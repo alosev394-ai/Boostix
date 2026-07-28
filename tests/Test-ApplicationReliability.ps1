@@ -17,7 +17,7 @@ $features = [IO.File]::ReadAllText(
     (Join-Path $projectRoot 'MajesticBoost\BoostFeatures.cs'))
 
 foreach ($required in @(
-    'Local\SilusSuspect.MajesticBoost.Application',
+    'Local\SilasSuspect.MajesticBoost.Application',
     'applicationMutex.WaitOne(0, false)',
     'catch (AbandonedMutexException)',
     'applicationMutex.ReleaseMutex()',

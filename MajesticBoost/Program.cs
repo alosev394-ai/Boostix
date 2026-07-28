@@ -26,18 +26,18 @@ using System.Windows.Threading;
 
 [assembly: AssemblyTitle("Majestic Boost")]
 [assembly: AssemblyDescription("Animated Max FPS launcher for Majestic")]
-[assembly: AssemblyCompany("Silus Suspect")]
-[assembly: AssemblyCopyright("© Silus Suspect")]
+[assembly: AssemblyCompany("Silas Suspect")]
+[assembly: AssemblyCopyright("© Silas Suspect")]
 [assembly: AssemblyProduct("Majestic Boost")]
-[assembly: AssemblyVersion("1.8.0.0")]
-[assembly: AssemblyFileVersion("1.8.0.0")]
+[assembly: AssemblyVersion("1.8.1.0")]
+[assembly: AssemblyFileVersion("1.8.1.0")]
 
 namespace MajesticBoost
 {
     internal static class Program
     {
         private const string ApplicationMutexName =
-            @"Local\SilusSuspect.MajesticBoost.Application";
+            @"Local\SilasSuspect.MajesticBoost.Application";
 
         [STAThread]
         private static void Main(string[] args)
@@ -353,15 +353,14 @@ namespace MajesticBoost
             FrameworkElement shell = BuildShell();
             if (!demoMode)
             {
-                shell.Width = BaseWindowWidth;
-                shell.Height = BaseWindowHeight;
+                Grid designSurface = BuildAdaptiveDesignSurface(shell);
                 monitorAdaptiveViewbox = new Viewbox
                 {
                     Stretch = Stretch.Uniform,
                     StretchDirection = StretchDirection.DownOnly,
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                     VerticalAlignment = VerticalAlignment.Stretch,
-                    Child = shell
+                    Child = designSurface
                 };
                 Content = monitorAdaptiveViewbox;
             }
@@ -388,6 +387,25 @@ namespace MajesticBoost
             PreviewMouseLeftButtonDown += WindowMouseLeftButtonDown;
             Closing += BoostWindowClosing;
             Closed += WindowClosed;
+        }
+
+        private static Grid BuildAdaptiveDesignSurface(
+            FrameworkElement shell)
+        {
+            if (shell == null)
+            {
+                throw new ArgumentNullException("shell");
+            }
+
+            var designSurface = new Grid
+            {
+                Width = BaseWindowWidth,
+                Height = BaseWindowHeight,
+                UseLayoutRounding = true,
+                SnapsToDevicePixels = true
+            };
+            designSurface.Children.Add(shell);
+            return designSurface;
         }
 
         private Grid BuildShell()
@@ -553,7 +571,7 @@ namespace MajesticBoost
             root.Children.Add(updateOverlay);
 
             var watermark = MakeText(
-                "by Silus Suspect",
+                "by Silas Suspect",
                 9,
                 "#FF666666",
                 FontWeights.SemiBold);
@@ -567,7 +585,7 @@ namespace MajesticBoost
                 MainContentInset);
             watermark.Opacity = 0.72;
             watermark.IsHitTestVisible = false;
-            AutomationProperties.SetName(watermark, "by Silus Suspect");
+            AutomationProperties.SetName(watermark, "by Silas Suspect");
             AutomationProperties.SetAutomationId(
                 watermark,
                 "MajesticBoost.Watermark");

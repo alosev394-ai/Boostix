@@ -174,7 +174,7 @@ try {
         throw 'The update health token is not a 256-bit lowercase random value.'
     }
     $ownerSid = 'S-1-5-21-1000-1001-1002-1003'
-    $expectedVersion = '1.8.0.0'
+    $expectedVersion = '1.8.1.0'
 
     $proofArguments = New-Object 'object[]' 4
     $proofArguments[0] = $transactionId

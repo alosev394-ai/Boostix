@@ -47,6 +47,54 @@ if (-not $placementMethod) {
     throw 'Compiled app does not expose the pure per-monitor placement calculation.'
 }
 
+$productionWindow = $null
+try {
+    $constructor = $windowType.GetConstructor(
+        [Reflection.BindingFlags]::Public -bor
+            [Reflection.BindingFlags]::NonPublic -bor
+            [Reflection.BindingFlags]::Instance,
+        $null,
+        [Type[]]@([string[]]),
+        $null)
+    if (-not $constructor) {
+        throw 'Compiled app does not expose the production window constructor.'
+    }
+
+    $constructorArguments = New-Object 'object[]' 1
+    $constructorArguments[0] = [string[]]@('--skip-setup')
+    $productionWindow = $constructor.Invoke($constructorArguments)
+    $adaptiveViewbox = $productionWindow.Content
+    if (-not ($adaptiveViewbox -is [Windows.Controls.Viewbox])) {
+        throw 'Production window is missing its adaptive Viewbox.'
+    }
+
+    $adaptiveViewbox.Measure([Windows.Size]::new(460.0, 552.0))
+    $adaptiveViewbox.Arrange([Windows.Rect]::new(
+        0.0,
+        0.0,
+        460.0,
+        552.0))
+    $adaptiveViewbox.UpdateLayout()
+
+    $designSurface = $adaptiveViewbox.Child
+    if ([Math]::Abs($designSurface.DesiredSize.Width - 460.0) -gt 0.001 -or
+        [Math]::Abs($designSurface.DesiredSize.Height - 552.0) -gt 0.001) {
+        throw "Production design surface measured $($designSurface.DesiredSize); expected 460x552 DIP."
+    }
+
+    $adaptiveMatrix = $designSurface.
+        TransformToAncestor($adaptiveViewbox).Value
+    if ([Math]::Abs($adaptiveMatrix.M11 - 1.0) -gt 0.001 -or
+        [Math]::Abs($adaptiveMatrix.M22 - 1.0) -gt 0.001) {
+        throw "Production UI is fractionally resampled at $($adaptiveMatrix.M11)x$($adaptiveMatrix.M22); expected a crisp 1.0x transform."
+    }
+}
+finally {
+    if ($productionWindow) {
+        $productionWindow.Close()
+    }
+}
+
 function Invoke-MonitorPlacement {
     param(
         [int]$WorkLeft,
