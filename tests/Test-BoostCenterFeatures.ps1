@@ -17,11 +17,11 @@ $installer = [IO.File]::ReadAllText((Join-Path $projectRoot 'MajesticBoostInstal
 $build = [IO.File]::ReadAllText((Join-Path $projectRoot 'build.ps1'))
 
 foreach ($required in @(
-    'AssemblyVersion("1.8.0.0")',
-    'AssemblyCompany("Silus Suspect")',
+    'AssemblyVersion("1.8.1.0")',
+    'AssemblyCompany("Silas Suspect")',
     'GetApplicationVersion() + "  BETA"',
     'MakeText(',
-    '"by Silus Suspect"',
+    '"by Silas Suspect"',
     'Panel.SetZIndex(watermark, 400)',
     'ProcessPriorityClass.AboveNormal',
     'OriginalPriority = originalPriority',
