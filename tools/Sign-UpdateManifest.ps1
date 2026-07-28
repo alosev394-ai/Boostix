@@ -10,7 +10,7 @@ param(
     [switch]$AllowLegacyChannel,
 
     [Parameter(Mandatory = $false)]
-    [string]$PrivateKeyPath = (Join-Path $env:LOCALAPPDATA 'MajesticBoostSigning\manifest-private-v1.dpapi')
+    [string]$PrivateKeyPath = (Join-Path $env:LOCALAPPDATA 'BoostixSigning\manifest-private-v1.dpapi')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,6 +32,15 @@ if ((Split-Path -Leaf $ManifestPath) -ieq 'update.json' -and -not $AllowLegacyCh
 
 if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
     throw "Update manifest not found: $ManifestPath"
+}
+if (-not $PSBoundParameters.ContainsKey('PrivateKeyPath') -and
+    -not (Test-Path -LiteralPath $PrivateKeyPath -PathType Leaf)) {
+    # Reuse the existing DPAPI-protected release key during the product-name
+    # migration. The signing identity and public key intentionally stay stable.
+    $legacyPrivateKeyPath = Join-Path $env:LOCALAPPDATA 'MajesticBoostSigning\manifest-private-v1.dpapi'
+    if (Test-Path -LiteralPath $legacyPrivateKeyPath -PathType Leaf) {
+        $PrivateKeyPath = $legacyPrivateKeyPath
+    }
 }
 if (-not (Test-Path -LiteralPath $PrivateKeyPath -PathType Leaf)) {
     throw "Encrypted signing key not found: $PrivateKeyPath"

@@ -14,15 +14,15 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $ApplicationPath) {
-    $ApplicationPath = Join-Path $projectRoot 'dist\MajesticBoost.exe'
+    $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
 }
 $ApplicationPath = (Resolve-Path -LiteralPath $ApplicationPath).Path
-$sourcePath = Join-Path $projectRoot 'MajesticBoost\DiagnosticsFeatures.cs'
+$sourcePath = Join-Path $projectRoot 'Boostix\DiagnosticsFeatures.cs'
 $source = [IO.File]::ReadAllText($sourcePath)
 $build = [IO.File]::ReadAllText((Join-Path $projectRoot 'build.ps1'))
 if (-not $build.Contains("'/reference:System.Management.dll'") -or
     -not $build.Contains(
-        '"$projectRoot\MajesticBoost\DiagnosticsFeatures.cs"')) {
+        '"$projectRoot\Boostix\DiagnosticsFeatures.cs"')) {
     throw 'The app build does not include diagnostics or System.Management.'
 }
 
@@ -42,12 +42,16 @@ foreach ($required in @(
     'internal static class DiagnosticSessionHistory',
     'public const int MaximumSessionCount = 10',
     'public static List<BoostSessionReport> LoadRecent(int maximumCount)',
+    'BoostSessionReportStore.LegacySessionsDirectory',
+    'BoostSessionReportStore.IsSafeKnownSessionsDirectory(',
     'internal static class DiagnosticExportBuilder',
     'public static string BuildSafeReport(',
     'public static void WriteSafeReport(',
     'public const int MaximumExportCharacters = 64 * 1024',
     'Guid.TryParseExact(candidate, "N", out parsed)',
-    'FileAttributes.ReparsePoint'
+    'FileAttributes.ReparsePoint',
+    '"  PeakTargetWorkingSetBytes="',
+    '"  TargetCrashCode="'
 )) {
     if (-not $source.Contains($required)) {
         throw "The diagnostic feature contract is missing: $required"
@@ -79,12 +83,12 @@ $allInstance = [Reflection.BindingFlags]::Public -bor
     [Reflection.BindingFlags]::NonPublic -bor
     [Reflection.BindingFlags]::Instance
 
-$snapshotType = $assembly.GetType('MajesticBoost.DiagnosticSnapshot', $true)
-$providerType = $assembly.GetType('MajesticBoost.DiagnosticSnapshotProvider', $true)
-$classifierType = $assembly.GetType('MajesticBoost.DiagnosticPressureClassifier', $true)
-$historyType = $assembly.GetType('MajesticBoost.DiagnosticSessionHistory', $true)
-$exportType = $assembly.GetType('MajesticBoost.DiagnosticExportBuilder', $true)
-$overlayType = $assembly.GetType('MajesticBoost.BoostCenterOverlay', $true)
+$snapshotType = $assembly.GetType('Boostix.DiagnosticSnapshot', $true)
+$providerType = $assembly.GetType('Boostix.DiagnosticSnapshotProvider', $true)
+$classifierType = $assembly.GetType('Boostix.DiagnosticPressureClassifier', $true)
+$historyType = $assembly.GetType('Boostix.DiagnosticSessionHistory', $true)
+$exportType = $assembly.GetType('Boostix.DiagnosticExportBuilder', $true)
+$overlayType = $assembly.GetType('Boostix.BoostCenterOverlay', $true)
 
 function Set-Field {
     param(
@@ -388,7 +392,8 @@ function New-MinimalReportContent {
             'EndedUtc=',
             'AvailableMemoryStartBytes=0',
             'AvailableMemoryEndBytes=0',
-            ('GameName=' + (Convert-ToBase64 'GTA5')),
+            # Version 2 deliberately uses the legacy key to exercise migration.
+            ('GameName=' + (Convert-ToBase64 'SampleApp')),
             ('StopReason=' + (Convert-ToBase64 'Test'))
         )) + "`r`n"
 }
@@ -401,7 +406,7 @@ if (-not $loadRecentFromDirectory) {
 }
 
 $testRoot = Join-Path $env:TEMP (
-    'MajesticBoost-Diagnostics-' + [Guid]::NewGuid().ToString('N'))
+    'Boostix-Diagnostics-' + [Guid]::NewGuid().ToString('N'))
 try {
     [void](New-Item -ItemType Directory -Path $testRoot)
     $baseTime = [DateTime]::UtcNow.AddHours(-1)
@@ -436,6 +441,12 @@ try {
         [object[]]@([string]$testRoot, [int]100))
     if ($recent.Count -ne 10) {
         throw "History returned $($recent.Count) sessions instead of the hard maximum of 10."
+    }
+    $newestTargetName = [string]$recent[0].GetType().GetField(
+        'TargetName',
+        $allInstance).GetValue($recent[0])
+    if ($newestTargetName -cne 'SampleApp') {
+        throw 'A legacy GameName value was not migrated to TargetName.'
     }
     for ($index = 1; $index -lt $recent.Count; $index++) {
         $previous = [DateTime](
@@ -503,6 +514,24 @@ try {
         -not $safeReport.Contains('<path>')) {
         throw 'Safe export did not mark redacted email, secret, and path values.'
     }
+    foreach ($legacyDiagnosticLabel in @(
+        'MAJESTIC',
+        'PeakGameWorkingSetBytes=',
+        'PeakGamePrivateBytes=',
+        'GameCrashCode=',
+        'GameCrashModule=',
+        'GameName='
+    )) {
+        if ($safeReport.IndexOf(
+                $legacyDiagnosticLabel,
+                [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            throw "Safe export used a legacy diagnostic label: $legacyDiagnosticLabel"
+        }
+    }
+    if (-not $safeReport.Contains('BOOSTIX SAFE DIAGNOSTIC REPORT') -or
+        -not $safeReport.Contains('TargetName=SampleApp')) {
+        throw 'Safe export did not use the Boostix generic diagnostic schema.'
+    }
 
     $maximumExportCharacters = [int]$exportType.GetField(
         'MaximumExportCharacters',
@@ -523,7 +552,7 @@ try {
         throw 'WriteSafeReport did not create a diagnostic text file.'
     }
     $written = [IO.File]::ReadAllText($destination)
-    if (-not $written.Contains('MAJESTIC BOOST SAFE DIAGNOSTIC REPORT') -or
+    if (-not $written.Contains('BOOSTIX SAFE DIAGNOSTIC REPORT') -or
         $written.Length -gt $maximumExportCharacters -or
         $written.Contains($email) -or
         $written.Contains('do-not-export-this') -or

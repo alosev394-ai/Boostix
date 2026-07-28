@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$flowPath = Join-Path $projectRoot 'MajesticBoost\OptimizationFlow.cs'
+$flowPath = Join-Path $projectRoot 'Boostix\OptimizationFlow.cs'
 $applyPath = Join-Path $projectRoot 'outputs\MaxFPS-Apply.ps1'
 $restorePath = Join-Path $projectRoot 'outputs\MaxFPS-Restore.ps1'
 $flow = [IO.File]::ReadAllText($flowPath)
@@ -61,7 +61,7 @@ foreach ($entry in $hashContracts.GetEnumerator()) {
 }
 
 $testRoot = Join-Path $env:TEMP (
-    'MajesticBoost-Elevation-Safety-' + [Guid]::NewGuid().ToString('N'))
+    'Boostix-Elevation-Safety-' + [Guid]::NewGuid().ToString('N'))
 $cases = @()
 try {
     [void](New-Item -ItemType Directory -Path $testRoot)
@@ -87,7 +87,7 @@ try {
     $fixture = [Reflection.Assembly]::Load(
         [IO.File]::ReadAllBytes($fixtureAssembly))
     $flowType = $fixture.GetType(
-        'MajesticBoost.OptimizationFlowOverlay',
+        'Boostix.OptimizationFlowOverlay',
         $true,
         $false)
     $waitMethod = $flowType.GetMethod(
@@ -149,13 +149,13 @@ Start-Sleep -Milliseconds 1200
         @{
             Path = $applyPath
             Result = Join-Path $env:TEMP (
-                'MajesticBoost-apply-' + [Guid]::NewGuid().ToString('N') + '.json')
+                'Boostix-apply-' + [Guid]::NewGuid().ToString('N') + '.json')
             Extra = @{ AdoptExistingState = $true }
         },
         @{
             Path = $restorePath
             Result = Join-Path $env:TEMP (
-                'MajesticBoost-restore-' + [Guid]::NewGuid().ToString('N') + '.json')
+                'Boostix-restore-' + [Guid]::NewGuid().ToString('N') + '.json')
             Extra = @{}
         }
     )

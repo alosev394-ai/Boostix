@@ -5,8 +5,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$featuresPath = Join-Path $projectRoot 'MajesticBoost\BoostFeatures.cs'
-$diagnosticsPath = Join-Path $projectRoot 'MajesticBoost\DiagnosticsFeatures.cs'
+$featuresPath = Join-Path $projectRoot 'Boostix\BoostFeatures.cs'
+$diagnosticsPath = Join-Path $projectRoot 'Boostix\DiagnosticsFeatures.cs'
 $features = [IO.File]::ReadAllText($featuresPath)
 
 foreach ($required in @(
@@ -33,7 +33,7 @@ if (-not (Test-Path -LiteralPath $compiler)) {
 }
 
 $testRoot = Join-Path $env:TEMP (
-    'MajesticBoost-PowerPlanTimeout-' + [Guid]::NewGuid().ToString('N'))
+    'Boostix-PowerPlanTimeout-' + [Guid]::NewGuid().ToString('N'))
 $fixturePath = Join-Path $testRoot 'BoostFeaturesFixture.dll'
 $harnessSourcePath = Join-Path $testRoot 'PowerPlanTimeoutHarness.cs'
 $harnessPath = Join-Path $testRoot 'PowerPlanTimeoutHarness.exe'
@@ -49,6 +49,7 @@ try {
         "/out:$fixturePath",
         '/reference:System.dll',
         '/reference:System.Core.dll',
+        (Join-Path $projectRoot 'ProductBrand.cs'),
         $featuresPath,
         $diagnosticsPath
     )
@@ -93,7 +94,7 @@ internal static class PowerPlanTimeoutHarness
 
         Assembly fixture = Assembly.Load(File.ReadAllBytes(args[0]));
         Type serviceType = fixture.GetType(
-            "MajesticBoost.BoostPreflightService",
+            "Boostix.BoostPreflightService",
             true,
             false);
         MethodInfo readMethod = serviceType.GetMethod(

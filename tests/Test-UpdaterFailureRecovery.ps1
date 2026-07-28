@@ -12,15 +12,15 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($ApplicationPath)) {
-    $ApplicationPath = Join-Path $projectRoot 'dist\MajesticBoost.exe'
+    $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
 }
 $ApplicationPath = (Resolve-Path -LiteralPath $ApplicationPath).Path
-$sourcePath = Join-Path $projectRoot 'MajesticBoost\UpdateFlow.cs'
+$sourcePath = Join-Path $projectRoot 'Boostix\UpdateFlow.cs'
 $source = [IO.File]::ReadAllText($sourcePath)
 
 $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($ApplicationPath))
 $overlayType = $assembly.GetType(
-    'MajesticBoost.UpdateFlowOverlay',
+    'Boostix.UpdateFlowOverlay',
     $true,
     $false)
 $staticFlags =
@@ -288,9 +288,9 @@ $signatureAddress = [string](Invoke-StaticMethod `
     -Method $buildMainAddressMethod `
     -Arguments $addressArguments)
 if ($manifestAddress -cne
-        'https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/update-v2.json' -or
+        'https://raw.githubusercontent.com/alosev394-ai/Boostix/main/update-v2.json' -or
     $signatureAddress -cne
-        'https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/update-v2.json.sig') {
+        'https://raw.githubusercontent.com/alosev394-ai/Boostix/main/update-v2.json.sig') {
     throw 'The signed-main fallback URLs are not the exact trusted release paths.'
 }
 
@@ -345,7 +345,7 @@ $validatedStateDirectory = [string](Invoke-StaticMethod `
     -Arguments $stateArguments)
 $expectedStateDirectory = Join-Path `
     ([IO.Path]::GetFullPath([IO.Path]::GetTempPath())) `
-    'MajesticBoost'
+    'Boostix'
 if ($validatedStateDirectory -cne $expectedStateDirectory) {
     throw 'The update-lock directory validator returned an unexpected path.'
 }
@@ -361,7 +361,7 @@ foreach ($invalidRoot in @('', 'relative\profile')) {
     catch {
         $failure = Get-InnerException -Exception $_.Exception
         if ($failure.GetType().FullName -cne
-            'MajesticBoost.UpdateFlowOverlay+UpdateStorageException') {
+            'Boostix.UpdateFlowOverlay+UpdateStorageException') {
             throw $failure
         }
     }

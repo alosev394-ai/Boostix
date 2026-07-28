@@ -9,14 +9,15 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$installerSource = Join-Path $projectRoot 'MajesticBoostInstaller\Program.cs'
-$updateSource = Join-Path $projectRoot 'MajesticBoost\UpdateFlow.cs'
-$applicationSource = Join-Path $projectRoot 'MajesticBoost\Program.cs'
+$installerSource = Join-Path $projectRoot 'BoostixInstaller\Program.cs'
+$updateSource = Join-Path $projectRoot 'Boostix\UpdateFlow.cs'
+$applicationSource = Join-Path $projectRoot 'Boostix\Program.cs'
+$brandSource = Join-Path $projectRoot 'ProductBrand.cs'
 $frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $compiler = Join-Path $frameworkRoot 'csc.exe'
 $wpfRoot = Join-Path $frameworkRoot 'WPF'
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) (
-    'MajesticBoost-UpdateRollback-' + [Guid]::NewGuid().ToString('N'))
+    'Boostix-UpdateRollback-' + [Guid]::NewGuid().ToString('N'))
 $installerHarness = Join-Path $temporaryRoot 'InstallerRollbackHarness.dll'
 $applicationHarness = Join-Path $temporaryRoot 'ApplicationHandshakeHarness.dll'
 $utf8 = New-Object Text.UTF8Encoding($false)
@@ -97,6 +98,7 @@ try {
         /reference:System.Drawing.dll `
         /reference:System.Windows.Forms.dll `
         /reference:System.Security.dll `
+        $brandSource `
         $installerSource 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Installer rollback harness did not compile:`r`n$($installerCompilerOutput -join [Environment]::NewLine)"
@@ -113,6 +115,7 @@ try {
         "/reference:$wpfRoot\WindowsBase.dll" `
         "/reference:$wpfRoot\PresentationCore.dll" `
         "/reference:$wpfRoot\PresentationFramework.dll" `
+        $brandSource `
         $updateSource 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Application health-handshake harness did not compile:`r`n$($applicationCompilerOutput -join [Environment]::NewLine)"
@@ -123,11 +126,11 @@ try {
     $applicationAssembly = [Reflection.Assembly]::Load(
         [IO.File]::ReadAllBytes($applicationHarness))
     $engineType = $installerAssembly.GetType(
-        'MajesticBoostSetup.InstallerEngine',
+        'BoostixSetup.InstallerEngine',
         $true,
         $false)
     $handshakeType = $applicationAssembly.GetType(
-        'MajesticBoost.UpdateHealthHandshake',
+        'Boostix.UpdateHealthHandshake',
         $true,
         $false)
 
@@ -174,7 +177,7 @@ try {
         throw 'The update health token is not a 256-bit lowercase random value.'
     }
     $ownerSid = 'S-1-5-21-1000-1001-1002-1003'
-    $expectedVersion = '1.8.1.0'
+    $expectedVersion = '1.9.0.0'
 
     $proofArguments = New-Object 'object[]' 4
     $proofArguments[0] = $transactionId
@@ -244,16 +247,16 @@ try {
 
     $scenarioRoot = Join-Path $temporaryRoot 'scenario'
     $installParent = Join-Path $scenarioRoot 'ProgramFiles'
-    $installDirectory = Join-Path $installParent 'Majestic Boost'
+    $installDirectory = Join-Path $installParent 'Boostix'
     $transactionDirectory = Join-Path $scenarioRoot $transactionId
     $snapshotDirectory = Join-Path $transactionDirectory 'snapshot\files'
     $manifestPath = Join-Path $transactionDirectory 'files.manifest'
     [IO.Directory]::CreateDirectory($snapshotDirectory) | Out-Null
     Write-TestFile `
-        -Path (Join-Path $installDirectory 'MajesticBoost.exe') `
+        -Path (Join-Path $installDirectory 'Boostix.exe') `
         -Value 'old-application'
     Write-TestFile `
-        -Path (Join-Path $installDirectory 'Game-Boost.ps1') `
+        -Path (Join-Path $installDirectory 'Boost-Session.ps1') `
         -Value 'old-script'
     Write-TestFile `
         -Path (Join-Path $installDirectory 'Tools\PresentMon\LICENSE.txt') `
@@ -268,7 +271,7 @@ try {
         -Arguments $snapshotArguments)
 
     Write-TestFile `
-        -Path (Join-Path $installDirectory 'MajesticBoost.exe') `
+        -Path (Join-Path $installDirectory 'Boostix.exe') `
         -Value 'new-application'
     Write-TestFile `
         -Path (Join-Path $installDirectory 'new-resource.bin') `
@@ -295,7 +298,7 @@ try {
         throw 'A valid ready signal was rejected.'
     }
     if ([IO.File]::ReadAllText(
-            (Join-Path $installDirectory 'MajesticBoost.exe')) -cne
+            (Join-Path $installDirectory 'Boostix.exe')) -cne
         'new-application') {
         throw 'The success scenario replaced the healthy new version.'
     }
@@ -323,7 +326,7 @@ try {
         -Method $restoreSnapshot `
         -Arguments $restoreArguments)
     if ([IO.File]::ReadAllText(
-            (Join-Path $installDirectory 'MajesticBoost.exe')) -cne
+            (Join-Path $installDirectory 'Boostix.exe')) -cne
         'old-application' -or
         (Test-Path -LiteralPath (
             Join-Path $installDirectory 'new-resource.bin'))) {
@@ -336,16 +339,16 @@ try {
         -Method $restoreSnapshot `
         -Arguments $restoreArguments)
     if ([IO.File]::ReadAllText(
-            (Join-Path $installDirectory 'MajesticBoost.exe')) -cne
+            (Join-Path $installDirectory 'Boostix.exe')) -cne
         'old-application') {
         throw 'Interrupted rollback recovery was not idempotent.'
     }
 
     # Corrupt snapshots fail before the current installation is renamed.
     Write-TestFile `
-        -Path (Join-Path $installDirectory 'MajesticBoost.exe') `
+        -Path (Join-Path $installDirectory 'Boostix.exe') `
         -Value 'new-after-corruption'
-    $snapshotApp = Join-Path $snapshotDirectory 'MajesticBoost.exe'
+    $snapshotApp = Join-Path $snapshotDirectory 'Boostix.exe'
     [IO.File]::AppendAllText($snapshotApp, 'tampered', $utf8)
     try {
         [void](Invoke-Static `
@@ -360,7 +363,7 @@ try {
         }
     }
     if ([IO.File]::ReadAllText(
-            (Join-Path $installDirectory 'MajesticBoost.exe')) -cne
+            (Join-Path $installDirectory 'Boostix.exe')) -cne
         'new-after-corruption') {
         throw 'A corrupt snapshot modified the current installation.'
     }
@@ -449,9 +452,8 @@ try {
         'DiagnosticSessionHistory.LoadRecent(',
         'BoostPreflightService.Run(',
         'DiagnosticSnapshotProvider.Capture()',
-        'StartGameWatcher(false);',
         'DispatcherPriority.ApplicationIdle',
-        'gameWatcherTimer.IsEnabled'
+        '!boostButton.IsEnabled'
     )) {
         if (-not $readinessText.Contains($required)) {
             throw "The local update-readiness contract is missing: $required"
@@ -494,7 +496,7 @@ finally {
         $tempRoot = [IO.Path]::GetFullPath(
             [IO.Path]::GetTempPath()).TrimEnd('\')
         $expectedPrefix = $tempRoot +
-            '\MajesticBoost-UpdateRollback-'
+            '\Boostix-UpdateRollback-'
         if ($resolvedRoot.StartsWith(
                 $expectedPrefix,
                 [StringComparison]::OrdinalIgnoreCase)) {

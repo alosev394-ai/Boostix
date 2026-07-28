@@ -12,14 +12,14 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $ApplicationPath) {
-    $ApplicationPath = Join-Path $projectRoot 'dist\MajesticBoost.exe'
+    $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
 }
 $ApplicationPath = (Resolve-Path -LiteralPath $ApplicationPath).Path
 
 $program = [IO.File]::ReadAllText(
-    (Join-Path $projectRoot 'MajesticBoost\Program.cs'))
+    (Join-Path $projectRoot 'Boostix\Program.cs'))
 $features = [IO.File]::ReadAllText(
-    (Join-Path $projectRoot 'MajesticBoost\BoostFeatures.cs'))
+    (Join-Path $projectRoot 'Boostix\BoostFeatures.cs'))
 
 foreach ($required in @(
     'public const int IntervalSeconds = 60',
@@ -44,7 +44,8 @@ foreach ($required in @(
     'if (!result.Attempted)',
     'if (result.Success)',
     'currentSession.MemoryReliefBytes',
-    'result.ReclaimedWorkingSetBytes'
+    'result.ReclaimedWorkingSetBytes',
+    'Memory pressure relief affected the current app only: working set decreased by '
 )) {
     if (-not $program.Contains($required)) {
         throw "The Active Boost memory integration is missing: $required"
@@ -52,7 +53,7 @@ foreach ($required in @(
 }
 
 $applicationSources = Get-ChildItem -LiteralPath (
-    Join-Path $projectRoot 'MajesticBoost') -Filter '*.cs' -File |
+    Join-Path $projectRoot 'Boostix') -Filter '*.cs' -File |
     ForEach-Object { [IO.File]::ReadAllText($_.FullName) }
 $combined = [string]::Join([Environment]::NewLine, $applicationSources)
 foreach ($forbidden in @(
@@ -108,7 +109,7 @@ if ($startMethod.IndexOf(
 
 $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($ApplicationPath))
 $serviceType = $assembly.GetType(
-    'MajesticBoost.ActiveMemoryMaintenanceService',
+    'Boostix.ActiveMemoryMaintenanceService',
     $true)
 $flags = [Reflection.BindingFlags]::Public -bor
     [Reflection.BindingFlags]::NonPublic -bor

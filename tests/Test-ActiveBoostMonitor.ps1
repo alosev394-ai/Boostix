@@ -11,7 +11,7 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$scriptPath = Join-Path $projectRoot 'outputs\Game-Boost.ps1'
+$scriptPath = Join-Path $projectRoot 'outputs\Boost-Session.ps1'
 $testRoot = Join-Path $env:TEMP ('MajesticBoost-OneShot-Test-' + [Guid]::NewGuid().ToString('N'))
 
 try {
@@ -84,7 +84,6 @@ try {
         }
 
         & $ProductionScript `
-            -DoNotLaunchMajestic `
             -ReadySignalPath $ReadyPath `
             -ResultPath $ReportPath
     } $scriptPath (Join-Path $testRoot 'default') $defaultReadySignalPath $defaultResultPath $defaultRequestedNames
@@ -96,21 +95,16 @@ try {
         throw 'The one-shot preparation script did not publish its structured result.'
     }
     $defaultResult = [IO.File]::ReadAllText($defaultResultPath)
-    foreach ($requiredResultText in @('[GameBoost]', 'FormatVersion=1', 'Status=Completed')) {
+    foreach ($requiredResultText in @('[BoostSession]', 'FormatVersion=1', 'Status=Completed')) {
         if (-not $defaultResult.Contains($requiredResultText)) {
             throw "The structured result is missing: $requiredResultText"
         }
     }
 
-    foreach ($requiredDefaultProcess in @(
-        'SteelSeriesMoments',
-        'WidgetService',
-        'Widgets',
-        'CrossDeviceService'
-    )) {
-        if (-not $defaultRequestedNames.Contains($requiredDefaultProcess)) {
-            throw "The safe default preparation list is missing: $requiredDefaultProcess"
-        }
+    if ($defaultRequestedNames.Count -ne 0) {
+        throw (
+            'The safe default preparation must not inspect or close third-party ' +
+            'processes: ' + [string]::Join(', ', $defaultRequestedNames))
     }
 
     foreach ($optInProcess in @(
@@ -153,7 +147,7 @@ try {
             [CmdletBinding()]
             param([string]$ClassName, [string]$Filter)
             $CimCounter[0] = $CimCounter[0] + 1
-            return @()
+            throw 'Opt-in process selection must not trigger undeclared CIM discovery.'
         }
 
         function Start-Process {
@@ -174,7 +168,6 @@ try {
             -CloseTeams `
             -CloseWallpaper `
             -CloseNvidiaOverlay `
-            -DoNotLaunchMajestic `
             -ReadySignalPath $ReadyPath `
             -ResultPath $ReportPath
     } $scriptPath (Join-Path $testRoot 'opt-in') $optInReadySignalPath $optInResultPath $optInRequestedNames $cimDiscoveryCount
@@ -199,8 +192,8 @@ try {
             throw "An opt-in process group is missing: $requiredOptInProcess"
         }
     }
-    if ($cimDiscoveryCount[0] -ne 1) {
-        throw 'NVIDIA SPUser discovery must run exactly once when CloseNvidiaOverlay is selected.'
+    if ($cimDiscoveryCount[0] -ne 0) {
+        throw 'Opt-in process selection triggered unexpected CIM discovery.'
     }
 
     'Active Boost one-shot preparation regression test passed.'

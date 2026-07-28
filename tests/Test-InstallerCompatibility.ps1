@@ -12,10 +12,10 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $InstallerPath) {
-    $InstallerPath = Join-Path $projectRoot 'dist\MajesticBoost-Setup-1.8.1.exe'
+    $InstallerPath = Join-Path $projectRoot 'dist\Boostix-Setup-1.9.0.exe'
 }
 if (-not $LatestInstallerPath) {
-    $LatestInstallerPath = Join-Path $projectRoot 'dist\MajesticBoost-Setup-Latest.exe'
+    $LatestInstallerPath = Join-Path $projectRoot 'dist\Boostix-Setup-Latest.exe'
 }
 $InstallerPath = (Resolve-Path -LiteralPath $InstallerPath).Path
 $LatestInstallerPath = (Resolve-Path -LiteralPath $LatestInstallerPath).Path
@@ -27,23 +27,35 @@ if ($installerHash -cne $latestHash) {
 }
 
 $versionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($InstallerPath)
-if ($versionInfo.ProductName -cne 'Majestic Boost' -or
-    $versionInfo.FileVersion -cne '1.8.1.0' -or
+if ($versionInfo.ProductName -cne 'Boostix' -or
+    $versionInfo.FileVersion -cne '1.9.0.0' -or
     $versionInfo.CompanyName -cne 'Silas Suspect') {
-    throw 'Installer product metadata does not match release 1.8.1.'
+    throw 'Installer product metadata does not match release 1.9.0.'
 }
 
 $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($InstallerPath))
-$engineType = $assembly.GetType('MajesticBoostSetup.InstallerEngine', $true, $false)
-$programType = $assembly.GetType('MajesticBoostSetup.Program', $true, $false)
+$engineType = $assembly.GetType('BoostixSetup.InstallerEngine', $true, $false)
+$programType = $assembly.GetType('BoostixSetup.Program', $true, $false)
 $flags = [Reflection.BindingFlags]::NonPublic -bor [Reflection.BindingFlags]::Static
+$publicStaticFlags = [Reflection.BindingFlags]::Public -bor [Reflection.BindingFlags]::Static
 $downgradeMethod = $engineType.GetMethod('IsDowngrade', $flags)
 if (-not $downgradeMethod) {
     throw 'Compiled installer downgrade guard was not found.'
 }
 $mutexName = [string]$programType.GetField('SetupMutexName', $flags).GetRawConstantValue()
-if ($mutexName -cne 'Global\CodexGamingOptimization.MajesticBoost.Setup') {
+if ($mutexName -cne 'Global\SilasSuspect.Boostix.Setup') {
     throw 'Installer does not use the expected global install/uninstall mutex.'
+}
+$installDirectory = [string]$engineType.GetField(
+    'InstallDirectory',
+    $publicStaticFlags).GetValue($null)
+$installedExe = [string]$engineType.GetField(
+    'InstalledExe',
+    $publicStaticFlags).GetValue($null)
+if ((Split-Path -Leaf $installDirectory) -cne 'Boostix' -or
+    (Split-Path -Leaf $installedExe) -cne 'Boostix.exe' -or
+    (Split-Path -Parent $installedExe) -cne $installDirectory) {
+    throw 'Installer public product paths are not fully branded as Boostix.'
 }
 
 function Test-DowngradeDecision {
@@ -58,26 +70,25 @@ function Test-DowngradeDecision {
     }
 }
 
-Test-DowngradeDecision -Installed '1.5.1.0' -Setup '1.8.1.0' -Expected $false
-Test-DowngradeDecision -Installed '1.6.4.0' -Setup '1.8.1.0' -Expected $false
-Test-DowngradeDecision -Installed '1.7.0.0' -Setup '1.8.1.0' -Expected $false
-Test-DowngradeDecision -Installed '1.8.0.0' -Setup '1.8.1.0' -Expected $false
-Test-DowngradeDecision -Installed '1.8.1.0' -Setup '1.8.1.0' -Expected $false
-Test-DowngradeDecision -Installed '1.8.2.0' -Setup '1.8.1.0' -Expected $true
-Test-DowngradeDecision -Installed '2.0.0.0' -Setup '1.8.1.0' -Expected $true
-Test-DowngradeDecision -Installed 'invalid' -Setup '1.8.1.0' -Expected $false
+Test-DowngradeDecision -Installed '1.5.1.0' -Setup '1.9.0.0' -Expected $false
+Test-DowngradeDecision -Installed '1.8.1.0' -Setup '1.9.0.0' -Expected $false
+Test-DowngradeDecision -Installed '1.8.9.0' -Setup '1.9.0.0' -Expected $false
+Test-DowngradeDecision -Installed '1.9.0.0' -Setup '1.9.0.0' -Expected $false
+Test-DowngradeDecision -Installed '1.9.1.0' -Setup '1.9.0.0' -Expected $true
+Test-DowngradeDecision -Installed '2.0.0.0' -Setup '1.9.0.0' -Expected $true
+Test-DowngradeDecision -Installed 'invalid' -Setup '1.9.0.0' -Expected $false
 
-$payloadStream = $assembly.GetManifestResourceStream('MajesticBoost.Payload.exe')
+$payloadStream = $assembly.GetManifestResourceStream('Boostix.Payload.exe')
 if (-not $payloadStream) {
-    throw 'Embedded MajesticBoost payload is missing.'
+    throw 'Embedded Boostix payload is missing.'
 }
 try {
     $memory = New-Object IO.MemoryStream
     try {
         $payloadStream.CopyTo($memory)
         $payloadAssembly = [Reflection.Assembly]::Load($memory.ToArray())
-        if ($payloadAssembly.GetName().Version.ToString() -cne '1.8.1.0') {
-            throw 'Embedded application version does not match installer version 1.8.1.'
+        if ($payloadAssembly.GetName().Version.ToString() -cne '1.9.0.0') {
+            throw 'Embedded application version does not match installer version 1.9.0.'
         }
         $payloadCompany = @(
             $payloadAssembly.GetCustomAttributes(
@@ -96,7 +107,16 @@ finally {
     $payloadStream.Dispose()
 }
 
-$presentMonStream = $assembly.GetManifestResourceStream('MajesticBoost.PresentMon.exe')
+$sessionStream = $assembly.GetManifestResourceStream('Boostix.BoostSession.ps1')
+if (-not $sessionStream -or $sessionStream.Length -eq 0) {
+    throw 'Embedded Boostix session payload is missing.'
+}
+$sessionStream.Dispose()
+if ($assembly.GetManifestResourceStream('MajesticBoost.Payload.exe')) {
+    throw 'The installer still publishes a legacy-branded primary payload resource.'
+}
+
+$presentMonStream = $assembly.GetManifestResourceStream('Boostix.PresentMon.exe')
 if (-not $presentMonStream) {
     throw 'Embedded PresentMon payload is missing.'
 }
@@ -119,8 +139,8 @@ finally {
     $presentMonStream.Dispose()
 }
 foreach ($noticeName in @(
-    'MajesticBoost.PresentMon.License.txt',
-    'MajesticBoost.PresentMon.ThirdParty.txt'
+    'Boostix.PresentMon.License.txt',
+    'Boostix.PresentMon.ThirdParty.txt'
 )) {
     $notice = $assembly.GetManifestResourceStream($noticeName)
     if (-not $notice -or $notice.Length -eq 0) {
@@ -129,7 +149,7 @@ foreach ($noticeName in @(
     $notice.Dispose()
 }
 
-$source = [IO.File]::ReadAllText((Join-Path $projectRoot 'MajesticBoostInstaller\Program.cs'))
+$source = [IO.File]::ReadAllText((Join-Path $projectRoot 'BoostixInstaller\Program.cs'))
 $validationLoop = $source.IndexOf('ValidateStagedPayload(item.StagePath, item.Executable);', [StringComparison]::Ordinal)
 $stopInstalledApp = $source.IndexOf('StopInstalledApplication();', $validationLoop, [StringComparison]::Ordinal)
 $commitLoop = $source.IndexOf('CommitStagedFile(', $stopInstalledApp, [StringComparison]::Ordinal)
@@ -160,20 +180,22 @@ if ($source.Contains('File.Copy(Application.ExecutablePath, UninstallerExe, true
     throw 'Uninstall.exe is still published outside the payload transaction.'
 }
 foreach ($requiredText in @(
-    'AssemblyCompany("Silas Suspect")',
+    'AssemblyCompany(ProductBrand.CompanyName)',
     'uninstall.SetValue("Publisher", "Silas Suspect", RegistryValueKind.String)',
     'ValidatePresentMonPayload(item.StagePath)',
     'TryDeleteIfExists(item.StagePath)',
-    'MajesticBoost.PresentMon.exe',
+    'Boostix.PresentMon.exe',
     'items.Count - 1; index >= 0; index--',
     'GetDesktopShortcutPreference()',
     'ScheduleUpdateSourceCleanupIfNeeded()',
+    'PrepareLegacyInstallationForUpdate()',
+    'CleanupLegacyInstallationAfterSuccess()',
     'CaptureRegistryTree(child, childName)',
     'RestoreRegistryKey(baseKey, snapshot.AppPathsKey)',
     'RestoreRegistryKey(baseKey, snapshot.UninstallKey)',
     'RestoreShortcut(snapshot.DesktopShortcut)',
     'RestoreShortcut(snapshot.StartMenuShortcut)',
-    '^MajesticBoost\.Update\.[0-9a-f]{32}$'
+    '^(?:Boostix|MajesticBoost)\.Update\.[0-9a-f]{32}$'
 )) {
     if (-not $source.Contains($requiredText)) {
         throw "Installer resilience policy is missing: $requiredText"

@@ -1,0 +1,4111 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
+using System.Windows.Shapes;
+using System.Windows.Shell;
+using System.Windows.Threading;
+using Boostix.Branding;
+
+[assembly: AssemblyTitle(ProductBrand.ProductName)]
+[assembly: AssemblyDescription("Safe Windows performance preparation and diagnostics")]
+[assembly: AssemblyCompany(ProductBrand.CompanyName)]
+[assembly: AssemblyCopyright("© Silas Suspect")]
+[assembly: AssemblyProduct(ProductBrand.ProductName)]
+[assembly: AssemblyVersion(ProductBrand.AssemblyVersion)]
+[assembly: AssemblyFileVersion(ProductBrand.AssemblyVersion)]
+
+namespace Boostix
+{
+    internal static class Program
+    {
+        private const string ApplicationMutexName =
+            @"Local\SilasSuspect.Boostix.Application";
+        private const uint LoadLibrarySearchSystem32 = 0x00000800;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetDefaultDllDirectories(
+            uint directoryFlags);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetDllDirectory(string path);
+
+        [STAThread]
+        private static void Main(string[] args)
+        {
+            if (!HardenNativeDllSearch())
+            {
+                MessageBox.Show(
+                    "Boostix не смог безопасно подготовить запуск. " +
+                    "Установите актуальные обновления Windows и повторите попытку.",
+                    ProductBrand.ProductName,
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                return;
+            }
+
+            using (var applicationMutex = new Mutex(false, ApplicationMutexName))
+            {
+                bool ownsMutex = false;
+                try
+                {
+                    try
+                    {
+                        ownsMutex = applicationMutex.WaitOne(0, false);
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        ownsMutex = true;
+                    }
+
+                    if (!ownsMutex)
+                    {
+                        MessageBox.Show(
+                            "Boostix уже запущен.",
+                            ProductBrand.ProductName,
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Information);
+                        return;
+                    }
+
+                    var application = new Application();
+                    application.Resources[SystemParameters.FocusVisualStyleKey] =
+                        BuildKeyboardFocusVisualStyle();
+                    application.ShutdownMode = ShutdownMode.OnMainWindowClose;
+                    application.DispatcherUnhandledException += delegate(
+                        object sender,
+                        DispatcherUnhandledExceptionEventArgs eventArgs)
+                    {
+                        CrashLog.Write(
+                            "Unhandled WPF dispatcher exception.",
+                            eventArgs.Exception);
+                    };
+                    AppDomain.CurrentDomain.UnhandledException += delegate(
+                        object sender,
+                        UnhandledExceptionEventArgs eventArgs)
+                    {
+                        CrashLog.Write(
+                            "Unhandled AppDomain exception.",
+                            eventArgs.ExceptionObject as Exception);
+                    };
+                    TaskScheduler.UnobservedTaskException += delegate(
+                        object sender,
+                        UnobservedTaskExceptionEventArgs eventArgs)
+                    {
+                        CrashLog.Write(
+                            "Unobserved task exception.",
+                            eventArgs.Exception);
+                        eventArgs.SetObserved();
+                    };
+                    try
+                    {
+                        application.Run(new BoostWindow(args));
+                    }
+                    catch (Exception ex)
+                    {
+                        CrashLog.Write("Application.Run failed.", ex);
+                        MessageBox.Show(
+                            "Boostix столкнулся с ошибкой и безопасно остановлен. " +
+                            "Диагностика сохранена в LocalAppData\\Boostix\\crash.log.",
+                            ProductBrand.ProductName,
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Error);
+                    }
+                }
+                finally
+                {
+                    if (ownsMutex)
+                    {
+                        applicationMutex.ReleaseMutex();
+                    }
+                }
+            }
+        }
+
+        private static bool HardenNativeDllSearch()
+        {
+            try
+            {
+                // Remove the process working directory and the executable
+                // directory from implicit native DLL resolution. Boostix has no
+                // private native DLL dependency; all P/Invoke targets are Windows
+                // system libraries.
+                return SetDllDirectory(string.Empty) &&
+                    SetDefaultDllDirectories(LoadLibrarySearchSystem32);
+            }
+            catch (DllNotFoundException)
+            {
+                return false;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                return false;
+            }
+        }
+
+        private static Style BuildKeyboardFocusVisualStyle()
+        {
+            var style = new Style(typeof(Control));
+            var template = new ControlTemplate(typeof(Control));
+            var border = new FrameworkElementFactory(typeof(Border));
+            border.SetValue(
+                Border.BorderBrushProperty,
+                new SolidColorBrush(Color.FromRgb(
+                    ProductBrand.AccentTextRed,
+                    ProductBrand.AccentTextGreen,
+                    ProductBrand.AccentTextBlue)));
+            border.SetValue(Border.BorderThicknessProperty, new Thickness(1));
+            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(5));
+            border.SetValue(Border.MarginProperty, new Thickness(2));
+            border.SetValue(UIElement.IsHitTestVisibleProperty, false);
+            border.SetValue(UIElement.SnapsToDevicePixelsProperty, true);
+            template.VisualTree = border;
+            style.Setters.Add(new Setter(Control.TemplateProperty, template));
+            return style;
+        }
+    }
+
+    internal sealed class BoostWindow : Window
+    {
+        private const double BaseWindowWidth = 460;
+        private const double BaseWindowHeight = 552;
+        private const double ShellShadowMargin = 0;
+        private const double MainContentInset = 24;
+        private const double TitleControlSize = 32;
+        private const double PreferenceRowHeight = 38;
+        private const double ToggleSafeGutter = 12;
+        private const double CompactWindowHeight = 492;
+        private const double WorkAreaSafetyInset = 8;
+        private const int MonitorDefaultToNearest = 2;
+        private const int SwpNoActivate = 0x0010;
+        private const int SwpNoZOrder = 0x0004;
+        private const int WmDisplayChange = 0x007E;
+        private const int WmDpiChanged = 0x02E0;
+        private const int WmExitSizeMove = 0x0232;
+        private const int WmSettingChange = 0x001A;
+        private const int DwmWindowCornerPreference = 33;
+        private const int DwmBorderColor = 34;
+        private const int DwmRoundCornerPreference = 2;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeRectangle
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        private struct MonitorInformation
+        {
+            public int Size;
+            public NativeRectangle Monitor;
+            public NativeRectangle Work;
+            public int Flags;
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromWindow(
+            IntPtr window,
+            int flags);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetMonitorInfo(
+            IntPtr monitor,
+            ref MonitorInformation information);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetWindowRect(
+            IntPtr window,
+            out NativeRectangle rectangle);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetWindowPos(
+            IntPtr window,
+            IntPtr insertAfter,
+            int x,
+            int y,
+            int width,
+            int height,
+            int flags);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetDpiForWindow(IntPtr window);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(
+            IntPtr window,
+            out uint processId);
+
+        [DllImport("dwmapi.dll", PreserveSig = true)]
+        private static extern int DwmSetWindowAttribute(
+            IntPtr window,
+            int attribute,
+            ref int attributeValue,
+            int attributeSize);
+
+        private sealed class PreferenceToggleVisuals
+        {
+            public SolidColorBrush TrackBrush;
+            public TranslateTransform KnobTranslation;
+        }
+
+        private sealed class TrackedTargetPriority
+        {
+            public int ProcessId;
+            public DateTime StartTimeUtc;
+            public string ProcessName;
+            public ProcessPriorityClass OriginalPriority;
+            public bool ChangedByBoost;
+        }
+
+        private Button boostButton;
+        private Border boostSurface;
+        private FrameworkElement titleSection;
+        private FrameworkElement boostButtonSection;
+        private FrameworkElement preferenceSection;
+        private Grid rocket;
+        private Canvas grayRocketLayer;
+        private Canvas colorRocketLayer;
+        private Canvas starField;
+        private Grid flameLayer;
+        private TextBlock caption;
+        private CheckBox keepDiscordToggle;
+        private CheckBox keepEpicToggle;
+        private CheckBox keepSteamToggle;
+        private OptimizationFlowOverlay optimizationOverlay;
+        private UpdateFlowOverlay updateOverlay;
+        private BoostCenterOverlay boostCenterOverlay;
+        private ScaleTransform rocketScale;
+        private TranslateTransform flightTranslation;
+        private TranslateTransform floatTranslation;
+        private readonly List<FrameworkElement> stars = new List<FrameworkElement>();
+        private DispatcherTimer readinessTimer;
+        private DispatcherTimer activeBoostTimer;
+        private Process boostProcess;
+        private string readinessSignalPath;
+        private DateTime readinessDeadline;
+        private int activeMaintenanceGeneration;
+        private int activeMaintenancePending;
+        private int activeMemoryMaintenanceCycles;
+        private int benchmarkCaptureActive;
+        private int preflightGeneration;
+        private long nextMemoryMaintenanceTimestamp;
+        private readonly object activeMaintenanceSync = new object();
+        private bool animationRunning;
+        private bool departureFinished;
+        private bool boostReady;
+        private bool boostActive;
+        private bool preferencesLoaded;
+        private bool preflightAccepted;
+        private bool preflightForBoost;
+        private string deactivationSessionStatus = "Completed";
+        private string deactivationSessionReason = "Boost остановлен пользователем.";
+        private BoostCenterSettings centerSettings = new BoostCenterSettings
+        {
+            CheckBeforeBoost = true
+        };
+        private BoostPreflightReport latestPreflight;
+        private DiagnosticSnapshot latestDiagnosticSnapshot;
+        private BoostSessionReport currentSession;
+        private BoostSessionReport lastSession;
+        private List<BoostSessionReport> sessionHistory =
+            new List<BoostSessionReport>();
+        private CancellationTokenSource benchmarkCancellation;
+        private PerformanceCaptureAttemptResult lastCaptureAttempt;
+        private readonly Dictionary<int, TrackedTargetPriority> trackedTargetPriorities =
+            new Dictionary<int, TrackedTargetPriority>();
+        private readonly bool demoMode;
+        private readonly bool safeMode;
+        private readonly double demoUiScale;
+        private readonly bool compactMainLayout;
+        private readonly bool scaleMainLayoutToWorkArea;
+        private readonly string[] launchArguments;
+        private Viewbox monitorAdaptiveViewbox;
+        private HwndSource windowSource;
+        private IntPtr windowHandle;
+        private bool applyingMonitorBounds;
+        private bool monitorBoundsQueued;
+
+        public BoostWindow(string[] args)
+        {
+            launchArguments = args ?? new string[0];
+            demoMode = HasLaunchArgument(launchArguments, "--demo");
+            safeMode = HasLaunchArgument(launchArguments, "--safe-mode");
+            demoUiScale = demoMode
+                ? GetDemoUiScale(launchArguments)
+                : 1.0;
+            double targetWidth = BaseWindowWidth * demoUiScale;
+            double targetHeight = BaseWindowHeight * demoUiScale;
+            bool compactDemo = HasLaunchArgument(
+                launchArguments,
+                "--demo-compact");
+            bool ultraCompactDemo = HasLaunchArgument(
+                launchArguments,
+                "--demo-ultra-compact");
+            if (ultraCompactDemo)
+            {
+                targetHeight = 360;
+            }
+            else if (compactDemo)
+            {
+                targetHeight = CompactWindowHeight;
+            }
+            compactMainLayout =
+                targetHeight < BaseWindowHeight - 0.5;
+            scaleMainLayoutToWorkArea =
+                targetHeight < CompactWindowHeight - 0.5 ||
+                targetWidth < BaseWindowWidth - 0.5;
+            Title = ProductBrand.ProductName;
+            Width = targetWidth;
+            Height = targetHeight;
+            MinWidth = Width;
+            MinHeight = Height;
+            MaxWidth = Width;
+            MaxHeight = Height;
+            WindowStyle = WindowStyle.None;
+            ResizeMode = ResizeMode.NoResize;
+            // An opaque native window keeps WPF on the ClearType/hardware-rendered
+            // path. Layered transparent windows rasterize text less sharply,
+            // especially at 1080p and fractional DPI.
+            AllowsTransparency = false;
+            Background = BrushFrom("#FF161616");
+            WindowChrome.SetWindowChrome(
+                this,
+                new WindowChrome
+                {
+                    CaptionHeight = 0,
+                    CornerRadius = new CornerRadius(11),
+                    GlassFrameThickness = new Thickness(0),
+                    ResizeBorderThickness = new Thickness(0),
+                    UseAeroCaptionButtons = false
+                });
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            ShowInTaskbar = true;
+            UseLayoutRounding = true;
+            SnapsToDevicePixels = true;
+            FontFamily = LoadAppFontFamily();
+            TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
+            TextOptions.SetTextRenderingMode(this, TextRenderingMode.ClearType);
+            TextOptions.SetTextHintingMode(this, TextHintingMode.Fixed);
+            RenderOptions.SetBitmapScalingMode(
+                this,
+                BitmapScalingMode.HighQuality);
+            Icon = BuildWindowIcon();
+            AutomationProperties.SetName(this, ProductBrand.ProductName);
+            AutomationProperties.SetAutomationId(this, "Boostix.MainWindow");
+
+            FrameworkElement shell = BuildShell();
+            if (!demoMode)
+            {
+                Grid designSurface = BuildAdaptiveDesignSurface(shell);
+                monitorAdaptiveViewbox = new Viewbox
+                {
+                    Stretch = Stretch.Uniform,
+                    StretchDirection = StretchDirection.DownOnly,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    Child = designSurface
+                };
+                Content = monitorAdaptiveViewbox;
+            }
+            else if (scaleMainLayoutToWorkArea)
+            {
+                shell.Width = BaseWindowWidth;
+                shell.Height = CompactWindowHeight;
+                Content = new Viewbox
+                {
+                    Stretch = Stretch.Uniform,
+                    StretchDirection = StretchDirection.DownOnly,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = shell
+                };
+            }
+            else
+            {
+                Content = shell;
+            }
+            Loaded += BoostWindowLoaded;
+            SourceInitialized += BoostWindowSourceInitialized;
+            KeyDown += WindowKeyDown;
+            PreviewMouseLeftButtonDown += WindowMouseLeftButtonDown;
+            Closing += BoostWindowClosing;
+            Closed += WindowClosed;
+        }
+
+        private static Grid BuildAdaptiveDesignSurface(
+            FrameworkElement shell)
+        {
+            if (shell == null)
+            {
+                throw new ArgumentNullException("shell");
+            }
+
+            var designSurface = new Grid
+            {
+                Width = BaseWindowWidth,
+                Height = BaseWindowHeight,
+                UseLayoutRounding = true,
+                SnapsToDevicePixels = true
+            };
+            designSurface.Children.Add(shell);
+            return designSurface;
+        }
+
+        private Grid BuildShell()
+        {
+            var shell = new Grid
+            {
+                Margin = new Thickness(ShellShadowMargin * demoUiScale)
+            };
+            if (Math.Abs(demoUiScale - 1.0) > 0.001)
+            {
+                shell.LayoutTransform = new ScaleTransform(
+                    demoUiScale,
+                    demoUiScale);
+            }
+
+            var frame = new Border();
+            frame.CornerRadius = new CornerRadius(11);
+            frame.BorderThickness = new Thickness(1);
+            frame.BorderBrush = BrushFrom("#FF383838");
+            frame.Background = BrushFrom("#FF161616");
+            shell.Children.Add(frame);
+
+            var root = new Grid();
+            root.Background = Brushes.Transparent;
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
+            root.RowDefinitions.Add(new RowDefinition
+            {
+                Height = new GridLength(compactMainLayout ? 62 : 70)
+            });
+            root.RowDefinitions.Add(new RowDefinition
+            {
+                Height = new GridLength(compactMainLayout ? 172 : 190)
+            });
+            root.RowDefinitions.Add(new RowDefinition
+            {
+                Height = new GridLength(compactMainLayout ? 32 : 36)
+            });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(114) });
+            root.RowDefinitions.Add(new RowDefinition
+            {
+                Height = new GridLength(1, GridUnitType.Star),
+                MinHeight = compactMainLayout ? 12 : MainContentInset
+            });
+            KeyboardNavigation.SetTabNavigation(
+                root,
+                KeyboardNavigationMode.Cycle);
+            root.SizeChanged += delegate
+            {
+                root.Clip = new RectangleGeometry(
+                    new Rect(0, 0, Math.Max(0, root.ActualWidth), Math.Max(0, root.ActualHeight)),
+                    10,
+                    10);
+            };
+            frame.Child = root;
+
+            var controls = BuildWindowControls();
+            Grid.SetRow(controls, 0);
+            root.Children.Add(controls);
+
+            titleSection = BuildTitle();
+            titleSection.Margin = new Thickness(MainContentInset, 0, MainContentInset, 0);
+            Grid.SetRow(titleSection, 1);
+            root.Children.Add(titleSection);
+
+            boostButtonSection = BuildBoostButton();
+            boostButtonSection.Margin = new Thickness(MainContentInset, 0, MainContentInset, 0);
+            Grid.SetRow(boostButtonSection, 2);
+            root.Children.Add(boostButtonSection);
+            boostButton.IsEnabled = false;
+
+            caption = MakeText("НАЖМИ, ЧТОБЫ АКТИВИРОВАТЬ", 10, "#FF8E8E8E", FontWeights.Bold);
+            caption.FontFamily = LoadAppSemiboldFontFamily();
+            caption.HorizontalAlignment = HorizontalAlignment.Center;
+            caption.VerticalAlignment = VerticalAlignment.Center;
+            caption.Margin = new Thickness(MainContentInset, 0, MainContentInset, 0);
+            AutomationProperties.SetName(caption, "Состояние Boost");
+            AutomationProperties.SetAutomationId(caption, "Boostix.Status");
+            AutomationProperties.SetLiveSetting(caption, AutomationLiveSetting.Polite);
+            Grid.SetRow(caption, 3);
+            root.Children.Add(caption);
+
+            preferenceSection = BuildPreferencePanel();
+            Grid.SetRow(preferenceSection, 4);
+            root.Children.Add(preferenceSection);
+
+            boostCenterOverlay = new BoostCenterOverlay(
+                LoadAppFontFamily(),
+                LoadAppSemiboldFontFamily());
+            boostCenterOverlay.RefreshRequested += delegate { QueuePreflight(preflightForBoost, true); };
+            boostCenterOverlay.CloseRequested += delegate
+            {
+                if (preflightForBoost && !boostActive && !animationRunning)
+                {
+                    Interlocked.Increment(ref preflightGeneration);
+                }
+                preflightForBoost = false;
+            };
+            boostCenterOverlay.ProceedBoostRequested += delegate
+            {
+                if (boostActive || animationRunning)
+                {
+                    return;
+                }
+                preflightAccepted = true;
+                preflightForBoost = false;
+                StartBoost();
+            };
+            boostCenterOverlay.SettingsChanged += delegate
+            {
+                centerSettings = boostCenterOverlay.Settings;
+                SaveBoostPreferences();
+            };
+            boostCenterOverlay.RestoreRequested += delegate
+            {
+                if (optimizationOverlay != null && optimizationOverlay.ShowManualRestore())
+                {
+                    boostCenterOverlay.HandleEscape();
+                }
+            };
+            boostCenterOverlay.BenchmarkRequested += BoostCenterBenchmarkRequested;
+            boostCenterOverlay.ExportDiagnosticsRequested +=
+                BoostCenterExportDiagnosticsRequested;
+            boostCenterOverlay.IsVisibleChanged += delegate
+            {
+                SetMainContentVisible(boostCenterOverlay.Visibility != Visibility.Visible);
+            };
+            Grid.SetRow(boostCenterOverlay, 1);
+            Grid.SetRowSpan(boostCenterOverlay, 5);
+            Panel.SetZIndex(boostCenterOverlay, 50);
+            root.Children.Add(boostCenterOverlay);
+
+            optimizationOverlay = new OptimizationFlowOverlay(
+                this,
+                launchArguments,
+                LoadAppFontFamily(),
+                LoadAppSemiboldFontFamily());
+            optimizationOverlay.RequestApplicationClose += delegate { Close(); };
+            Grid.SetRow(optimizationOverlay, 0);
+            Grid.SetRowSpan(optimizationOverlay, 6);
+            Panel.SetZIndex(optimizationOverlay, 100);
+            root.Children.Add(optimizationOverlay);
+
+            updateOverlay = new UpdateFlowOverlay(
+                this,
+                launchArguments,
+                LoadAppFontFamily(),
+                LoadAppSemiboldFontFamily());
+            updateOverlay.RequestApplicationClose += delegate { Close(); };
+            Grid.SetRow(updateOverlay, 0);
+            Grid.SetRowSpan(updateOverlay, 6);
+            Panel.SetZIndex(updateOverlay, 200);
+            root.Children.Add(updateOverlay);
+
+            var watermark = MakeText(
+                "by Silas Suspect",
+                9,
+                "#FF8A8A8A",
+                FontWeights.SemiBold);
+            watermark.FontFamily = LoadAppSemiboldFontFamily();
+            watermark.HorizontalAlignment = HorizontalAlignment.Right;
+            watermark.VerticalAlignment = VerticalAlignment.Bottom;
+            watermark.Margin = new Thickness(
+                MainContentInset,
+                0,
+                MainContentInset,
+                MainContentInset);
+            watermark.Opacity = 0.72;
+            watermark.IsHitTestVisible = false;
+            AutomationProperties.SetName(watermark, "by Silas Suspect");
+            AutomationProperties.SetAutomationId(
+                watermark,
+                "Boostix.Watermark");
+            Grid.SetRow(watermark, 0);
+            Grid.SetRowSpan(watermark, 6);
+            Panel.SetZIndex(watermark, 400);
+            root.Children.Add(watermark);
+
+            return shell;
+        }
+
+        private Grid BuildWindowControls()
+        {
+            var header = new Grid
+            {
+                Margin = new Thickness(0),
+                Height = 48
+            };
+            AutomationProperties.SetAutomationId(
+                header,
+                "Boostix.TitleBar");
+
+            var center = MakeCenterButton();
+            center.HorizontalAlignment = HorizontalAlignment.Left;
+            center.VerticalAlignment = VerticalAlignment.Top;
+            center.Margin = new Thickness(10, 10, 0, 0);
+            KeyboardNavigation.SetTabIndex(center, 0);
+            AutomationProperties.SetAutomationId(
+                center,
+                "Boostix.OpenCenter");
+            center.Click += delegate
+            {
+                if (boostCenterOverlay != null)
+                {
+                    if (boostCenterOverlay.IsOpen)
+                    {
+                        boostCenterOverlay.HandleEscape();
+                        return;
+                    }
+                    preflightForBoost = false;
+                    boostCenterOverlay.SetSettings(centerSettings);
+                    boostCenterOverlay.SetPreflight(latestPreflight);
+                    boostCenterOverlay.SetSessionReport(currentSession ?? lastSession);
+                    boostCenterOverlay.SetDiagnosticSnapshot(
+                        latestDiagnosticSnapshot);
+                    boostCenterOverlay.SetSessionHistory(sessionHistory);
+                    boostCenterOverlay.OpenReadiness(false);
+                }
+            };
+            header.Children.Add(center);
+
+            var controls = new StackPanel();
+            controls.Orientation = Orientation.Horizontal;
+            controls.HorizontalAlignment = HorizontalAlignment.Right;
+            controls.VerticalAlignment = VerticalAlignment.Top;
+            controls.Height = TitleControlSize;
+            controls.Margin = new Thickness(0, 10, 10, 0);
+
+            var version = MakeText(
+                GetApplicationVersion() + "  " + ProductBrand.ReleaseLabel,
+                11.5,
+                "#FF8B8B8B",
+                FontWeights.Bold);
+            version.FontFamily = LoadAppSemiboldFontFamily();
+            version.RenderTransform = new TranslateTransform(0, 2);
+            version.VerticalAlignment = VerticalAlignment.Center;
+            version.Margin = new Thickness(0, 0, 10, 0);
+            AutomationProperties.SetName(
+                version,
+                "Версия приложения " + GetApplicationVersion() + " " +
+                ProductBrand.ReleaseLabel);
+            AutomationProperties.SetAutomationId(
+                version,
+                "Boostix.Version");
+            controls.Children.Add(version);
+
+            var minimize = MakeWindowButton("Свернуть", false);
+            KeyboardNavigation.SetTabIndex(minimize, 90);
+            AutomationProperties.SetAutomationId(
+                minimize,
+                "Boostix.Minimize");
+            minimize.Click += delegate { WindowState = WindowState.Minimized; };
+            controls.Children.Add(minimize);
+
+            var close = MakeWindowButton("Закрыть", true);
+            KeyboardNavigation.SetTabIndex(close, 91);
+            AutomationProperties.SetAutomationId(
+                close,
+                "Boostix.Close");
+            close.Click += delegate { Close(); };
+            controls.Children.Add(close);
+
+            header.Children.Add(controls);
+            return header;
+        }
+
+        private StackPanel BuildTitle()
+        {
+            var title = new StackPanel();
+            title.HorizontalAlignment = HorizontalAlignment.Center;
+            title.VerticalAlignment = VerticalAlignment.Center;
+
+            var firstLine = MakeText("BOOSTIX", 30, "#FFF4F4F4", FontWeights.Bold);
+            firstLine.HorizontalAlignment = HorizontalAlignment.Center;
+            firstLine.Margin = new Thickness(0);
+            AutomationProperties.SetAutomationId(
+                firstLine,
+                "Boostix.Title");
+            title.Children.Add(firstLine);
+            return title;
+        }
+
+        private Grid BuildBoostButton()
+        {
+            var stage = new Grid();
+            stage.ClipToBounds = false;
+            if (compactMainLayout)
+            {
+                stage.LayoutTransform = new ScaleTransform(0.9, 0.9);
+            }
+
+            boostButton = new Button();
+            boostButton.Width = 184;
+            boostButton.Height = 184;
+            boostButton.HorizontalAlignment = HorizontalAlignment.Center;
+            boostButton.VerticalAlignment = VerticalAlignment.Center;
+            boostButton.BorderThickness = new Thickness(0);
+            boostButton.Background = Brushes.Transparent;
+            boostButton.Cursor = Cursors.Hand;
+            boostButton.Template = MakeTransparentButtonTemplate();
+            AutomationProperties.SetName(boostButton, "Активировать Boostix");
+            AutomationProperties.SetHelpText(
+                boostButton,
+                "Применяет выбранную подготовку производительности без запуска сторонних программ.");
+            AutomationProperties.SetAutomationId(
+                boostButton,
+                "Boostix.Activate");
+            KeyboardNavigation.SetTabIndex(boostButton, 10);
+
+            boostSurface = new Border();
+            boostSurface.Width = 178;
+            boostSurface.Height = 178;
+            boostSurface.CornerRadius = new CornerRadius(54);
+            boostSurface.Background = BrushFrom("#FF1B1B1B");
+            boostSurface.BorderBrush = BrushFrom(ProductBrand.AccentVisualHex);
+            boostSurface.BorderThickness = new Thickness(1.5);
+
+            var viewport = new Grid();
+            viewport.Width = 176;
+            viewport.Height = 176;
+            viewport.Background = Brushes.Transparent;
+            viewport.Clip = new RectangleGeometry(new Rect(0, 0, 176, 176), 52, 52);
+            boostSurface.Child = viewport;
+
+            starField = BuildStarField();
+            viewport.Children.Add(starField);
+
+            rocket = BuildRocket();
+            viewport.Children.Add(rocket);
+
+            boostButton.Content = boostSurface;
+            boostButton.Click += BoostButtonClick;
+            boostButton.MouseEnter += BoostButtonMouseEnter;
+            boostButton.MouseLeave += BoostButtonMouseLeave;
+            stage.Children.Add(boostButton);
+            return stage;
+        }
+
+        private Grid BuildPreferencePanel()
+        {
+            preferencesLoaded = false;
+            var panel = new Grid
+            {
+                MaxWidth = 300,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                Margin = new Thickness(
+                    MainContentInset,
+                    0,
+                    MainContentInset,
+                    0)
+            };
+            panel.RowDefinitions.Add(new RowDefinition
+            {
+                Height = new GridLength(PreferenceRowHeight)
+            });
+            panel.RowDefinitions.Add(new RowDefinition
+            {
+                Height = new GridLength(PreferenceRowHeight)
+            });
+            panel.RowDefinitions.Add(new RowDefinition
+            {
+                Height = new GridLength(PreferenceRowHeight)
+            });
+
+            keepDiscordToggle = BuildPreferenceToggle("НЕ ЗАКРЫВАТЬ DISCORD");
+            keepEpicToggle = BuildPreferenceToggle("НЕ ЗАКРЫВАТЬ EPIC GAMES");
+            keepSteamToggle = BuildPreferenceToggle("НЕ ЗАКРЫВАТЬ STEAM");
+            KeyboardNavigation.SetTabIndex(keepDiscordToggle, 20);
+            KeyboardNavigation.SetTabIndex(keepEpicToggle, 21);
+            KeyboardNavigation.SetTabIndex(keepSteamToggle, 22);
+            Grid.SetRow(keepDiscordToggle, 0);
+            Grid.SetRow(keepEpicToggle, 1);
+            Grid.SetRow(keepSteamToggle, 2);
+            panel.Children.Add(keepDiscordToggle);
+            panel.Children.Add(keepEpicToggle);
+            panel.Children.Add(keepSteamToggle);
+
+            LoadBoostPreferences();
+            UpdatePreferenceToggle(keepDiscordToggle, false);
+            UpdatePreferenceToggle(keepEpicToggle, false);
+            UpdatePreferenceToggle(keepSteamToggle, false);
+            preferencesLoaded = true;
+            return panel;
+        }
+
+        private CheckBox BuildPreferenceToggle(string text)
+        {
+            var toggle = new CheckBox();
+            toggle.MinWidth = 252;
+            toggle.MaxWidth = 300;
+            toggle.Height = PreferenceRowHeight;
+            toggle.HorizontalAlignment = HorizontalAlignment.Stretch;
+            toggle.Background = Brushes.Transparent;
+            toggle.BorderThickness = new Thickness(0);
+            toggle.Cursor = Cursors.Hand;
+            toggle.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+            toggle.VerticalContentAlignment = VerticalAlignment.Center;
+            toggle.Template = MakeTransparentCheckBoxTemplate();
+            AutomationProperties.SetName(toggle, text.ToLowerInvariant());
+            AutomationProperties.SetAutomationId(
+                toggle,
+                "Boostix.Keep." +
+                text.Replace("НЕ ЗАКРЫВАТЬ ", string.Empty)
+                    .Replace(" ", string.Empty));
+            AutomationProperties.SetHelpText(
+                toggle,
+                "Если включено, Boostix не будет закрывать эту программу. " +
+                "Закрытые по вашему выбору программы автоматически не запускаются заново.");
+
+            var content = new Grid();
+            content.Height = PreferenceRowHeight;
+            content.HorizontalAlignment = HorizontalAlignment.Stretch;
+            content.UseLayoutRounding = true;
+            content.SnapsToDevicePixels = true;
+            content.ClipToBounds = false;
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            content.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(36 + ToggleSafeGutter)
+            });
+
+            var label = MakeText(text, 10.5, "#FFBDBDBD", FontWeights.SemiBold);
+            label.FontFamily = LoadAppSemiboldFontFamily();
+            label.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(label, 0);
+            content.Children.Add(label);
+
+            var trackBrush = new SolidColorBrush(Color.FromRgb(37, 37, 37));
+            var track = new Border();
+            track.Width = 36;
+            track.Height = 20;
+            track.CornerRadius = new CornerRadius(10);
+            track.Background = trackBrush;
+            track.HorizontalAlignment = HorizontalAlignment.Right;
+            track.VerticalAlignment = VerticalAlignment.Center;
+            track.Margin = new Thickness(0, 0, ToggleSafeGutter, 0);
+            track.UseLayoutRounding = true;
+            track.SnapsToDevicePixels = true;
+            track.ClipToBounds = false;
+            Grid.SetColumn(track, 1);
+
+            var knob = new Ellipse();
+            knob.Width = 16;
+            knob.Height = 16;
+            knob.Margin = new Thickness(3, 0, 0, 0);
+            knob.HorizontalAlignment = HorizontalAlignment.Left;
+            knob.VerticalAlignment = VerticalAlignment.Center;
+            knob.Fill = Brushes.White;
+            knob.UseLayoutRounding = true;
+            knob.SnapsToDevicePixels = true;
+            var knobTranslation = new TranslateTransform();
+            knob.RenderTransform = knobTranslation;
+            track.Child = knob;
+            content.Children.Add(track);
+
+            toggle.Tag = new PreferenceToggleVisuals
+            {
+                TrackBrush = trackBrush,
+                KnobTranslation = knobTranslation
+            };
+            toggle.Content = content;
+            toggle.Checked += PreferenceToggleChanged;
+            toggle.Unchecked += PreferenceToggleChanged;
+            toggle.MouseEnter += delegate { UpdatePreferenceToggle(toggle, true); };
+            toggle.MouseLeave += delegate { UpdatePreferenceToggle(toggle, true); };
+            return toggle;
+        }
+
+        private void PreferenceToggleChanged(object sender, RoutedEventArgs e)
+        {
+            var toggle = sender as CheckBox;
+            if (toggle != null)
+            {
+                UpdatePreferenceToggle(toggle, true);
+            }
+            if (preferencesLoaded)
+            {
+                SaveBoostPreferences();
+                if (boostActive)
+                {
+                    RefreshActiveBoostMaintenance();
+                }
+            }
+        }
+
+        private static void UpdatePreferenceToggle(CheckBox toggle, bool animate)
+        {
+            var visuals = toggle.Tag as PreferenceToggleVisuals;
+            if (visuals == null)
+            {
+                return;
+            }
+
+            bool isChecked = toggle.IsChecked == true;
+            Color targetColor = isChecked
+                ? Color.FromRgb(
+                    ProductBrand.AccentRed,
+                    ProductBrand.AccentGreen,
+                    ProductBrand.AccentBlue)
+                : (toggle.IsMouseOver ? Color.FromRgb(52, 52, 52) : Color.FromRgb(37, 37, 37));
+            double targetX = isChecked ? 14 : 0;
+            if (!animate || !SystemParameters.ClientAreaAnimation)
+            {
+                visuals.TrackBrush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+                visuals.KnobTranslation.BeginAnimation(TranslateTransform.XProperty, null);
+                visuals.TrackBrush.Color = targetColor;
+                visuals.KnobTranslation.X = targetX;
+                return;
+            }
+
+            var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
+            visuals.TrackBrush.BeginAnimation(
+                SolidColorBrush.ColorProperty,
+                new ColorAnimation(targetColor, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease });
+            visuals.KnobTranslation.BeginAnimation(
+                TranslateTransform.XProperty,
+                new DoubleAnimation(targetX, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease });
+        }
+
+        private void LoadBoostPreferences()
+        {
+            var values = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                string path = GetPreferencesPath();
+                if (File.Exists(path))
+                {
+                    foreach (string line in File.ReadAllLines(path, Encoding.UTF8))
+                    {
+                        int separator = line.IndexOf('=');
+                        bool parsed;
+                        if (separator > 0 && bool.TryParse(line.Substring(separator + 1).Trim(), out parsed))
+                        {
+                            values[line.Substring(0, separator).Trim()] = parsed;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not read Boost preferences.", ex);
+            }
+
+            // Closing third-party applications is always opt-in for a safe default.
+            keepDiscordToggle.IsChecked = true;
+            keepEpicToggle.IsChecked = true;
+            keepSteamToggle.IsChecked = true;
+            centerSettings.AutoBoost = false;
+            centerSettings.CheckBeforeBoost = values.ContainsKey("CheckBeforeBoost")
+                ? GetPreference(values, "CheckBeforeBoost")
+                : true;
+            centerSettings.KeepOneDrive = !values.ContainsKey("KeepOneDrive") ||
+                GetPreference(values, "KeepOneDrive");
+            centerSettings.KeepTeams = !values.ContainsKey("KeepTeams") ||
+                GetPreference(values, "KeepTeams");
+            centerSettings.KeepWallpaper = !values.ContainsKey("KeepWallpaper") ||
+                GetPreference(values, "KeepWallpaper");
+            centerSettings.KeepNvidiaOverlay = !values.ContainsKey("KeepNvidiaOverlay") ||
+                GetPreference(values, "KeepNvidiaOverlay");
+        }
+
+        private void SaveBoostPreferences()
+        {
+            try
+            {
+                string path = GetPreferencesPath();
+                string content = string.Join(
+                    Environment.NewLine,
+                    new[]
+                    {
+                        "CheckBeforeBoost=" + centerSettings.CheckBeforeBoost,
+                        "KeepOneDrive=" + centerSettings.KeepOneDrive,
+                        "KeepTeams=" + centerSettings.KeepTeams,
+                        "KeepWallpaper=" + centerSettings.KeepWallpaper,
+                        "KeepNvidiaOverlay=" + centerSettings.KeepNvidiaOverlay
+                    }) + Environment.NewLine;
+                BoostSessionReportStore.WriteAllTextAtomic(
+                    path,
+                    content);
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not save Boost preferences.", ex);
+            }
+        }
+
+        private static bool GetPreference(Dictionary<string, bool> values, string name)
+        {
+            bool value;
+            return values.TryGetValue(name, out value) && value;
+        }
+
+        private static string GetPreferencesPath()
+        {
+            return System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                ProductBrand.DataDirectoryName,
+                "boost-preferences.ini");
+        }
+
+        private Canvas BuildStarField()
+        {
+            var canvas = new Canvas();
+            canvas.Width = 176;
+            canvas.Height = 176;
+            canvas.Opacity = 0;
+            canvas.IsHitTestVisible = false;
+
+            var random = new Random(2407);
+            for (int index = 0; index < 18; index++)
+            {
+                var star = new Rectangle();
+                star.Width = 3 + random.NextDouble() * 8;
+                star.Height = index % 4 == 0 ? 1.7 : 1.15;
+                star.RadiusX = star.Height / 2;
+                star.RadiusY = star.Height / 2;
+                star.Fill = index % 3 == 0
+                    ? BrushFrom(ProductBrand.AccentVisualHex)
+                    : BrushFrom(ProductBrand.AccentTextHex);
+                star.Opacity = 0.28 + random.NextDouble() * 0.58;
+                star.RenderTransformOrigin = new Point(0.5, 0.5);
+                var transforms = new TransformGroup();
+                transforms.Children.Add(new RotateTransform(-31));
+                transforms.Children.Add(new TranslateTransform());
+                star.RenderTransform = transforms;
+                Canvas.SetLeft(star, 15 + random.NextDouble() * 155);
+                Canvas.SetTop(star, 4 + random.NextDouble() * 154);
+                canvas.Children.Add(star);
+                stars.Add(star);
+            }
+            return canvas;
+        }
+
+        private Grid BuildRocket()
+        {
+            var host = new Grid();
+            host.Width = 106;
+            host.Height = 112;
+            host.HorizontalAlignment = HorizontalAlignment.Center;
+            host.VerticalAlignment = VerticalAlignment.Center;
+            host.RenderTransformOrigin = new Point(0.5, 0.5);
+
+            rocketScale = new ScaleTransform(1, 1);
+            flightTranslation = new TranslateTransform(0, 0);
+            floatTranslation = new TranslateTransform(0, 0);
+            var transforms = new TransformGroup();
+            transforms.Children.Add(rocketScale);
+            transforms.Children.Add(new RotateTransform(43));
+            transforms.Children.Add(flightTranslation);
+            transforms.Children.Add(floatTranslation);
+            host.RenderTransform = transforms;
+
+            flameLayer = BuildStaticFlame();
+            flameLayer.Opacity = 0;
+            host.Children.Add(flameLayer);
+
+            grayRocketLayer = BuildRocketLayer(false);
+            grayRocketLayer.Opacity = 1;
+            host.Children.Add(grayRocketLayer);
+
+            colorRocketLayer = BuildRocketLayer(true);
+            colorRocketLayer.Opacity = 0;
+            host.Children.Add(colorRocketLayer);
+            return host;
+        }
+
+        private Grid BuildStaticFlame()
+        {
+            var grid = new Grid();
+            grid.Width = 72;
+            grid.Height = 103;
+            grid.HorizontalAlignment = HorizontalAlignment.Center;
+            grid.VerticalAlignment = VerticalAlignment.Center;
+            grid.IsHitTestVisible = false;
+
+            var outer = new System.Windows.Shapes.Path();
+            outer.Data = Geometry.Parse("M 24,68 C 18,82 24,96 36,102 C 48,96 54,82 48,68 Z");
+            outer.Fill = MakeLinearBrush("#FFFFD166", "#FFFF4D5A", 90);
+            outer.Effect = new DropShadowEffect
+            {
+                BlurRadius = 13,
+                ShadowDepth = 0,
+                Opacity = 0.88,
+                Color = Color.FromRgb(255, 83, 70)
+            };
+            grid.Children.Add(outer);
+
+            var inner = new System.Windows.Shapes.Path();
+            inner.Data = Geometry.Parse("M 30,71 C 27,82 31,91 36,96 C 41,91 45,82 42,71 Z");
+            inner.Fill = MakeLinearBrush("#FFFFFFFF", "#FFFFBE45", 90);
+            grid.Children.Add(inner);
+            return grid;
+        }
+
+        private Canvas BuildRocketLayer(bool useColor)
+        {
+            var canvas = new Canvas();
+            canvas.Width = 72;
+            canvas.Height = 103;
+            canvas.HorizontalAlignment = HorizontalAlignment.Center;
+            canvas.VerticalAlignment = VerticalAlignment.Center;
+            canvas.IsHitTestVisible = false;
+
+            var leftFin = new System.Windows.Shapes.Path();
+            leftFin.Data = Geometry.Parse("M 19,51 L 7,70 L 22,65 Z");
+            leftFin.Fill = useColor
+                ? MakeLinearBrush("#FFB794F4", "#FF6D28D9", 90)
+                : MakeLinearBrush("#FF9AA1AB", "#FF606873", 90);
+            canvas.Children.Add(leftFin);
+
+            var rightFin = new System.Windows.Shapes.Path();
+            rightFin.Data = Geometry.Parse("M 53,51 L 65,70 L 50,65 Z");
+            rightFin.Fill = useColor
+                ? MakeLinearBrush(ProductBrand.AccentVisualHex, "#FF5B21B6", 90)
+                : MakeLinearBrush("#FF9AA1AB", "#FF59616D", 90);
+            canvas.Children.Add(rightFin);
+
+            var body = new System.Windows.Shapes.Path();
+            body.Data = Geometry.Parse("M 36,3 C 22,15 18,35 18,57 C 18,67 25,74 36,79 C 47,74 54,67 54,57 C 54,35 50,15 36,3 Z");
+            body.Fill = useColor
+                ? MakeLinearBrush("#FFFFFFFF", "#FFD9C6CD", 32)
+                : MakeLinearBrush("#FFD1D5DB", "#FF737B87", 32);
+            body.Stroke = useColor ? BrushFrom("#D9FFFFFF") : BrushFrom("#FFBBC0C8");
+            body.StrokeThickness = 1;
+            canvas.Children.Add(body);
+
+            var bodyShade = new System.Windows.Shapes.Path();
+            bodyShade.Data = Geometry.Parse("M 36,3 C 48,17 51,36 50,58 C 48,66 43,72 36,79 C 47,74 54,67 54,57 C 54,35 50,15 36,3 Z");
+            bodyShade.Fill = useColor ? BrushFrom("#503C1722") : BrushFrom("#35545A64");
+            canvas.Children.Add(bodyShade);
+
+            var window = new Ellipse();
+            window.Width = 18;
+            window.Height = 18;
+            Canvas.SetLeft(window, 27);
+            Canvas.SetTop(window, 27);
+            window.Fill = useColor
+                ? MakeLinearBrush("#FFD8B4FE", ProductBrand.AccentVisualHex, 45)
+                : MakeLinearBrush("#FFB5BBC3", "#FF68717C", 45);
+            window.Stroke = useColor ? BrushFrom("#FFFFFFFF") : BrushFrom("#FFD4D7DC");
+            window.StrokeThickness = 2;
+            if (useColor)
+            {
+                window.Effect = new DropShadowEffect
+                {
+                    BlurRadius = 9,
+                    ShadowDepth = 0,
+                    Opacity = 0.7,
+                    Color = Color.FromRgb(
+                        ProductBrand.AccentRed,
+                        ProductBrand.AccentGreen,
+                        ProductBrand.AccentBlue)
+                };
+            }
+            canvas.Children.Add(window);
+
+            var seam = new Line();
+            seam.X1 = 23;
+            seam.Y1 = 57;
+            seam.X2 = 49;
+            seam.Y2 = 57;
+            seam.Stroke = useColor ? BrushFrom("#668C4A61") : BrushFrom("#66656D78");
+            seam.StrokeThickness = 1;
+            canvas.Children.Add(seam);
+            return canvas;
+        }
+
+        private void BoostButtonMouseEnter(object sender, MouseEventArgs e)
+        {
+            if (animationRunning)
+            {
+                return;
+            }
+            AnimateRocketScale(1.08, 155);
+            if (!boostActive)
+            {
+                AnimateRocketColor(true, 180);
+            }
+        }
+
+        private void BoostButtonMouseLeave(object sender, MouseEventArgs e)
+        {
+            if (animationRunning)
+            {
+                return;
+            }
+            AnimateRocketScale(1, 180);
+            if (!boostActive)
+            {
+                AnimateRocketColor(false, 210);
+                flameLayer.Opacity = 0;
+            }
+        }
+
+        private void BoostButtonClick(object sender, RoutedEventArgs e)
+        {
+            ToggleBoost();
+        }
+
+        private void ToggleBoost()
+        {
+            if (animationRunning)
+            {
+                return;
+            }
+
+            if (boostActive)
+            {
+                StartBoostDeactivation();
+            }
+            else
+            {
+                RequestBoostStart();
+            }
+        }
+
+        private void RequestBoostStart()
+        {
+            if (demoMode)
+            {
+                StartBoost();
+                return;
+            }
+            if (centerSettings.CheckBeforeBoost && !preflightAccepted)
+            {
+                QueuePreflight(true, true);
+                return;
+            }
+            StartBoost();
+        }
+
+        private async void QueuePreflight(bool forBoost, bool showCenter)
+        {
+            int generation = Interlocked.Increment(ref preflightGeneration);
+            preflightForBoost = forBoost;
+            if (boostCenterOverlay != null && showCenter)
+            {
+                boostCenterOverlay.SetPreflight(null);
+                boostCenterOverlay.OpenReadiness(forBoost);
+            }
+
+            string optimizationStatus = "Unknown";
+            if (optimizationOverlay != null)
+            {
+                optimizationStatus = optimizationOverlay.GetOptimizationStatus();
+            }
+
+            BoostPreflightReport report = null;
+            DiagnosticSnapshot diagnostic = null;
+            await Task.Run(delegate
+            {
+                report = BoostPreflightService.Run(
+                    AppDomain.CurrentDomain.BaseDirectory,
+                    optimizationStatus);
+                diagnostic = DiagnosticSnapshotProvider.Capture();
+            });
+
+            if (generation != Interlocked.CompareExchange(ref preflightGeneration, 0, 0))
+            {
+                return;
+            }
+            latestPreflight = report;
+            latestDiagnosticSnapshot = diagnostic;
+            if (boostCenterOverlay != null)
+            {
+                boostCenterOverlay.SetPreflight(report);
+                boostCenterOverlay.SetDiagnosticSnapshot(diagnostic);
+            }
+
+            if (!forBoost)
+            {
+                return;
+            }
+            if (report != null && !report.HasWarnings)
+            {
+                if (boostActive || animationRunning)
+                {
+                    return;
+                }
+                preflightAccepted = true;
+                if (boostCenterOverlay != null && boostCenterOverlay.IsOpen)
+                {
+                    boostCenterOverlay.HandleEscape();
+                }
+                StartBoost();
+            }
+        }
+
+        private void StartBoost()
+        {
+            if (animationRunning || boostActive)
+            {
+                return;
+            }
+            preflightForBoost = false;
+            StopActiveBoostMaintenance();
+            BeginSession("Manual");
+            animationRunning = true;
+            departureFinished = false;
+            boostReady = false;
+            boostButton.IsEnabled = false;
+            AnimateRocketColor(true, 110);
+            AnimateRocketScale(1.08, 100);
+            flameLayer.Opacity = 1;
+            caption.Text = "АКТИВИРУЮ BOOST...";
+            caption.Foreground = BrushFrom(ProductBrand.AccentTextHex);
+
+            if (!LaunchBoostScript())
+            {
+                HandleBoostFailure("BOOST НЕ ЗАПУЩЕН");
+                return;
+            }
+
+            PlayDeparture();
+        }
+
+        private bool LaunchBoostScript()
+        {
+            if (demoMode)
+            {
+                var demoTimer = new DispatcherTimer();
+                demoTimer.Interval = TimeSpan.FromMilliseconds(950);
+                demoTimer.Tick += delegate
+                {
+                    demoTimer.Stop();
+                    MarkBoostReady();
+                };
+                demoTimer.Start();
+                return true;
+            }
+
+            try
+            {
+                string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+                string scriptPath = System.IO.Path.Combine(baseDirectory, "Boost-Session.ps1");
+                if (!File.Exists(scriptPath))
+                {
+                    throw new FileNotFoundException("Boost-Session.ps1 не найден рядом с приложением.", scriptPath);
+                }
+
+                readinessSignalPath = System.IO.Path.Combine(
+                    System.IO.Path.GetTempPath(),
+                    "Boostix-ready-" + Process.GetCurrentProcess().Id + ".flag");
+                if (File.Exists(readinessSignalPath))
+                {
+                    File.Delete(readinessSignalPath);
+                }
+
+                string powershell = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.System),
+                    "WindowsPowerShell\\v1.0\\powershell.exe");
+                var scriptArguments = new StringBuilder();
+                scriptArguments.Append("-NoProfile -ExecutionPolicy Bypass -File \"");
+                scriptArguments.Append(scriptPath);
+                scriptArguments.Append("\"");
+                if (keepDiscordToggle == null || keepDiscordToggle.IsChecked != true)
+                {
+                    scriptArguments.Append(" -CloseDiscord");
+                }
+                if (keepEpicToggle == null || keepEpicToggle.IsChecked != true)
+                {
+                    scriptArguments.Append(" -CloseEpic");
+                }
+                if (keepSteamToggle == null || keepSteamToggle.IsChecked != true)
+                {
+                    scriptArguments.Append(" -CloseSteam");
+                }
+                if (!centerSettings.KeepOneDrive)
+                {
+                    scriptArguments.Append(" -CloseOneDrive");
+                }
+                if (!centerSettings.KeepTeams)
+                {
+                    scriptArguments.Append(" -CloseTeams");
+                }
+                if (!centerSettings.KeepWallpaper)
+                {
+                    scriptArguments.Append(" -CloseWallpaper");
+                }
+                if (!centerSettings.KeepNvidiaOverlay)
+                {
+                    scriptArguments.Append(" -CloseNvidiaOverlay");
+                }
+                if (currentSession != null)
+                {
+                    string resultPath = System.IO.Path.Combine(
+                        BoostSessionReportStore.StateDirectory,
+                        "Boost-Session-" + currentSession.SessionId + ".result");
+                    scriptArguments.Append(" -ResultPath \"");
+                    scriptArguments.Append(resultPath);
+                    scriptArguments.Append("\"");
+                }
+                scriptArguments.Append(" -ReadySignalPath \"");
+                scriptArguments.Append(readinessSignalPath);
+                scriptArguments.Append("\"");
+
+                var startInfo = new ProcessStartInfo();
+                startInfo.FileName = powershell;
+                startInfo.Arguments = scriptArguments.ToString();
+                startInfo.WorkingDirectory = baseDirectory;
+                startInfo.UseShellExecute = false;
+                startInfo.CreateNoWindow = true;
+                startInfo.WindowStyle = ProcessWindowStyle.Hidden;
+                StopBoostProcess();
+                boostProcess = Process.Start(startInfo);
+
+                readinessDeadline = DateTime.Now.AddSeconds(20);
+                readinessTimer = new DispatcherTimer();
+                readinessTimer.Interval = TimeSpan.FromMilliseconds(120);
+                readinessTimer.Tick += ReadinessTimerTick;
+                readinessTimer.Start();
+                return true;
+            }
+            catch
+            {
+                StopBoostProcess();
+                return false;
+            }
+        }
+
+        private void ReadinessTimerTick(object sender, EventArgs e)
+        {
+            if (!string.IsNullOrEmpty(readinessSignalPath) && File.Exists(readinessSignalPath))
+            {
+                readinessTimer.Stop();
+                TryDeleteReadinessSignal();
+                MarkBoostReady();
+                return;
+            }
+
+            bool processFailed = false;
+            try
+            {
+                processFailed = boostProcess != null && boostProcess.HasExited && boostProcess.ExitCode != 0;
+            }
+            catch (InvalidOperationException) { }
+            if (processFailed || DateTime.Now >= readinessDeadline)
+            {
+                readinessTimer.Stop();
+                HandleBoostFailure("BOOST НЕ ЗАПУЩЕН");
+            }
+        }
+
+        private void PlayDeparture()
+        {
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                departureFinished = true;
+                if (boostReady)
+                {
+                    PlayReturn();
+                }
+                return;
+            }
+
+            var duration = TimeSpan.FromMilliseconds(620);
+            var x = MakeEaseAnimation(0, 152, duration, EasingMode.EaseIn);
+            var y = MakeEaseAnimation(0, -108, duration, EasingMode.EaseIn);
+            var opacity = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(560));
+            opacity.BeginTime = TimeSpan.FromMilliseconds(60);
+            opacity.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn };
+            x.Completed += delegate
+            {
+                departureFinished = true;
+                if (boostReady)
+                {
+                    PlayReturn();
+                }
+            };
+            flightTranslation.BeginAnimation(TranslateTransform.XProperty, x);
+            flightTranslation.BeginAnimation(TranslateTransform.YProperty, y);
+            rocket.BeginAnimation(UIElement.OpacityProperty, opacity);
+        }
+
+        private void MarkBoostReady()
+        {
+            if (boostReady || boostActive)
+            {
+                return;
+            }
+            boostReady = true;
+            if (currentSession != null)
+            {
+                currentSession.Status = "Active";
+                currentSession.AddAction(
+                    "ОДНОРАЗОВАЯ ПОДГОТОВКА",
+                    "Фоновые приложения обработаны один раз по выбранным переключателям.",
+                    BoostActionOutcome.Changed);
+                ImportBoostScriptResult(currentSession);
+                SaveCurrentSession();
+            }
+            StartStarfield();
+            caption.Text = "BOOST АКТИВЕН";
+            caption.Foreground = BrushFrom(ProductBrand.AccentTextHex);
+            if (departureFinished)
+            {
+                PlayReturn();
+            }
+        }
+
+        private void PlayReturn()
+        {
+            flightTranslation.BeginAnimation(TranslateTransform.XProperty, null);
+            flightTranslation.BeginAnimation(TranslateTransform.YProperty, null);
+            rocket.BeginAnimation(UIElement.OpacityProperty, null);
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                CompleteBoostActivation();
+                return;
+            }
+
+            flightTranslation.X = -152;
+            flightTranslation.Y = 104;
+            rocket.Opacity = 0;
+
+            var duration = TimeSpan.FromMilliseconds(760);
+            var x = MakeEaseAnimation(-152, 0, duration, EasingMode.EaseOut);
+            var y = MakeEaseAnimation(104, 0, duration, EasingMode.EaseOut);
+            var opacity = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(470));
+            opacity.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+            x.Completed += delegate { CompleteBoostActivation(); };
+            flightTranslation.BeginAnimation(TranslateTransform.XProperty, x);
+            flightTranslation.BeginAnimation(TranslateTransform.YProperty, y);
+            rocket.BeginAnimation(UIElement.OpacityProperty, opacity);
+        }
+
+        private void CompleteBoostActivation()
+        {
+            flightTranslation.BeginAnimation(TranslateTransform.XProperty, null);
+            flightTranslation.BeginAnimation(TranslateTransform.YProperty, null);
+            rocket.BeginAnimation(UIElement.OpacityProperty, null);
+            flightTranslation.X = 0;
+            flightTranslation.Y = 0;
+            rocket.Opacity = 1;
+            SetRocketScaleImmediately(boostButton.IsMouseOver ? 1.08 : 1);
+            boostActive = true;
+            animationRunning = false;
+            boostButton.IsEnabled = true;
+            SetBoostAutomationState(true);
+            StartActiveBoostMaintenance();
+            StartRocketFloat();
+        }
+
+        private void HandleBoostFailure(string message)
+        {
+            if (readinessTimer != null)
+            {
+                readinessTimer.Stop();
+            }
+            TryDeleteReadinessSignal();
+            StopActiveBoostMaintenance();
+            StopBoostProcess();
+            boostReady = false;
+            departureFinished = false;
+            flightTranslation.BeginAnimation(TranslateTransform.XProperty, null);
+            flightTranslation.BeginAnimation(TranslateTransform.YProperty, null);
+            rocket.BeginAnimation(UIElement.OpacityProperty, null);
+            flightTranslation.X = 0;
+            flightTranslation.Y = 0;
+            rocket.Opacity = 1;
+            flameLayer.Opacity = 0;
+            AnimateRocketColor(false, 180);
+            AnimateRocketScale(1, 160);
+            caption.Text = message;
+            caption.Foreground = BrushFrom("#FFFF667A");
+            animationRunning = false;
+            boostButton.IsEnabled = true;
+            ImportBoostScriptResult(currentSession);
+            CompleteCurrentSession("Failed", message);
+        }
+
+        private void StartBoostDeactivation(
+            string sessionStatus = "Completed",
+            string sessionReason = "Boost остановлен пользователем.")
+        {
+            deactivationSessionStatus = string.IsNullOrWhiteSpace(sessionStatus)
+                ? "Completed"
+                : sessionStatus;
+            deactivationSessionReason = sessionReason ?? string.Empty;
+            animationRunning = true;
+            boostButton.IsEnabled = false;
+            boostActive = false;
+            StopActiveBoostMaintenance();
+            StopBoostProcess();
+            StopRocketFloat();
+            caption.Text = "ОТКЛЮЧАЮ BOOST...";
+            caption.Foreground = BrushFrom(ProductBrand.AccentTextHex);
+            flameLayer.Opacity = 1;
+            AnimateRocketColor(true, 100);
+            AnimateRocketScale(1.08, 100);
+
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                PlayDeactivationReturn();
+                return;
+            }
+
+            var duration = TimeSpan.FromMilliseconds(620);
+            var x = MakeEaseAnimation(0, 152, duration, EasingMode.EaseIn);
+            var y = MakeEaseAnimation(0, -108, duration, EasingMode.EaseIn);
+            var opacity = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(560));
+            opacity.BeginTime = TimeSpan.FromMilliseconds(60);
+            opacity.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn };
+            x.Completed += delegate { PlayDeactivationReturn(); };
+            flightTranslation.BeginAnimation(TranslateTransform.XProperty, x);
+            flightTranslation.BeginAnimation(TranslateTransform.YProperty, y);
+            rocket.BeginAnimation(UIElement.OpacityProperty, opacity);
+        }
+
+        private void PlayDeactivationReturn()
+        {
+            flightTranslation.BeginAnimation(TranslateTransform.XProperty, null);
+            flightTranslation.BeginAnimation(TranslateTransform.YProperty, null);
+            rocket.BeginAnimation(UIElement.OpacityProperty, null);
+            flightTranslation.X = -152;
+            flightTranslation.Y = 104;
+            rocket.Opacity = 0;
+            flameLayer.Opacity = 0;
+            SetRocketColorImmediately(false);
+            StopStarfield();
+
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                CompleteBoostDeactivation();
+                return;
+            }
+
+            var duration = TimeSpan.FromMilliseconds(760);
+            var x = MakeEaseAnimation(-152, 0, duration, EasingMode.EaseOut);
+            var y = MakeEaseAnimation(104, 0, duration, EasingMode.EaseOut);
+            var opacity = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(470));
+            opacity.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+            x.Completed += delegate { CompleteBoostDeactivation(); };
+            flightTranslation.BeginAnimation(TranslateTransform.XProperty, x);
+            flightTranslation.BeginAnimation(TranslateTransform.YProperty, y);
+            rocket.BeginAnimation(UIElement.OpacityProperty, opacity);
+        }
+
+        private void CompleteBoostDeactivation()
+        {
+            flightTranslation.BeginAnimation(TranslateTransform.XProperty, null);
+            flightTranslation.BeginAnimation(TranslateTransform.YProperty, null);
+            rocket.BeginAnimation(UIElement.OpacityProperty, null);
+            flightTranslation.X = 0;
+            flightTranslation.Y = 0;
+            rocket.Opacity = 1;
+            boostActive = false;
+            boostReady = false;
+            departureFinished = false;
+            animationRunning = false;
+            boostButton.IsEnabled = true;
+            caption.Text = "НАЖМИ, ЧТОБЫ АКТИВИРОВАТЬ";
+            caption.Foreground = BrushFrom("#FF8E8E8E");
+            SetBoostAutomationState(false);
+            bool showCrashReport = string.Equals(
+                deactivationSessionStatus,
+                "TargetCrashed",
+                StringComparison.OrdinalIgnoreCase);
+            CompleteCurrentSession(
+                deactivationSessionStatus,
+                deactivationSessionReason);
+            deactivationSessionStatus = "Completed";
+            deactivationSessionReason = "Boost остановлен пользователем.";
+            preflightAccepted = false;
+
+            bool isHovered = boostButton.IsMouseOver;
+            SetRocketScaleImmediately(isHovered ? 1.08 : 1);
+            AnimateRocketColor(isHovered, 180);
+            if (showCrashReport && boostCenterOverlay != null)
+            {
+                boostCenterOverlay.SetSessionReport(lastSession);
+                boostCenterOverlay.SetDiagnosticSnapshot(
+                    latestDiagnosticSnapshot);
+                boostCenterOverlay.SetSessionHistory(sessionHistory);
+                boostCenterOverlay.OpenReport();
+            }
+        }
+
+        private void StartStarfield()
+        {
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                starField.BeginAnimation(UIElement.OpacityProperty, null);
+                starField.Opacity = 0;
+                return;
+            }
+            if (starField.Opacity > 0.5)
+            {
+                return;
+            }
+            var appear = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(320));
+            starField.BeginAnimation(UIElement.OpacityProperty, appear);
+
+            for (int index = 0; index < stars.Count; index++)
+            {
+                var transforms = (TransformGroup)stars[index].RenderTransform;
+                var translation = (TranslateTransform)transforms.Children[1];
+                double durationMs = 1050 + (index % 6) * 180;
+                var x = new DoubleAnimation(66, -112, TimeSpan.FromMilliseconds(durationMs));
+                var y = new DoubleAnimation(-44, 74, TimeSpan.FromMilliseconds(durationMs));
+                x.BeginTime = TimeSpan.FromMilliseconds((index % 9) * 115);
+                y.BeginTime = x.BeginTime;
+                x.RepeatBehavior = RepeatBehavior.Forever;
+                y.RepeatBehavior = RepeatBehavior.Forever;
+                translation.BeginAnimation(TranslateTransform.XProperty, x);
+                translation.BeginAnimation(TranslateTransform.YProperty, y);
+            }
+        }
+
+        private void StopStarfield()
+        {
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                ResetStarfield();
+                return;
+            }
+            var disappear = new DoubleAnimation(0, TimeSpan.FromMilliseconds(220));
+            disappear.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+            disappear.Completed += delegate
+            {
+                ResetStarfield();
+            };
+            starField.BeginAnimation(UIElement.OpacityProperty, disappear);
+        }
+
+        private void ResetStarfield()
+        {
+            starField.BeginAnimation(UIElement.OpacityProperty, null);
+            starField.Opacity = 0;
+            foreach (FrameworkElement star in stars)
+            {
+                var transforms = (TransformGroup)star.RenderTransform;
+                var translation = (TranslateTransform)transforms.Children[1];
+                translation.BeginAnimation(TranslateTransform.XProperty, null);
+                translation.BeginAnimation(TranslateTransform.YProperty, null);
+                translation.X = 0;
+                translation.Y = 0;
+            }
+        }
+
+        private void StartRocketFloat()
+        {
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                StopRocketFloat();
+                return;
+            }
+            var y = new DoubleAnimation(-3.5, 3.5, TimeSpan.FromMilliseconds(1250));
+            y.AutoReverse = true;
+            y.RepeatBehavior = RepeatBehavior.Forever;
+            y.EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut };
+            var x = new DoubleAnimation(-1.6, 1.6, TimeSpan.FromMilliseconds(1650));
+            x.AutoReverse = true;
+            x.RepeatBehavior = RepeatBehavior.Forever;
+            x.EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut };
+            floatTranslation.BeginAnimation(TranslateTransform.YProperty, y);
+            floatTranslation.BeginAnimation(TranslateTransform.XProperty, x);
+        }
+
+        private void StopRocketFloat()
+        {
+            floatTranslation.BeginAnimation(TranslateTransform.XProperty, null);
+            floatTranslation.BeginAnimation(TranslateTransform.YProperty, null);
+            floatTranslation.X = 0;
+            floatTranslation.Y = 0;
+        }
+
+        private void SetRocketColorImmediately(bool colorized)
+        {
+            colorRocketLayer.BeginAnimation(UIElement.OpacityProperty, null);
+            grayRocketLayer.BeginAnimation(UIElement.OpacityProperty, null);
+            colorRocketLayer.Opacity = colorized ? 1 : 0;
+            grayRocketLayer.Opacity = colorized ? 0 : 1;
+        }
+
+        private void SetRocketScaleImmediately(double scale)
+        {
+            rocketScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            rocketScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            rocketScale.ScaleX = scale;
+            rocketScale.ScaleY = scale;
+        }
+
+        private void StartActiveBoostMaintenance()
+        {
+            int generation = AdvanceActiveMaintenanceGeneration();
+            lock (activeMaintenanceSync)
+            {
+                if (IsActiveMaintenanceGeneration(generation))
+                {
+                    // Capture the first pressure sample immediately. A relief action
+                    // still requires a second critical sample one minute later.
+                    nextMemoryMaintenanceTimestamp = Stopwatch.GetTimestamp();
+                }
+            }
+            if (activeBoostTimer == null)
+            {
+                activeBoostTimer = new DispatcherTimer();
+                activeBoostTimer.Interval = TimeSpan.FromSeconds(5);
+                activeBoostTimer.Tick += delegate { QueueActiveBoostMaintenance(); };
+            }
+            activeBoostTimer.Start();
+            QueueActiveBoostMaintenance();
+        }
+
+        private void RefreshActiveBoostMaintenance()
+        {
+            AdvanceActiveMaintenanceGeneration();
+            QueueActiveBoostMaintenance();
+        }
+
+        private void StopActiveBoostMaintenance()
+        {
+            if (activeBoostTimer != null)
+            {
+                activeBoostTimer.Stop();
+            }
+            lock (activeMaintenanceSync)
+            {
+                Interlocked.Increment(ref activeMaintenanceGeneration);
+                nextMemoryMaintenanceTimestamp = 0;
+                TryDeleteActiveBoostDemoSignal();
+            }
+            RestoreOwnedTargetPriorities();
+        }
+
+        private void QueueActiveBoostMaintenance()
+        {
+            if (!boostActive || animationRunning)
+            {
+                return;
+            }
+            if (Interlocked.CompareExchange(ref activeMaintenancePending, 1, 0) != 0)
+            {
+                return;
+            }
+
+            int generation = ReadActiveMaintenanceGeneration();
+            Task.Run(delegate
+            {
+                try
+                {
+                    RunActiveBoostMaintenance(generation);
+                }
+                catch (Exception ex)
+                {
+                    AppendActiveBoostLog("Active maintenance error: " + ex.Message);
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref activeMaintenancePending, 0);
+                    if (generation != ReadActiveMaintenanceGeneration())
+                    {
+                        try
+                        {
+                            Dispatcher.BeginInvoke(new Action(delegate
+                            {
+                                if (boostActive && !animationRunning)
+                                {
+                                    QueueActiveBoostMaintenance();
+                                }
+                            }));
+                        }
+                        catch (InvalidOperationException) { }
+                        catch (TaskCanceledException) { }
+                    }
+                }
+            });
+        }
+
+        private void RunActiveBoostMaintenance(int generation)
+        {
+            if (!IsActiveMaintenanceGeneration(generation))
+            {
+                return;
+            }
+
+            if (demoMode)
+            {
+                lock (activeMaintenanceSync)
+                {
+                    if (IsActiveMaintenanceGeneration(generation))
+                    {
+                        File.WriteAllText(
+                            GetActiveBoostDemoSignalPath(),
+                            DateTime.UtcNow.ToString("o"),
+                            new UTF8Encoding(false));
+                    }
+                }
+                return;
+            }
+
+            RunActiveMemoryMaintenance(generation);
+
+            Process target = TryGetForegroundTargetProcess();
+            if (target == null)
+            {
+                return;
+            }
+
+            try
+            {
+                int processId = target.Id;
+                DateTime startTimeUtc = target.StartTime.ToUniversalTime();
+                string actualName = target.ProcessName;
+                target.Refresh();
+                UpdateTargetMemoryTelemetry(
+                    actualName,
+                    Math.Max(0, target.WorkingSet64),
+                    Math.Max(0, target.PrivateMemorySize64));
+                ProcessPriorityClass originalPriority = target.PriorityClass;
+                bool alreadyTracked;
+                lock (activeMaintenanceSync)
+                {
+                    if (!IsActiveMaintenanceGeneration(generation))
+                    {
+                        return;
+                    }
+                    TrackedTargetPriority existing;
+                    alreadyTracked =
+                        trackedTargetPriorities.TryGetValue(processId, out existing) &&
+                        existing.StartTimeUtc == startTimeUtc;
+                    if (!alreadyTracked)
+                    {
+                        trackedTargetPriorities[processId] = new TrackedTargetPriority
+                        {
+                            ProcessId = processId,
+                            StartTimeUtc = startTimeUtc,
+                            ProcessName = actualName,
+                            OriginalPriority = originalPriority,
+                            ChangedByBoost = false
+                        };
+                    }
+                }
+                if (alreadyTracked)
+                {
+                    return;
+                }
+
+                bool canRaise =
+                    originalPriority == ProcessPriorityClass.Normal ||
+                    originalPriority == ProcessPriorityClass.BelowNormal ||
+                    originalPriority == ProcessPriorityClass.Idle;
+                if (!canRaise)
+                {
+                    RecordSessionAction(
+                        actualName + " — ПРИОРИТЕТ",
+                        "Существующий приоритет " + originalPriority + " сохранён.",
+                        BoostActionOutcome.AlreadyOptimal);
+                    return;
+                }
+
+                bool priorityChanged = false;
+                lock (activeMaintenanceSync)
+                {
+                    if (!IsActiveMaintenanceGeneration(generation))
+                    {
+                        return;
+                    }
+                    TrackedTargetPriority tracked;
+                    if (trackedTargetPriorities.TryGetValue(processId, out tracked) &&
+                        tracked.StartTimeUtc == startTimeUtc)
+                    {
+                        ProcessPriorityClass currentPriority = target.PriorityClass;
+                        if (currentPriority == originalPriority &&
+                            (currentPriority == ProcessPriorityClass.Normal ||
+                             currentPriority == ProcessPriorityClass.BelowNormal ||
+                             currentPriority == ProcessPriorityClass.Idle))
+                        {
+                            target.PriorityClass = ProcessPriorityClass.AboveNormal;
+                            tracked.ChangedByBoost = true;
+                            priorityChanged = true;
+                        }
+                    }
+                }
+                if (!priorityChanged)
+                {
+                    RecordSessionAction(
+                        actualName + " — ПРИОРИТЕТ",
+                        "Внешнее изменение приоритета сохранено.",
+                        BoostActionOutcome.ExternalOverridePreserved);
+                    return;
+                }
+                AppendActiveBoostLog(
+                    "Set foreground target " + actualName + " (PID " +
+                    processId + ") priority to AboveNormal.");
+                RecordSessionAction(
+                    actualName + " — ПРИОРИТЕТ",
+                    "Приоритет " + originalPriority +
+                    " → AboveNormal. Исходное значение сохранено.",
+                    BoostActionOutcome.Changed);
+                if (currentSession != null)
+                {
+                    currentSession.TargetName = actualName;
+                }
+            }
+            catch (Exception ex)
+            {
+                RecordSessionAction(
+                    "ЦЕЛЕВОЕ ПРИЛОЖЕНИЕ — ПРИОРИТЕТ",
+                    "Не удалось изменить приоритет: " + ex.Message,
+                    BoostActionOutcome.Skipped);
+            }
+            finally
+            {
+                target.Dispose();
+            }
+        }
+
+        private static Process TryGetForegroundTargetProcess()
+        {
+            Process process = null;
+            try
+            {
+                IntPtr foreground = GetForegroundWindow();
+                if (foreground == IntPtr.Zero ||
+                    !IsLargeForegroundWindow(foreground))
+                {
+                    return null;
+                }
+
+                uint rawProcessId;
+                GetWindowThreadProcessId(foreground, out rawProcessId);
+                if (rawProcessId == 0 ||
+                    rawProcessId == (uint)Process.GetCurrentProcess().Id)
+                {
+                    return null;
+                }
+
+                process = Process.GetProcessById((int)rawProcessId);
+                string name = process.ProcessName ?? string.Empty;
+                string[] excluded =
+                {
+                    "Boostix",
+                    "MajesticBoost",
+                    "explorer",
+                    "dwm",
+                    "ShellExperienceHost",
+                    "StartMenuExperienceHost",
+                    "SearchHost",
+                    "SearchApp",
+                    "ApplicationFrameHost",
+                    "Taskmgr",
+                    "SystemSettings",
+                    "LockApp",
+                    "LogonUI",
+                    "winlogon",
+                    "csrss",
+                    "services",
+                    "lsass"
+                };
+                if (excluded.Any(item =>
+                        string.Equals(item, name, StringComparison.OrdinalIgnoreCase)) ||
+                    process.MainWindowHandle == IntPtr.Zero ||
+                    process.HasExited)
+                {
+                    process.Dispose();
+                    return null;
+                }
+                return process;
+            }
+            catch
+            {
+                if (process != null)
+                {
+                    process.Dispose();
+                }
+                return null;
+            }
+        }
+
+        private static bool IsLargeForegroundWindow(IntPtr window)
+        {
+            NativeRectangle rectangle;
+            IntPtr monitor = MonitorFromWindow(window, MonitorDefaultToNearest);
+            if (monitor == IntPtr.Zero ||
+                !GetWindowRect(window, out rectangle))
+            {
+                return false;
+            }
+
+            var information = new MonitorInformation
+            {
+                Size = Marshal.SizeOf(typeof(MonitorInformation))
+            };
+            if (!GetMonitorInfo(monitor, ref information))
+            {
+                return false;
+            }
+
+            long width = Math.Max(0, rectangle.Right - rectangle.Left);
+            long height = Math.Max(0, rectangle.Bottom - rectangle.Top);
+            long monitorWidth = Math.Max(
+                1,
+                information.Monitor.Right - information.Monitor.Left);
+            long monitorHeight = Math.Max(
+                1,
+                information.Monitor.Bottom - information.Monitor.Top);
+            return width * 100 >= monitorWidth * 65 &&
+                height * 100 >= monitorHeight * 65 &&
+                width * height * 100 >= monitorWidth * monitorHeight * 55;
+        }
+
+        private void RunActiveMemoryMaintenance(int generation)
+        {
+            long nowTimestamp = Stopwatch.GetTimestamp();
+            lock (activeMaintenanceSync)
+            {
+                if (!IsActiveMaintenanceGeneration(generation) ||
+                    !ActiveMemoryMaintenanceService.IsDue(
+                        nowTimestamp,
+                        nextMemoryMaintenanceTimestamp))
+                {
+                    return;
+                }
+
+                // Always schedule from "now": delayed ticks are skipped rather than replayed.
+                nextMemoryMaintenanceTimestamp =
+                    ActiveMemoryMaintenanceService.GetNextDueTimestamp(nowTimestamp);
+                if (Interlocked.CompareExchange(ref benchmarkCaptureActive, 0, 0) != 0)
+                {
+                    return;
+                }
+            }
+
+            if (!IsActiveMaintenanceGeneration(generation) ||
+                Interlocked.CompareExchange(ref benchmarkCaptureActive, 0, 0) != 0)
+            {
+                return;
+            }
+
+            ActiveMemoryMaintenanceResult result = ActiveMemoryMaintenanceService.Run();
+            DiagnosticSnapshot diagnostic = DiagnosticSnapshotProvider.Capture();
+            UpdateSessionMemoryTelemetry(result.Before);
+            UpdateSessionDiagnosticTelemetry(generation, diagnostic);
+            if (!result.Attempted)
+            {
+                return;
+            }
+
+            lock (activeMaintenanceSync)
+            {
+                if (!IsActiveMaintenanceGeneration(generation))
+                {
+                    return;
+                }
+                if (currentSession != null)
+                {
+                    currentSession.MemoryReliefAttempts++;
+                    if (result.Success)
+                    {
+                        currentSession.MemoryReliefSuccesses++;
+                        currentSession.MemoryReliefBytes +=
+                            Math.Max(0, result.ReclaimedWorkingSetBytes);
+                    }
+                }
+            }
+            if (result.Success)
+            {
+                Interlocked.Increment(ref activeMemoryMaintenanceCycles);
+                AppendActiveBoostLog(
+                    "Memory pressure relief affected the current app only: working set decreased by " +
+                    FormatBytesInvariant(result.ReclaimedWorkingSetBytes) +
+                    ", managed heap " +
+                    result.ManagedHeapBeforeBytes + " -> " +
+                    result.ManagedHeapAfterBytes + " bytes.");
+                RecordSessionAction(
+                    "ЗАЩИТА ПАМЯТИ",
+                    "Working set приложения уменьшился на " +
+                    FormatMemoryCompact(result.ReclaimedWorkingSetBytes) +
+                    ". Другие процессы и системный кэш Windows не затрагивались.",
+                    BoostActionOutcome.Changed);
+            }
+            else
+            {
+                AppendActiveBoostLog(
+                    "Memory pressure relief did not reclaim measurable memory: status=" +
+                    result.Status + ", win32=" + result.NativeErrorCode +
+                    ", reason=" + result.Reason);
+            }
+        }
+
+        private void UpdateSessionMemoryTelemetry(MemoryPressureSnapshot snapshot)
+        {
+            if (snapshot == null || !snapshot.MetricsAvailable)
+            {
+                return;
+            }
+            lock (activeMaintenanceSync)
+            {
+                if (currentSession == null)
+                {
+                    return;
+                }
+                currentSession.MemorySamples++;
+                currentSession.MinimumAvailableMemoryBytes = MinimumPositive(
+                    currentSession.MinimumAvailableMemoryBytes,
+                    snapshot.AvailablePhysicalBytes);
+                currentSession.MinimumCommitHeadroomBytes = MinimumPositive(
+                    currentSession.MinimumCommitHeadroomBytes,
+                    snapshot.CommitHeadroomBytes);
+            }
+        }
+
+        private void UpdateSessionDiagnosticTelemetry(
+            int generation,
+            DiagnosticSnapshot snapshot)
+        {
+            if (snapshot == null || !IsActiveMaintenanceGeneration(generation))
+            {
+                return;
+            }
+
+            lock (activeMaintenanceSync)
+            {
+                if (!IsActiveMaintenanceGeneration(generation))
+                {
+                    return;
+                }
+                latestDiagnosticSnapshot = snapshot;
+                if (currentSession != null)
+                {
+                    currentSession.ApplyDiagnosticSnapshot(snapshot);
+                }
+            }
+
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    if (boostCenterOverlay != null)
+                    {
+                        boostCenterOverlay.SetDiagnosticSnapshot(snapshot);
+                    }
+                }));
+            }
+            catch (InvalidOperationException) { }
+            catch (TaskCanceledException) { }
+        }
+
+        private void UpdateTargetMemoryTelemetry(
+            string processName,
+            long workingSetBytes,
+            long privateBytes)
+        {
+            lock (activeMaintenanceSync)
+            {
+                if (currentSession == null)
+                {
+                    return;
+                }
+                currentSession.TargetName = processName ?? currentSession.TargetName;
+                currentSession.PeakTargetWorkingSetBytes = Math.Max(
+                    currentSession.PeakTargetWorkingSetBytes,
+                    workingSetBytes);
+                currentSession.PeakTargetPrivateBytes = Math.Max(
+                    currentSession.PeakTargetPrivateBytes,
+                    privateBytes);
+            }
+        }
+
+        private static long MinimumPositive(long current, long candidate)
+        {
+            if (candidate <= 0)
+            {
+                return current;
+            }
+            return current <= 0 ? candidate : Math.Min(current, candidate);
+        }
+
+        private static string FormatBytesInvariant(long bytes)
+        {
+            return Math.Max(0, bytes).ToString(
+                System.Globalization.CultureInfo.InvariantCulture) + " bytes";
+        }
+
+        private static string FormatMemoryCompact(long bytes)
+        {
+            if (bytes <= 0)
+            {
+                return "0 МБ";
+            }
+            return (bytes / 1048576d).ToString(
+                "0.0",
+                System.Globalization.CultureInfo.CurrentCulture) + " МБ";
+        }
+
+        private void RestoreOwnedTargetPriorities()
+        {
+            List<TrackedTargetPriority> tracked;
+            lock (activeMaintenanceSync)
+            {
+                tracked = trackedTargetPriorities.Values.ToList();
+                trackedTargetPriorities.Clear();
+            }
+
+            foreach (TrackedTargetPriority item in tracked)
+            {
+                if (!item.ChangedByBoost)
+                {
+                    continue;
+                }
+                Process process = null;
+                try
+                {
+                    process = Process.GetProcessById(item.ProcessId);
+                    if (process.StartTime.ToUniversalTime() != item.StartTimeUtc)
+                    {
+                        continue;
+                    }
+                    ProcessPriorityClass current = process.PriorityClass;
+                    if (current != ProcessPriorityClass.AboveNormal)
+                    {
+                        RecordSessionAction(
+                            item.ProcessName + " — ПРИОРИТЕТ",
+                            "Внешнее изменение " + current + " сохранено; Boost его не перезаписал.",
+                            BoostActionOutcome.ExternalOverridePreserved);
+                        continue;
+                    }
+                    process.PriorityClass = item.OriginalPriority;
+                    RecordSessionAction(
+                        item.ProcessName + " — ПРИОРИТЕТ",
+                        "Восстановлен исходный приоритет " + item.OriginalPriority + ".",
+                        BoostActionOutcome.Restored);
+                }
+                catch
+                {
+                    // The target may already be closed; there is nothing left to restore.
+                }
+                finally
+                {
+                    if (process != null)
+                    {
+                        process.Dispose();
+                    }
+                }
+            }
+        }
+
+        private int ReadActiveMaintenanceGeneration()
+        {
+            return Interlocked.CompareExchange(ref activeMaintenanceGeneration, 0, 0);
+        }
+
+        private int AdvanceActiveMaintenanceGeneration()
+        {
+            lock (activeMaintenanceSync)
+            {
+                return Interlocked.Increment(ref activeMaintenanceGeneration);
+            }
+        }
+
+        private bool IsActiveMaintenanceGeneration(int generation)
+        {
+            return generation == ReadActiveMaintenanceGeneration();
+        }
+
+        private static void AppendActiveBoostLog(string message)
+        {
+            try
+            {
+                string directory = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    ProductBrand.DataDirectoryName);
+                Directory.CreateDirectory(directory);
+                File.AppendAllText(
+                    System.IO.Path.Combine(directory, "Boost-Session.last.log"),
+                    "[" + DateTime.Now.ToString("o") + "] " + message + Environment.NewLine,
+                    new UTF8Encoding(false));
+            }
+            catch { }
+        }
+
+        private static string GetActiveBoostDemoSignalPath()
+        {
+            return System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(),
+                "Boostix-demo-monitor-" + Process.GetCurrentProcess().Id + ".flag");
+        }
+
+        private static void TryDeleteActiveBoostDemoSignal()
+        {
+            try
+            {
+                string path = GetActiveBoostDemoSignalPath();
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch { }
+        }
+
+        private void BeginSession(string trigger)
+        {
+            if (currentSession != null)
+            {
+                CompleteCurrentSession("Interrupted", "Начата новая сессия Boost.");
+            }
+            Interlocked.Exchange(ref activeMemoryMaintenanceCycles, 0);
+            ActiveMemoryMaintenanceService.ResetPolicyState();
+            currentSession = BoostSessionReport.Start(trigger);
+            currentSession.AddAction(
+                "ПАМЯТЬ ДО ЗАПУСКА",
+                FormatMemory(currentSession.AvailableMemoryStartBytes) +
+                " доступно; сюда уже входит освобождаемый кэш Windows.",
+                BoostActionOutcome.AlreadyOptimal);
+            if (keepDiscordToggle != null && keepDiscordToggle.IsChecked == true)
+            {
+                currentSession.AddAction(
+                    "DISCORD",
+                    "Сохранён по вашему выбору.",
+                    BoostActionOutcome.Preserved);
+            }
+            if (keepEpicToggle != null && keepEpicToggle.IsChecked == true)
+            {
+                currentSession.AddAction(
+                    "EPIC GAMES",
+                    "Сохранён по вашему выбору.",
+                    BoostActionOutcome.Preserved);
+            }
+            if (keepSteamToggle != null && keepSteamToggle.IsChecked == true)
+            {
+                currentSession.AddAction(
+                    "STEAM",
+                    "Сохранён по вашему выбору.",
+                    BoostActionOutcome.Preserved);
+            }
+            SaveCurrentSession();
+            RefreshSessionHistory();
+        }
+
+        private void RecordSessionAction(
+            string title,
+            string detail,
+            BoostActionOutcome outcome)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                try
+                {
+                    Dispatcher.BeginInvoke(new Action(delegate
+                    {
+                        RecordSessionAction(title, detail, outcome);
+                    }));
+                }
+                catch { }
+                return;
+            }
+            if (currentSession == null)
+            {
+                return;
+            }
+            currentSession.AddAction(title, detail, outcome);
+            SaveCurrentSession();
+        }
+
+        private void ImportBoostScriptResult(BoostSessionReport report)
+        {
+            if (report == null || demoMode)
+            {
+                return;
+            }
+            string path = System.IO.Path.Combine(
+                BoostSessionReportStore.StateDirectory,
+                "Boost-Session-" + report.SessionId + ".result");
+            try
+            {
+                if (!File.Exists(path) || new FileInfo(path).Length > 256 * 1024)
+                {
+                    return;
+                }
+                int stopped = 0;
+                foreach (string line in File.ReadAllLines(path, Encoding.UTF8))
+                {
+                    int separator = line.IndexOf('=');
+                    if (separator <= 0)
+                    {
+                        continue;
+                    }
+                    string key = line.Substring(0, separator).Trim();
+                    string value = line.Substring(separator + 1).Trim();
+                    if (IsIndexedResultKey(key, "Process"))
+                    {
+                        string[] parts = value.Split('|');
+                        string processName = parts.Length > 0 ? parts[0] : value;
+                        report.AddAction(
+                            processName.ToUpperInvariant(),
+                            "Закрыт во время одноразовой подготовки.",
+                            BoostActionOutcome.Changed);
+                        stopped++;
+                    }
+                    else if (IsIndexedResultKey(key, "Warning"))
+                    {
+                        report.AddAction(
+                            "ПРЕДУПРЕЖДЕНИЕ ПОДГОТОВКИ",
+                            value,
+                            BoostActionOutcome.Failed);
+                    }
+                }
+                if (stopped == 0)
+                {
+                    report.AddAction(
+                        "ФОНОВЫЕ ПРОЦЕССЫ",
+                        "Выбранные процессы уже не были запущены.",
+                        BoostActionOutcome.AlreadyOptimal);
+                }
+            }
+            catch (Exception ex)
+            {
+                report.AddAction(
+                    "ОТЧЁТ ПОДГОТОВКИ",
+                    "Не удалось прочитать подробности: " + ex.Message,
+                    BoostActionOutcome.Skipped);
+            }
+            finally
+            {
+                try { if (File.Exists(path)) File.Delete(path); }
+                catch { }
+            }
+        }
+
+        private static bool IsIndexedResultKey(string key, string prefix)
+        {
+            if (string.IsNullOrEmpty(key) ||
+                string.IsNullOrEmpty(prefix) ||
+                key.Length <= prefix.Length ||
+                !key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            for (int index = prefix.Length; index < key.Length; index++)
+            {
+                if (key[index] < '0' || key[index] > '9')
+                {
+                    return false;
+                }
+            }
+
+            return key[prefix.Length] != '0';
+        }
+
+        private void SaveCurrentSession()
+        {
+            if (currentSession == null)
+            {
+                return;
+            }
+            try
+            {
+                BoostSessionReportStore.Save(currentSession);
+                if (boostCenterOverlay != null)
+                {
+                    boostCenterOverlay.SetSessionReport(currentSession);
+                }
+            }
+            catch { }
+        }
+
+        private void RefreshSessionHistory()
+        {
+            try
+            {
+                sessionHistory = DiagnosticSessionHistory.LoadRecent(
+                    DiagnosticSessionHistory.MaximumSessionCount);
+            }
+            catch
+            {
+                sessionHistory = new List<BoostSessionReport>();
+            }
+
+            if (currentSession != null &&
+                !sessionHistory.Any(item =>
+                    string.Equals(
+                        item.SessionId,
+                        currentSession.SessionId,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                sessionHistory.Insert(0, currentSession);
+                if (sessionHistory.Count >
+                    DiagnosticSessionHistory.MaximumSessionCount)
+                {
+                    sessionHistory.RemoveAt(sessionHistory.Count - 1);
+                }
+            }
+            if (boostCenterOverlay != null)
+            {
+                boostCenterOverlay.SetSessionHistory(sessionHistory);
+            }
+        }
+
+        private void CompleteCurrentSession(string status, string reason)
+        {
+            if (currentSession == null)
+            {
+                return;
+            }
+            int memoryMaintenanceCycles =
+                Interlocked.CompareExchange(ref activeMemoryMaintenanceCycles, 0, 0);
+            currentSession.ManagedMemoryMaintenanceCycles = memoryMaintenanceCycles;
+            if (currentSession.MemoryReliefSuccesses > 0)
+            {
+                currentSession.AddAction(
+                    "ЗАЩИТА ПАМЯТИ",
+                    "Working set приложения суммарно уменьшился на " +
+                    FormatMemoryCompact(currentSession.MemoryReliefBytes) +
+                    " за " +
+                    currentSession.MemoryReliefSuccesses + " успешн. попыток из " +
+                    currentSession.MemoryReliefAttempts +
+                    ". Другие процессы и системный кэш Windows не затрагивались.",
+                    BoostActionOutcome.Changed);
+            }
+            else if (currentSession.MemoryReliefAttempts > 0)
+            {
+                currentSession.AddAction(
+                    "ЗАЩИТА ПАМЯТИ",
+                    "Критическое давление памяти было обнаружено, но приложение " +
+                    "не удерживало измеримого объёма, который можно было безопасно отдать Windows.",
+                    BoostActionOutcome.Skipped);
+            }
+            currentSession.Complete(status, reason);
+            currentSession.AddAction(
+                "ПАМЯТЬ ПОСЛЕ СЕССИИ",
+                FormatMemory(currentSession.AvailableMemoryEndBytes) +
+                " доступно. Минимум за сессию: " +
+                FormatMemory(currentSession.MinimumAvailableMemoryBytes) +
+                "; минимальный запас commit: " +
+                FormatMemory(currentSession.MinimumCommitHeadroomBytes) + ".",
+                BoostActionOutcome.AlreadyOptimal);
+            try { BoostSessionReportStore.Save(currentSession); }
+            catch { }
+            lastSession = currentSession;
+            currentSession = null;
+            RefreshSessionHistory();
+            if (boostCenterOverlay != null)
+            {
+                boostCenterOverlay.SetSessionReport(lastSession);
+            }
+        }
+
+        private static string FormatMemory(long bytes)
+        {
+            if (bytes <= 0)
+            {
+                return "данные недоступны";
+            }
+            return (bytes / 1073741824d).ToString("0.0") + " ГБ";
+        }
+
+        private async void BoostCenterExportDiagnosticsRequested(
+            object sender,
+            EventArgs e)
+        {
+            if (boostCenterOverlay == null)
+            {
+                return;
+            }
+
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Сохранить диагностику Boostix",
+                Filter = "Текстовый отчёт (*.txt)|*.txt",
+                DefaultExt = ".txt",
+                AddExtension = true,
+                OverwritePrompt = true,
+                FileName = ProductBrand.ProductFileName + "-Diagnostic-" +
+                    DateTime.Now.ToString(
+                        "yyyyMMdd-HHmmss",
+                        CultureInfo.InvariantCulture) + ".txt"
+            };
+            bool? accepted = dialog.ShowDialog(this);
+            if (accepted != true)
+            {
+                return;
+            }
+
+            boostCenterOverlay.SetDiagnosticExportMessage(
+                "СОБИРАЕМ ДИАГНОСТИКУ",
+                "Получаем показатели Windows и удаляем персональные пути и секреты.",
+                false);
+            try
+            {
+                DiagnosticSnapshot snapshot = await Task.Run(
+                    delegate { return DiagnosticSnapshotProvider.Capture(); });
+                List<BoostSessionReport> reports = await Task.Run(
+                    delegate
+                    {
+                        return DiagnosticSessionHistory.LoadRecent(
+                            DiagnosticSessionHistory.MaximumSessionCount);
+                    });
+                lock (activeMaintenanceSync)
+                {
+                    if (currentSession != null)
+                    {
+                        currentSession.ApplyDiagnosticSnapshot(snapshot);
+                    }
+                    reports = MergeExportSessionSnapshot(
+                        reports,
+                        sessionHistory,
+                        currentSession);
+                }
+                string destination = dialog.FileName;
+                await Task.Run(delegate
+                {
+                    DiagnosticExportBuilder.WriteSafeReport(
+                        destination,
+                        snapshot,
+                        reports,
+                        "ApplicationVersion=" + GetApplicationVersion());
+                });
+
+                latestDiagnosticSnapshot = snapshot;
+                sessionHistory = reports;
+                boostCenterOverlay.SetDiagnosticSnapshot(snapshot);
+                boostCenterOverlay.SetSessionHistory(reports);
+                boostCenterOverlay.SetDiagnosticExportMessage(
+                    "ОТЧЁТ СОХРАНЁН",
+                    "Файл " + System.IO.Path.GetFileName(destination) +
+                        " готов — персональные пути и секреты удалены.",
+                    false);
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Diagnostic export failed.", ex);
+                boostCenterOverlay.SetDiagnosticExportMessage(
+                    "НЕ УДАЛОСЬ СОХРАНИТЬ ОТЧЁТ",
+                    "Windows вернул ошибку " + ex.GetType().Name +
+                        ". Выберите другую доступную папку и повторите.",
+                    true);
+            }
+        }
+
+        private static List<BoostSessionReport> MergeExportSessionSnapshot(
+            IEnumerable<BoostSessionReport> storedReports,
+            IEnumerable<BoostSessionReport> inMemoryReports,
+            BoostSessionReport activeReport)
+        {
+            var merged = new Dictionary<string, BoostSessionReport>(
+                StringComparer.OrdinalIgnoreCase);
+            Action<IEnumerable<BoostSessionReport>> addReports = delegate(
+                IEnumerable<BoostSessionReport> source)
+            {
+                foreach (BoostSessionReport report in source ??
+                    Enumerable.Empty<BoostSessionReport>())
+                {
+                    if (report == null ||
+                        string.IsNullOrWhiteSpace(report.SessionId) ||
+                        merged.ContainsKey(report.SessionId))
+                    {
+                        continue;
+                    }
+                    merged.Add(report.SessionId, report.Clone());
+                }
+            };
+
+            if (activeReport != null &&
+                !string.IsNullOrWhiteSpace(activeReport.SessionId))
+            {
+                merged[activeReport.SessionId] = activeReport.Clone();
+            }
+            addReports(inMemoryReports);
+            addReports(storedReports);
+            return merged.Values
+                .OrderByDescending(delegate(BoostSessionReport report)
+                {
+                    return report.StartedUtc;
+                })
+                .Take(DiagnosticSessionHistory.MaximumSessionCount)
+                .ToList();
+        }
+
+        private async void BoostCenterBenchmarkRequested(
+            object sender,
+            BoostBenchmarkRequestEventArgs e)
+        {
+            if (benchmarkCancellation != null)
+            {
+                return;
+            }
+
+            benchmarkCancellation = new CancellationTokenSource();
+            var progress = new Progress<PerformanceCaptureProgress>(delegate(PerformanceCaptureProgress item)
+            {
+                if (boostCenterOverlay != null)
+                {
+                    boostCenterOverlay.SetBenchmarkProgress(
+                        "ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ",
+                        item == null ? "Подготовка измерения." : item.Message,
+                        item == null ? 0 : item.Percent);
+                }
+            });
+            Interlocked.Exchange(ref benchmarkCaptureActive, 1);
+
+            try
+            {
+                PerformanceCaptureAttemptResult result;
+                if (e != null && e.Elevate)
+                {
+                    result = await PerformanceCaptureService.RetryElevatedAsync(
+                        lastCaptureAttempt,
+                        progress,
+                        benchmarkCancellation.Token);
+                }
+                else
+                {
+                    result = await PerformanceCaptureService.CaptureRunningTargetAsync(
+                        progress,
+                        benchmarkCancellation.Token);
+                }
+
+                lastCaptureAttempt = result;
+                if (result != null &&
+                    result.Status == PerformanceCaptureStatus.Completed &&
+                    result.Performance != null)
+                {
+                    StorePerformanceResult(result.Performance);
+                    boostCenterOverlay.SetBenchmarkMessage(
+                        "ТЕСТ ЗАВЕРШЁН",
+                        string.Format(
+                            "Средний FPS {0:0.0}, 1% low {1:0.0}, P95 {2:0.0} мс, P99 {3:0.0} мс.",
+                            result.Performance.AverageFps,
+                            result.Performance.OnePercentLowFps,
+                            result.Performance.P95FrameTimeMs,
+                            result.Performance.P99FrameTimeMs),
+                        false);
+                }
+                else if (result != null && result.CanRetryElevated)
+                {
+                    boostCenterOverlay.SetBenchmarkNeedsElevation(result.Message);
+                }
+                else
+                {
+                    boostCenterOverlay.SetBenchmarkMessage(
+                        "ЗАМЕР НЕ ВЫПОЛНЕН",
+                        result == null ? "PresentMon не вернул результат." : result.Message,
+                        true);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                boostCenterOverlay.SetBenchmarkMessage(
+                    "ЗАМЕР ОТМЕНЁН",
+                    "Измерение производительности остановлено.",
+                    true);
+            }
+            catch (Exception ex)
+            {
+                boostCenterOverlay.SetBenchmarkMessage(
+                    "ЗАМЕР НЕ ВЫПОЛНЕН",
+                    ex.Message,
+                    true);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref benchmarkCaptureActive, 0);
+                benchmarkCancellation.Dispose();
+                benchmarkCancellation = null;
+            }
+        }
+
+        private void StorePerformanceResult(BoostPerformanceResult performance)
+        {
+            if (performance == null)
+            {
+                return;
+            }
+            if (currentSession != null)
+            {
+                currentSession.Performance = performance;
+                currentSession.AddAction(
+                    "ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ",
+                    performance.Frames + " кадров проанализировано.",
+                    BoostActionOutcome.Changed);
+                SaveCurrentSession();
+                return;
+            }
+
+            BoostSessionReport report = lastSession ?? BoostSessionReport.Start("Benchmark");
+            report.Performance = performance;
+            report.AddAction(
+                "ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ",
+                performance.Frames + " кадров проанализировано.",
+                BoostActionOutcome.Changed);
+            if (!report.EndedUtc.HasValue)
+            {
+                report.Complete("Completed", "Ручной тест производительности.");
+            }
+            BoostSessionReportStore.Save(report);
+            lastSession = report;
+            RefreshSessionHistory();
+            if (boostCenterOverlay != null)
+            {
+                boostCenterOverlay.SetSessionReport(lastSession);
+            }
+        }
+
+        private void SetBoostAutomationState(bool active)
+        {
+            AutomationProperties.SetName(
+                boostButton,
+                active ? "Отключить Boost производительности" : "Активировать Boost производительности");
+            AutomationProperties.SetHelpText(
+                boostButton,
+                active
+                    ? "Останавливает активный контроль фоновых процессов. Применённые системные изменения не откатываются."
+                    : "Подготавливает Windows к высокой нагрузке и поддерживает приоритет активного полноэкранного приложения.");
+        }
+
+        private void SetMainContentVisible(bool visible)
+        {
+            Visibility state = visible ? Visibility.Visible : Visibility.Hidden;
+            if (titleSection != null)
+            {
+                titleSection.Visibility = state;
+            }
+            if (boostButtonSection != null)
+            {
+                boostButtonSection.Visibility = state;
+            }
+            if (caption != null)
+            {
+                caption.Visibility = state;
+            }
+            if (preferenceSection != null)
+            {
+                preferenceSection.Visibility = state;
+            }
+        }
+
+        private void AnimateRocketColor(bool colorized, int milliseconds)
+        {
+            double colorTarget = colorized ? 1 : 0;
+            double grayTarget = colorized ? 0 : 1;
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                colorRocketLayer.BeginAnimation(UIElement.OpacityProperty, null);
+                grayRocketLayer.BeginAnimation(UIElement.OpacityProperty, null);
+                colorRocketLayer.Opacity = colorTarget;
+                grayRocketLayer.Opacity = grayTarget;
+                return;
+            }
+            var colorAnimation = new DoubleAnimation(colorTarget, TimeSpan.FromMilliseconds(milliseconds));
+            var grayAnimation = new DoubleAnimation(grayTarget, TimeSpan.FromMilliseconds(milliseconds));
+            colorAnimation.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+            grayAnimation.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+            colorRocketLayer.BeginAnimation(UIElement.OpacityProperty, colorAnimation);
+            grayRocketLayer.BeginAnimation(UIElement.OpacityProperty, grayAnimation);
+        }
+
+        private void AnimateRocketScale(double target, int milliseconds)
+        {
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                SetRocketScaleImmediately(target);
+                return;
+            }
+            var x = new DoubleAnimation(target, TimeSpan.FromMilliseconds(milliseconds));
+            var y = new DoubleAnimation(target, TimeSpan.FromMilliseconds(milliseconds));
+            x.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+            y.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+            rocketScale.BeginAnimation(ScaleTransform.ScaleXProperty, x);
+            rocketScale.BeginAnimation(ScaleTransform.ScaleYProperty, y);
+        }
+
+        private static DoubleAnimation MakeEaseAnimation(double from, double to, TimeSpan duration, EasingMode mode)
+        {
+            var animation = new DoubleAnimation(from, to, duration);
+            animation.EasingFunction = new CubicEase { EasingMode = mode };
+            return animation;
+        }
+
+        private void WindowKeyDown(object sender, KeyEventArgs e)
+        {
+            if (updateOverlay != null && updateOverlay.ConsumesApplicationInput)
+            {
+                if (e.Key == Key.Escape)
+                {
+                    updateOverlay.HandleEscape();
+                }
+                e.Handled = true;
+                return;
+            }
+
+            if (optimizationOverlay != null && optimizationOverlay.IsFlowVisible)
+            {
+                if (e.Key == Key.Escape)
+                {
+                    optimizationOverlay.HandleEscape();
+                }
+                e.Handled = true;
+                return;
+            }
+
+            if (boostCenterOverlay != null && boostCenterOverlay.ConsumesApplicationInput)
+            {
+                boostCenterOverlay.HandleKey(e);
+                return;
+            }
+
+            if (e.Key == Key.OemComma &&
+                (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+            {
+                preflightForBoost = false;
+                boostCenterOverlay.SetSettings(centerSettings);
+                boostCenterOverlay.SetPreflight(latestPreflight);
+                boostCenterOverlay.SetSessionReport(currentSession ?? lastSession);
+                boostCenterOverlay.SetDiagnosticSnapshot(
+                    latestDiagnosticSnapshot);
+                boostCenterOverlay.SetSessionHistory(sessionHistory);
+                boostCenterOverlay.OpenSettings();
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Key == Key.Escape)
+            {
+                Close();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Enter || e.Key == Key.Space)
+            {
+                if (Keyboard.FocusedElement is ButtonBase)
+                {
+                    return;
+                }
+                ToggleBoost();
+                e.Handled = true;
+            }
+        }
+
+        private void BoostWindowSourceInitialized(object sender, EventArgs e)
+        {
+            windowHandle = new WindowInteropHelper(this).Handle;
+            if (windowHandle == IntPtr.Zero)
+            {
+                return;
+            }
+
+            ApplyNativeWindowAppearance();
+            if (demoMode)
+            {
+                return;
+            }
+
+            windowSource = HwndSource.FromHwnd(windowHandle);
+            if (windowSource != null)
+            {
+                windowSource.AddHook(WindowMessageHook);
+            }
+            LocationChanged += BoostWindowLocationChanged;
+            ApplyMonitorWorkAreaBounds(true);
+        }
+
+        private void ApplyNativeWindowAppearance()
+        {
+            if (windowHandle == IntPtr.Zero)
+            {
+                return;
+            }
+
+            try
+            {
+                int cornerPreference = DwmRoundCornerPreference;
+                DwmSetWindowAttribute(
+                    windowHandle,
+                    DwmWindowCornerPreference,
+                    ref cornerPreference,
+                    Marshal.SizeOf(typeof(int)));
+
+                // COLORREF uses 0x00BBGGRR. #383838 is intentionally neutral
+                // and matches the one-pixel application border.
+                int borderColor = 0x00383838;
+                DwmSetWindowAttribute(
+                    windowHandle,
+                    DwmBorderColor,
+                    ref borderColor,
+                    Marshal.SizeOf(typeof(int)));
+            }
+            catch (DllNotFoundException)
+            {
+                // Older Windows versions keep the rectangular native fallback.
+            }
+            catch (EntryPointNotFoundException)
+            {
+                // DWM corner attributes are optional on older Windows versions.
+            }
+        }
+
+        private IntPtr WindowMessageHook(
+            IntPtr window,
+            int message,
+            IntPtr wordParameter,
+            IntPtr longParameter,
+            ref bool handled)
+        {
+            if (message == WmDpiChanged ||
+                message == WmDisplayChange ||
+                message == WmSettingChange ||
+                message == WmExitSizeMove)
+            {
+                QueueMonitorWorkAreaBounds();
+            }
+            return IntPtr.Zero;
+        }
+
+        private void BoostWindowLocationChanged(object sender, EventArgs e)
+        {
+            if (applyingMonitorBounds ||
+                Mouse.LeftButton == MouseButtonState.Pressed)
+            {
+                return;
+            }
+            QueueMonitorWorkAreaBounds();
+        }
+
+        private void QueueMonitorWorkAreaBounds()
+        {
+            if (demoMode ||
+                windowHandle == IntPtr.Zero ||
+                monitorBoundsQueued)
+            {
+                return;
+            }
+
+            monitorBoundsQueued = true;
+            Dispatcher.BeginInvoke(
+                DispatcherPriority.Loaded,
+                new Action(delegate
+                {
+                    monitorBoundsQueued = false;
+                    if (Mouse.LeftButton == MouseButtonState.Pressed)
+                    {
+                        return;
+                    }
+                    ApplyMonitorWorkAreaBounds(false);
+                }));
+        }
+
+        private void ApplyMonitorWorkAreaBounds(bool centerOnMonitor)
+        {
+            if (demoMode ||
+                applyingMonitorBounds ||
+                windowHandle == IntPtr.Zero)
+            {
+                return;
+            }
+
+            IntPtr monitor = MonitorFromWindow(
+                windowHandle,
+                MonitorDefaultToNearest);
+            if (monitor == IntPtr.Zero)
+            {
+                return;
+            }
+
+            var information = new MonitorInformation
+            {
+                Size = Marshal.SizeOf(typeof(MonitorInformation))
+            };
+            NativeRectangle current;
+            if (!GetMonitorInfo(monitor, ref information) ||
+                !GetWindowRect(windowHandle, out current))
+            {
+                return;
+            }
+
+            uint dpiX;
+            uint dpiY;
+            GetEffectiveWindowDpi(out dpiX, out dpiY);
+            int[] placement = CalculateMonitorPlacement(
+                information.Work.Left,
+                information.Work.Top,
+                information.Work.Right,
+                information.Work.Bottom,
+                dpiX,
+                dpiY,
+                current.Left,
+                current.Top,
+                centerOnMonitor);
+
+            applyingMonitorBounds = true;
+            try
+            {
+                double widthDip = placement[2] * 96.0 / dpiX;
+                double heightDip = placement[3] * 96.0 / dpiY;
+                MinWidth = 0;
+                MinHeight = 0;
+                MaxWidth = double.PositiveInfinity;
+                MaxHeight = double.PositiveInfinity;
+                Width = widthDip;
+                Height = heightDip;
+                MinWidth = widthDip;
+                MaxWidth = widthDip;
+                MinHeight = heightDip;
+                MaxHeight = heightDip;
+                SetWindowPos(
+                    windowHandle,
+                    IntPtr.Zero,
+                    placement[0],
+                    placement[1],
+                    placement[2],
+                    placement[3],
+                    SwpNoActivate | SwpNoZOrder);
+            }
+            finally
+            {
+                applyingMonitorBounds = false;
+            }
+        }
+
+        private void GetEffectiveWindowDpi(out uint dpiX, out uint dpiY)
+        {
+            uint dpi = 0;
+            try
+            {
+                dpi = GetDpiForWindow(windowHandle);
+            }
+            catch (EntryPointNotFoundException)
+            {
+                dpi = 0;
+            }
+
+            if (dpi >= 48 && dpi <= 768)
+            {
+                dpiX = dpi;
+                dpiY = dpi;
+                return;
+            }
+
+            PresentationSource source = PresentationSource.FromVisual(this);
+            if (source != null && source.CompositionTarget != null)
+            {
+                Matrix fromDevice = source.CompositionTarget.TransformFromDevice;
+                double x = Math.Abs(fromDevice.M11);
+                double y = Math.Abs(fromDevice.M22);
+                if (x > 0.001 && y > 0.001)
+                {
+                    dpiX = (uint)Math.Round(96.0 / x);
+                    dpiY = (uint)Math.Round(96.0 / y);
+                    return;
+                }
+            }
+
+            dpiX = 96;
+            dpiY = 96;
+        }
+
+        internal static int[] CalculateMonitorPlacement(
+            int workLeft,
+            int workTop,
+            int workRight,
+            int workBottom,
+            uint dpiX,
+            uint dpiY,
+            int currentLeft,
+            int currentTop,
+            bool centerOnMonitor)
+        {
+            if (dpiX < 48 || dpiX > 768)
+            {
+                dpiX = 96;
+            }
+            if (dpiY < 48 || dpiY > 768)
+            {
+                dpiY = 96;
+            }
+
+            long workWidth = Math.Max(1L, (long)workRight - workLeft);
+            long workHeight = Math.Max(1L, (long)workBottom - workTop);
+            int insetX = Math.Max(
+                0,
+                (int)Math.Round(WorkAreaSafetyInset * dpiX / 96.0));
+            int insetY = Math.Max(
+                0,
+                (int)Math.Round(WorkAreaSafetyInset * dpiY / 96.0));
+            long availableWidth = Math.Max(1L, workWidth - insetX * 2L);
+            long availableHeight = Math.Max(1L, workHeight - insetY * 2L);
+            double baseWidthPixels = BaseWindowWidth * dpiX / 96.0;
+            double baseHeightPixels = BaseWindowHeight * dpiY / 96.0;
+            double scale = Math.Min(
+                1.0,
+                Math.Min(
+                    availableWidth / baseWidthPixels,
+                    availableHeight / baseHeightPixels));
+            int width = Math.Max(
+                1,
+                (int)Math.Floor(baseWidthPixels * scale));
+            int height = Math.Max(
+                1,
+                (int)Math.Floor(baseHeightPixels * scale));
+
+            long minimumLeft = (long)workLeft + insetX;
+            long minimumTop = (long)workTop + insetY;
+            long maximumLeft = (long)workRight - insetX - width;
+            long maximumTop = (long)workBottom - insetY - height;
+            if (maximumLeft < minimumLeft)
+            {
+                minimumLeft = workLeft;
+                maximumLeft = (long)workRight - width;
+            }
+            if (maximumTop < minimumTop)
+            {
+                minimumTop = workTop;
+                maximumTop = (long)workBottom - height;
+            }
+
+            long left = centerOnMonitor
+                ? (long)workLeft + (workWidth - width) / 2L
+                : currentLeft;
+            long top = centerOnMonitor
+                ? (long)workTop + (workHeight - height) / 2L
+                : currentTop;
+            left = Math.Max(minimumLeft, Math.Min(maximumLeft, left));
+            top = Math.Max(minimumTop, Math.Min(maximumTop, top));
+            return new[]
+            {
+                ClampToInt32(left),
+                ClampToInt32(top),
+                width,
+                height
+            };
+        }
+
+        private static int ClampToInt32(long value)
+        {
+            if (value < int.MinValue)
+            {
+                return int.MinValue;
+            }
+            if (value > int.MaxValue)
+            {
+                return int.MaxValue;
+            }
+            return (int)value;
+        }
+
+        private async void BoostWindowLoaded(object sender, RoutedEventArgs e)
+        {
+            bool updateHealthProbe = HasLaunchArgument(
+                launchArguments,
+                UpdateHealthHandshake.ProbeArgument);
+            if (updateHealthProbe)
+            {
+                try
+                {
+                    await VerifyLocalStartupForUpdateAsync();
+                    UpdateHealthHandshake.CompleteReadyHandshakeIfRequested(
+                        launchArguments);
+                }
+                catch (Exception ex)
+                {
+                    CrashLog.Write(
+                        "Update health probe did not reach local application readiness.",
+                        ex);
+                }
+                Application.Current.Shutdown(0);
+                return;
+            }
+
+            bool canContinue = true;
+            bool updateDemo = HasLaunchArgument(
+                launchArguments,
+                "--demo-update");
+            if (!safeMode &&
+                (!demoMode || updateDemo) &&
+                updateOverlay != null)
+            {
+                canContinue = await updateOverlay.CheckForUpdatesAsync();
+            }
+            if (!canContinue)
+            {
+                return;
+            }
+
+            boostButton.IsEnabled = !safeMode;
+            if (!safeMode && optimizationOverlay != null)
+            {
+                optimizationOverlay.ShowIfRequired();
+            }
+            if (safeMode)
+            {
+                caption.Text = "БЕЗОПАСНЫЙ РЕЖИМ";
+                caption.Foreground = BrushFrom(ProductBrand.AccentTextHex);
+                AutomationProperties.SetName(
+                    boostButton,
+                    "Boostix недоступен в безопасном режиме");
+                AutomationProperties.SetHelpText(
+                    boostButton,
+                    "В безопасном режиме системные изменения и Boost не запускаются.");
+            }
+            lastSession = BoostSessionReportStore.LoadLast();
+            if (lastSession != null && !lastSession.EndedUtc.HasValue)
+            {
+                lastSession.AddAction(
+                    "ПРЕДЫДУЩАЯ СЕССИЯ",
+                    "Отчёт был безопасно завершён при следующем запуске приложения.",
+                    BoostActionOutcome.Skipped);
+                lastSession.Complete(
+                    "Interrupted",
+                    "Предыдущая сессия завершилась вместе с приложением или Windows.");
+                try
+                {
+                    BoostSessionReportStore.Save(lastSession);
+                }
+                catch (Exception ex)
+                {
+                    CrashLog.Write(
+                        "Could not finalize the previous session report.",
+                        ex);
+                }
+            }
+            RefreshSessionHistory();
+            if (boostCenterOverlay != null)
+            {
+                boostCenterOverlay.SetSettings(centerSettings);
+                boostCenterOverlay.SetSessionReport(lastSession);
+                boostCenterOverlay.SetSessionHistory(sessionHistory);
+            }
+            QueuePreflight(false, false);
+
+            if (HasLaunchArgument(launchArguments, "--demo-center") &&
+                boostCenterOverlay != null)
+            {
+                boostCenterOverlay.OpenReadiness(false);
+            }
+            else if (HasLaunchArgument(launchArguments, "--demo-report") &&
+                     boostCenterOverlay != null)
+            {
+                boostCenterOverlay.OpenReport();
+            }
+            else if (HasLaunchArgument(launchArguments, "--demo-history") &&
+                     boostCenterOverlay != null)
+            {
+                boostCenterOverlay.OpenHistory();
+            }
+        }
+
+        private async Task VerifyLocalStartupForUpdateAsync()
+        {
+            if (boostButton == null ||
+                boostCenterOverlay == null ||
+                optimizationOverlay == null ||
+                updateOverlay == null)
+            {
+                throw new InvalidOperationException(
+                    "The main window did not initialize its local UI services.");
+            }
+
+            BoostSessionReport probedLastSession = null;
+            List<BoostSessionReport> probedHistory = null;
+            BoostPreflightReport probedPreflight = null;
+            DiagnosticSnapshot probedDiagnostic = null;
+            string optimizationStatus =
+                optimizationOverlay.GetOptimizationStatus();
+
+            await Task.Run(delegate
+            {
+                probedLastSession = BoostSessionReportStore.LoadLast();
+                probedHistory = DiagnosticSessionHistory.LoadRecent(
+                    DiagnosticSessionHistory.MaximumSessionCount);
+                probedPreflight = BoostPreflightService.Run(
+                    AppDomain.CurrentDomain.BaseDirectory,
+                    optimizationStatus);
+                probedDiagnostic = DiagnosticSnapshotProvider.Capture();
+            });
+
+            lastSession = probedLastSession;
+            sessionHistory = probedHistory ?? new List<BoostSessionReport>();
+            latestPreflight = probedPreflight;
+            latestDiagnosticSnapshot = probedDiagnostic;
+            boostCenterOverlay.SetSettings(centerSettings);
+            boostCenterOverlay.SetPreflight(probedPreflight);
+            boostCenterOverlay.SetSessionReport(probedLastSession);
+            boostCenterOverlay.SetSessionHistory(sessionHistory);
+            boostCenterOverlay.SetDiagnosticSnapshot(probedDiagnostic);
+            boostCenterOverlay.OpenReadiness(false);
+            boostButton.IsEnabled = true;
+            UpdateLayout();
+
+            await Dispatcher.InvokeAsync(
+                delegate { },
+                DispatcherPriority.ApplicationIdle);
+            if (!IsLoaded ||
+                !IsVisible ||
+                ActualWidth <= 0 ||
+                ActualHeight <= 0 ||
+                !boostButton.IsEnabled)
+            {
+                throw new InvalidOperationException(
+                    "The application did not reach an objectively usable local state.");
+            }
+        }
+
+        private void BoostWindowClosing(object sender, CancelEventArgs e)
+        {
+            if (updateOverlay != null && updateOverlay.ShouldCancelWindowClose())
+            {
+                e.Cancel = true;
+                return;
+            }
+            if (optimizationOverlay != null && optimizationOverlay.ShouldCancelWindowClose())
+            {
+                e.Cancel = true;
+            }
+        }
+
+        private void WindowMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.LeftButton != MouseButtonState.Pressed)
+            {
+                return;
+            }
+            var element = e.OriginalSource as DependencyObject;
+            while (element != null)
+            {
+                if (element is ButtonBase)
+                {
+                    return;
+                }
+                element = VisualTreeHelper.GetParent(element);
+            }
+            try { DragMove(); }
+            catch (InvalidOperationException) { }
+            finally { QueueMonitorWorkAreaBounds(); }
+        }
+
+        private void WindowClosed(object sender, EventArgs e)
+        {
+            LocationChanged -= BoostWindowLocationChanged;
+            if (windowSource != null)
+            {
+                windowSource.RemoveHook(WindowMessageHook);
+                windowSource = null;
+            }
+            windowHandle = IntPtr.Zero;
+            bool sessionWasRunning =
+                boostActive ||
+                animationRunning ||
+                boostProcess != null;
+            boostActive = false;
+            Interlocked.Increment(ref preflightGeneration);
+            if (benchmarkCancellation != null)
+            {
+                benchmarkCancellation.Cancel();
+            }
+            if (readinessTimer != null)
+            {
+                readinessTimer.Stop();
+            }
+            StopActiveBoostMaintenance();
+            ImportBoostScriptResult(currentSession);
+            CompleteCurrentSession(
+                sessionWasRunning ? "Interrupted" : "Completed",
+                sessionWasRunning
+                    ? "Приложение закрыто до штатного завершения Boost."
+                    : "Приложение закрыто.");
+            TryDeleteReadinessSignal();
+            StopBoostProcess();
+        }
+
+        private void TryDeleteReadinessSignal()
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(readinessSignalPath) && File.Exists(readinessSignalPath))
+                {
+                    File.Delete(readinessSignalPath);
+                }
+            }
+            catch { }
+        }
+
+        private void StopBoostProcess()
+        {
+            Process process = boostProcess;
+            boostProcess = null;
+            if (process == null)
+            {
+                return;
+            }
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill();
+                    process.WaitForExit(1000);
+                }
+            }
+            catch { }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+
+        private static bool HasLaunchArgument(string[] arguments, string expected)
+        {
+            foreach (string argument in arguments ?? new string[0])
+            {
+                if (string.Equals(argument, expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static double GetDemoUiScale(string[] arguments)
+        {
+            const string prefix = "--demo-ui-scale=";
+            foreach (string argument in arguments ?? new string[0])
+            {
+                if (argument == null ||
+                    !argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                double scale;
+                if (double.TryParse(
+                        argument.Substring(prefix.Length),
+                        NumberStyles.AllowDecimalPoint,
+                        CultureInfo.InvariantCulture,
+                        out scale) &&
+                    scale >= 1.0 &&
+                    scale <= 2.0)
+                {
+                    return scale;
+                }
+            }
+            return 1.0;
+        }
+
+        private static Button MakeCenterButton()
+        {
+            var backgroundBrush = new SolidColorBrush(Color.FromArgb(0, 27, 27, 27));
+            var glyphBrush = new SolidColorBrush(Color.FromRgb(139, 139, 139));
+            var button = new Button
+            {
+                Width = TitleControlSize,
+                Height = TitleControlSize,
+                Background = backgroundBrush,
+                Foreground = glyphBrush,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                ToolTip = "Центр Boostix",
+                Template = MakeChromeButtonTemplate()
+            };
+            AutomationProperties.SetName(button, "Открыть центр Boostix");
+
+            button.Content = new TextBlock
+            {
+                Text = "\uE713",
+                FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                FontSize = 19,
+                FontWeight = FontWeights.Normal,
+                Foreground = glyphBrush,
+                Width = TitleControlSize,
+                Height = TitleControlSize,
+                LineHeight = TitleControlSize,
+                LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextAlignment = TextAlignment.Center
+            };
+
+            var lift = new TranslateTransform();
+            button.RenderTransform = lift;
+            button.RenderTransformOrigin = new Point(0.5, 0.5);
+            button.MouseEnter += delegate
+            {
+                if (!SystemParameters.ClientAreaAnimation)
+                {
+                    backgroundBrush.BeginAnimation(
+                        SolidColorBrush.ColorProperty,
+                        null);
+                    glyphBrush.BeginAnimation(
+                        SolidColorBrush.ColorProperty,
+                        null);
+                    lift.BeginAnimation(TranslateTransform.YProperty, null);
+                    backgroundBrush.Color = Color.FromRgb(45, 45, 45);
+                    glyphBrush.Color = Colors.White;
+                    lift.Y = 0;
+                    return;
+                }
+                var ease = new SineEase { EasingMode = EasingMode.EaseInOut };
+                backgroundBrush.BeginAnimation(
+                    SolidColorBrush.ColorProperty,
+                    new ColorAnimation(
+                        Color.FromRgb(45, 45, 45),
+                        TimeSpan.FromMilliseconds(210)) { EasingFunction = ease });
+                glyphBrush.BeginAnimation(
+                    SolidColorBrush.ColorProperty,
+                    new ColorAnimation(
+                        Colors.White,
+                        TimeSpan.FromMilliseconds(210)) { EasingFunction = ease });
+                lift.BeginAnimation(
+                    TranslateTransform.YProperty,
+                    new DoubleAnimation(
+                        -1,
+                        TimeSpan.FromMilliseconds(240)) { EasingFunction = ease });
+            };
+            button.MouseLeave += delegate
+            {
+                if (!SystemParameters.ClientAreaAnimation)
+                {
+                    backgroundBrush.BeginAnimation(
+                        SolidColorBrush.ColorProperty,
+                        null);
+                    glyphBrush.BeginAnimation(
+                        SolidColorBrush.ColorProperty,
+                        null);
+                    lift.BeginAnimation(TranslateTransform.YProperty, null);
+                    backgroundBrush.Color = Color.FromArgb(0, 27, 27, 27);
+                    glyphBrush.Color = Color.FromRgb(139, 139, 139);
+                    lift.Y = 0;
+                    return;
+                }
+                var ease = new SineEase { EasingMode = EasingMode.EaseInOut };
+                backgroundBrush.BeginAnimation(
+                    SolidColorBrush.ColorProperty,
+                    new ColorAnimation(
+                        Color.FromArgb(0, 27, 27, 27),
+                        TimeSpan.FromMilliseconds(240)) { EasingFunction = ease });
+                glyphBrush.BeginAnimation(
+                    SolidColorBrush.ColorProperty,
+                    new ColorAnimation(
+                        Color.FromRgb(139, 139, 139),
+                        TimeSpan.FromMilliseconds(240)) { EasingFunction = ease });
+                lift.BeginAnimation(
+                    TranslateTransform.YProperty,
+                    new DoubleAnimation(
+                        0,
+                        TimeSpan.FromMilliseconds(260)) { EasingFunction = ease });
+            };
+            return button;
+        }
+
+        private static Button MakeWindowButton(string accessibleName, bool isClose)
+        {
+            var button = new Button();
+            button.Width = TitleControlSize;
+            button.Height = TitleControlSize;
+            var backgroundBrush = new SolidColorBrush(Color.FromArgb(0, 27, 27, 27));
+            var glyphBrush = new SolidColorBrush(Color.FromRgb(139, 139, 139));
+            button.Foreground = glyphBrush;
+            button.Background = backgroundBrush;
+            button.BorderThickness = new Thickness(0);
+            button.Cursor = Cursors.Hand;
+            button.ToolTip = accessibleName;
+            button.Template = MakeChromeButtonTemplate();
+            AutomationProperties.SetName(button, accessibleName);
+
+            var glyphCanvas = new Canvas();
+            glyphCanvas.Width = TitleControlSize;
+            glyphCanvas.Height = TitleControlSize;
+            glyphCanvas.Background = Brushes.Transparent;
+            glyphCanvas.IsHitTestVisible = false;
+            if (isClose)
+            {
+                var closeGlyph = new System.Windows.Shapes.Path();
+                closeGlyph.Data = Geometry.Parse("M 11,11 L 21,21 M 21,11 L 11,21");
+                closeGlyph.Stroke = glyphBrush;
+                closeGlyph.StrokeThickness = 2;
+                closeGlyph.StrokeStartLineCap = PenLineCap.Round;
+                closeGlyph.StrokeEndLineCap = PenLineCap.Round;
+                glyphCanvas.Children.Add(closeGlyph);
+            }
+            else
+            {
+                var minimizeGlyph = new Rectangle();
+                minimizeGlyph.Width = 16;
+                minimizeGlyph.Height = 2;
+                minimizeGlyph.RadiusX = 1;
+                minimizeGlyph.RadiusY = 1;
+                minimizeGlyph.Fill = glyphBrush;
+                Canvas.SetLeft(minimizeGlyph, 8);
+                Canvas.SetTop(minimizeGlyph, 19);
+                glyphCanvas.Children.Add(minimizeGlyph);
+            }
+
+            button.Content = glyphCanvas;
+
+            var lift = new TranslateTransform();
+            button.RenderTransform = lift;
+            button.RenderTransformOrigin = new Point(0.5, 0.5);
+
+            button.MouseEnter += delegate
+            {
+                Panel.SetZIndex(button, 2);
+                if (!SystemParameters.ClientAreaAnimation)
+                {
+                    backgroundBrush.BeginAnimation(
+                        SolidColorBrush.ColorProperty,
+                        null);
+                    glyphBrush.BeginAnimation(
+                        SolidColorBrush.ColorProperty,
+                        null);
+                    lift.BeginAnimation(TranslateTransform.YProperty, null);
+                    backgroundBrush.Color = isClose
+                        ? Color.FromRgb(231, 24, 42)
+                        : Color.FromRgb(45, 45, 45);
+                    glyphBrush.Color = Colors.White;
+                    lift.Y = 0;
+                    return;
+                }
+                var colorEase = new CubicEase { EasingMode = EasingMode.EaseInOut };
+                var liftEase = new SineEase { EasingMode = EasingMode.EaseInOut };
+                backgroundBrush.BeginAnimation(
+                    SolidColorBrush.ColorProperty,
+                    new ColorAnimation(
+                        isClose ? Color.FromRgb(231, 24, 42) : Color.FromRgb(45, 45, 45),
+                        TimeSpan.FromMilliseconds(220)) { EasingFunction = colorEase });
+                glyphBrush.BeginAnimation(
+                    SolidColorBrush.ColorProperty,
+                    new ColorAnimation(Colors.White, TimeSpan.FromMilliseconds(220)) { EasingFunction = colorEase });
+                lift.BeginAnimation(
+                    TranslateTransform.YProperty,
+                    new DoubleAnimation(-1, TimeSpan.FromMilliseconds(320)) { EasingFunction = liftEase });
+            };
+            button.MouseLeave += delegate
+            {
+                Panel.SetZIndex(button, 0);
+                if (!SystemParameters.ClientAreaAnimation)
+                {
+                    backgroundBrush.BeginAnimation(
+                        SolidColorBrush.ColorProperty,
+                        null);
+                    glyphBrush.BeginAnimation(
+                        SolidColorBrush.ColorProperty,
+                        null);
+                    lift.BeginAnimation(TranslateTransform.YProperty, null);
+                    backgroundBrush.Color = Color.FromArgb(0, 27, 27, 27);
+                    glyphBrush.Color = Color.FromRgb(139, 139, 139);
+                    lift.Y = 0;
+                    return;
+                }
+                var colorEase = new CubicEase { EasingMode = EasingMode.EaseInOut };
+                var liftEase = new SineEase { EasingMode = EasingMode.EaseInOut };
+                backgroundBrush.BeginAnimation(
+                    SolidColorBrush.ColorProperty,
+                    new ColorAnimation(Color.FromArgb(0, 27, 27, 27), TimeSpan.FromMilliseconds(260)) { EasingFunction = colorEase });
+                glyphBrush.BeginAnimation(
+                    SolidColorBrush.ColorProperty,
+                    new ColorAnimation(Color.FromRgb(139, 139, 139), TimeSpan.FromMilliseconds(240)) { EasingFunction = colorEase });
+                lift.BeginAnimation(
+                    TranslateTransform.YProperty,
+                    new DoubleAnimation(0, TimeSpan.FromMilliseconds(360)) { EasingFunction = liftEase });
+            };
+            return button;
+        }
+
+        private static ControlTemplate MakeTransparentButtonTemplate()
+        {
+            var template = new ControlTemplate(typeof(Button));
+            var border = new FrameworkElementFactory(typeof(Border));
+            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
+            border.SetValue(Border.BorderBrushProperty, Brushes.Transparent);
+            border.SetValue(Border.BorderThicknessProperty, new Thickness(0));
+            border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
+            var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
+            presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+            presenter.SetValue(ContentPresenter.ContentProperty, new TemplateBindingExtension(ContentControl.ContentProperty));
+            border.AppendChild(presenter);
+            template.VisualTree = border;
+            return template;
+        }
+
+        private static ControlTemplate MakeTransparentCheckBoxTemplate()
+        {
+            var template = new ControlTemplate(typeof(CheckBox));
+            var border = new FrameworkElementFactory(typeof(Border));
+            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(6));
+            border.SetValue(Border.BorderBrushProperty, Brushes.Transparent);
+            border.SetValue(Border.BorderThicknessProperty, new Thickness(0));
+            border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
+            var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
+            presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Stretch);
+            presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+            presenter.SetValue(ContentPresenter.ContentProperty, new TemplateBindingExtension(ContentControl.ContentProperty));
+            border.AppendChild(presenter);
+            template.VisualTree = border;
+            return template;
+        }
+
+        private static ControlTemplate MakeChromeButtonTemplate()
+        {
+            var template = new ControlTemplate(typeof(Button));
+            var border = new FrameworkElementFactory(typeof(Border));
+            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(6));
+            border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
+            border.SetValue(Border.BorderBrushProperty, Brushes.Transparent);
+            border.SetValue(Border.BorderThicknessProperty, new Thickness(0));
+            var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
+            presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+            presenter.SetValue(ContentPresenter.ContentProperty, new TemplateBindingExtension(ContentControl.ContentProperty));
+            presenter.SetValue(TextElement.ForegroundProperty, new TemplateBindingExtension(Control.ForegroundProperty));
+            border.AppendChild(presenter);
+            template.VisualTree = border;
+            return template;
+        }
+
+        private static TextBlock MakeText(string text, double size, string color, FontWeight weight)
+        {
+            var block = new TextBlock();
+            block.Text = text;
+            block.FontSize = size;
+            block.FontWeight = weight;
+            block.Foreground = BrushFrom(color);
+            TextOptions.SetTextFormattingMode(block, TextFormattingMode.Display);
+            TextOptions.SetTextRenderingMode(block, TextRenderingMode.ClearType);
+            return block;
+        }
+
+        private static FontFamily LoadAppFontFamily()
+        {
+            return new FontFamily("Segoe UI Variable Text, Segoe UI");
+        }
+
+        private static FontFamily LoadAppSemiboldFontFamily()
+        {
+            return new FontFamily("Segoe UI Variable Display, Segoe UI Semibold");
+        }
+
+        private static string GetApplicationVersion()
+        {
+            Version version = Assembly.GetExecutingAssembly().GetName().Version;
+            return string.Format(
+                "v. {0}.{1}.{2}",
+                version.Major,
+                version.Minor,
+                Math.Max(0, version.Build));
+        }
+
+        private static Brush MakeLinearBrush(string from, string to, double angle)
+        {
+            double radians = angle * Math.PI / 180.0;
+            double x = Math.Cos(radians) * 0.5;
+            double y = Math.Sin(radians) * 0.5;
+            var brush = new LinearGradientBrush();
+            brush.StartPoint = new Point(0.5 - x, 0.5 - y);
+            brush.EndPoint = new Point(0.5 + x, 0.5 + y);
+            brush.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString(from), 0));
+            brush.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString(to), 1));
+            brush.Freeze();
+            return brush;
+        }
+
+        private static Brush BrushFrom(string color)
+        {
+            var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
+            brush.Freeze();
+            return brush;
+        }
+
+        private static ImageSource BuildWindowIcon()
+        {
+            var group = new DrawingGroup();
+            group.Children.Add(new GeometryDrawing(
+                BrushFrom("#FF1B1B1B"),
+                new Pen(BrushFrom(ProductBrand.AccentVisualHex), 1.5),
+                new RectangleGeometry(new Rect(1, 1, 30, 30), 8, 8)));
+            group.Children.Add(new GeometryDrawing(
+                MakeLinearBrush("#FFFFFFFF", "#FFD8B4FE", 90),
+                null,
+                Geometry.Parse("M 16,5 C 10,10 9,18 10,23 L 16,27 L 22,23 C 23,18 22,10 16,5 Z")));
+            group.Children.Add(new GeometryDrawing(
+                BrushFrom("#FFFF6B57"),
+                null,
+                Geometry.Parse("M 13,24 C 13,28 15,30 16,31 C 17,30 19,28 19,24 Z")));
+            var image = new DrawingImage(group);
+            image.Freeze();
+            return image;
+        }
+    }
+
+    internal static class CrashLog
+    {
+        private const long MaximumLogBytes = 512 * 1024;
+        private static readonly object Sync = new object();
+
+        public static void Write(string message, Exception exception)
+        {
+            try
+            {
+                lock (Sync)
+                {
+                    string directory = System.IO.Path.Combine(
+                        Environment.GetFolderPath(
+                            Environment.SpecialFolder.LocalApplicationData),
+                        ProductBrand.DataDirectoryName);
+                    Directory.CreateDirectory(directory);
+                    string path = System.IO.Path.Combine(directory, "crash.log");
+                    string previousPath = System.IO.Path.Combine(
+                        directory,
+                        "crash.previous.log");
+                    if (File.Exists(path) &&
+                        new FileInfo(path).Length >= MaximumLogBytes)
+                    {
+                        if (File.Exists(previousPath))
+                        {
+                            File.Delete(previousPath);
+                        }
+                        File.Move(path, previousPath);
+                    }
+
+                    var entry = new StringBuilder();
+                    entry.Append('[');
+                    entry.Append(DateTime.UtcNow.ToString("o"));
+                    entry.Append("] ");
+                    entry.AppendLine(message ?? "Unknown application error.");
+                    if (exception != null)
+                    {
+                        entry.AppendLine(exception.ToString());
+                    }
+                    File.AppendAllText(
+                        path,
+                        entry.ToString(),
+                        new UTF8Encoding(false));
+                }
+            }
+            catch
+            {
+                // Crash logging must never trigger another application failure.
+            }
+        }
+    }
+}

@@ -14,7 +14,33 @@ $systemDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
 $programDataRoot = [IO.Path]::GetFullPath([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData))
 $programFilesRoot = [IO.Path]::GetFullPath([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles))
 if (-not $systemDirectory -or -not $programDataRoot -or -not $programFilesRoot) { throw 'Trusted Windows security roots could not be resolved from the OS.' }
-$stateRoot = Join-Path $programDataRoot 'CodexGamingOptimization'
+$boostixStateRoot = Join-Path $programDataRoot 'BoostixOptimization'
+$legacyStateRoot = Join-Path $programDataRoot 'CodexGamingOptimization'
+$stateRoot = $boostixStateRoot
+if ($StatePath) {
+    if ($StatePath.IndexOfAny([char[]]@('"', "`r", "`n", [char]0)) -ge 0) {
+        throw 'StatePath contains invalid characters.'
+    }
+    $requestedStatePath = [IO.Path]::GetFullPath($StatePath)
+    $requestedTransaction = [IO.Path]::GetDirectoryName($requestedStatePath)
+    $requestedBackupRoot = [IO.Path]::GetDirectoryName($requestedTransaction)
+    $boostixBackupRoot = [IO.Path]::GetFullPath((Join-Path $boostixStateRoot 'Backups')).TrimEnd('\')
+    $legacyBackupRoot = [IO.Path]::GetFullPath((Join-Path $legacyStateRoot 'Backups')).TrimEnd('\')
+    if ([IO.Path]::GetFileName($requestedStatePath) -ine 'state.json') {
+        throw 'StatePath must identify a direct transaction state.json under a protected backup root.'
+    }
+    if ($requestedBackupRoot -ieq $legacyBackupRoot) {
+        $stateRoot = $legacyStateRoot
+    }
+    elseif ($requestedBackupRoot -ine $boostixBackupRoot) {
+        throw 'StatePath must identify a direct transaction state.json under a protected backup root.'
+    }
+    $StatePath = $requestedStatePath
+}
+elseif (-not (Test-Path -LiteralPath (Join-Path $boostixStateRoot 'latest-state.txt') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $legacyStateRoot 'latest-state.txt') -PathType Leaf)) {
+    $stateRoot = $legacyStateRoot
+}
 $backupRoot = Join-Path $stateRoot 'Backups'
 $latestStatePointer = Join-Path $stateRoot 'latest-state.txt'
 $transactionLockPath = Join-Path $stateRoot 'transaction.lock'
@@ -38,13 +64,13 @@ function Get-SafeResultPath {
     param([string]$RequestedPath)
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
     $candidate = if ($RequestedPath) { [IO.Path]::GetFullPath($RequestedPath) } else {
-        Join-Path $tempRoot ('MajesticBoost-restore-{0}.json' -f [Guid]::NewGuid().ToString('N'))
+        Join-Path $tempRoot ('Boostix-restore-{0}.json' -f [Guid]::NewGuid().ToString('N'))
     }
     if ([IO.Path]::GetDirectoryName($candidate) -ine $tempRoot) {
         throw 'ResultPath must be a direct child of the current user TEMP directory.'
     }
-    if ([IO.Path]::GetFileName($candidate) -notmatch '^MajesticBoost-restore-[0-9a-fA-F]{32}\.json$') {
-        throw 'ResultPath must use the MajesticBoost restore GUID filename format.'
+    if ([IO.Path]::GetFileName($candidate) -notmatch '^Boostix-restore-[0-9a-fA-F]{32}\.json$') {
+        throw 'ResultPath must use the Boostix restore GUID filename format.'
     }
     if (Test-Path -LiteralPath $candidate) { throw 'ResultPath must be a new, non-existing unique file.' }
     $tempItem = Get-Item -LiteralPath $tempRoot -Force
@@ -55,18 +81,6 @@ function Get-SafeResultPath {
 }
 
 $effectiveResultPath = Get-SafeResultPath -RequestedPath $ResultPath
-
-if ($StatePath) {
-    if ($StatePath.IndexOfAny([char[]]@('"', "`r", "`n", [char]0)) -ge 0) { throw 'StatePath contains invalid characters.' }
-    $earlyStatePath = [IO.Path]::GetFullPath($StatePath)
-    $earlyBackupRoot = [IO.Path]::GetFullPath($backupRoot).TrimEnd('\')
-    $earlyTransaction = [IO.Path]::GetDirectoryName($earlyStatePath)
-    if ([IO.Path]::GetFileName($earlyStatePath) -ine 'state.json' -or
-        [IO.Path]::GetDirectoryName($earlyTransaction) -ine $earlyBackupRoot) {
-        throw 'StatePath must identify a direct transaction state.json under the protected backup root.'
-    }
-    $StatePath = $earlyStatePath
-}
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -102,10 +116,9 @@ foreach ($moduleManifest in @(
     (Join-Path $systemModuleRoot 'ScheduledTasks\ScheduledTasks.psd1'),
     (Join-Path $systemModuleRoot 'Defender\Defender.psd1')
 )) {
-    if (-not (Test-Path -LiteralPath $moduleManifest -PathType Leaf)) {
-        throw "Required protected Windows module is missing: $moduleManifest"
+    if (Test-Path -LiteralPath $moduleManifest -PathType Leaf) {
+        Microsoft.PowerShell.Core\Import-Module -Name $moduleManifest -Force -ErrorAction Stop
     }
-    Microsoft.PowerShell.Core\Import-Module -Name $moduleManifest -Force -ErrorAction Stop
 }
 
 function Set-ObjectProperty {
@@ -317,7 +330,7 @@ function Write-ProtectedJsonAtomic {
 
 function Initialize-ProtectedStateStorage {
     if (-not (Test-Path -LiteralPath $stateRoot -PathType Container) -or -not (Test-Path -LiteralPath $backupRoot -PathType Container)) {
-        throw 'Protected MAX FPS state storage does not exist.'
+        throw 'Protected Boostix state storage does not exist.'
     }
     foreach ($existingDirectory in @($stateRoot, $backupRoot)) {
         Assert-NoReparsePath -Path $existingDirectory -StopAt $programDataRoot
@@ -350,9 +363,9 @@ function Initialize-ProtectedStateStorage {
         Set-ProtectedFileSecurity -Path $transactionLockPath
         return
     }
-    if (-not (Test-Path -LiteralPath $latestStatePointer -PathType Leaf)) { throw 'No active Majestic Boost MAX FPS transaction was found.' }
+    if (-not (Test-Path -LiteralPath $latestStatePointer -PathType Leaf)) { throw 'No active Boostix optimization transaction was found.' }
     Set-ProtectedFileSecurity -Path $latestStatePointer -RequireTrustedExisting
-    if ((Get-Item -LiteralPath $latestStatePointer -Force).Length -gt 4096) { throw 'The MAX FPS state pointer exceeds the safe size limit.' }
+    if ((Get-Item -LiteralPath $latestStatePointer -Force).Length -gt 4096) { throw 'The Boostix state pointer exceeds the safe size limit.' }
     if (Test-Path -LiteralPath $transactionLockPath) {
         Set-ProtectedFileSecurity -Path $transactionLockPath -RequireTrustedExisting
     }
@@ -426,7 +439,7 @@ function Enter-TransactionLock {
         return $stream
     }
     catch [IO.IOException] {
-        throw 'Another MAX FPS apply/restore transaction is already running.'
+        throw 'Another Boostix apply/restore transaction is already running.'
     }
 }
 
@@ -591,7 +604,7 @@ function Assert-MutationStateSchema {
     if (-not (Test-GuidText -Value ([string]$Candidate.OriginalPowerScheme)) -or -not (Test-GuidText -Value ([string]$Candidate.MaxPowerScheme))) {
         throw 'State power scheme GUIDs are invalid.'
     }
-    if ([string]$Candidate.OriginalPowerScheme -ieq [string]$Candidate.MaxPowerScheme) { throw 'Original and MAX FPS power scheme GUIDs must differ.' }
+    if ([string]$Candidate.OriginalPowerScheme -ieq [string]$Candidate.MaxPowerScheme) { throw 'Original and Boostix power scheme GUIDs must differ.' }
 
     $seenRegistry = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in @($Candidate.Registry)) {
@@ -755,7 +768,7 @@ function Restore-FileAtomic {
         [Parameter(Mandatory = $true)][string]$ExpectedHash
     )
     $directory = Split-Path -Parent $Original
-    $temporary = Join-Path $directory ('.majesticboost-restore-{0}.tmp' -f [Guid]::NewGuid().ToString('N'))
+    $temporary = Join-Path $directory ('.boostix-restore-{0}.tmp' -f [Guid]::NewGuid().ToString('N'))
     try {
         Copy-Item -LiteralPath $Backup -Destination $temporary -Force
         if ((Get-FileSha256 -Path $temporary) -ne $ExpectedHash) {
@@ -854,7 +867,7 @@ try {
     else {
     if (-not $StatePath) { throw 'StatePath is required and must exactly match the protected latest-state pointer.' }
     $pointerText = (Get-Content -LiteralPath $latestStatePointer -Raw -Encoding UTF8).Trim()
-    if (-not $pointerText) { throw 'The MAX FPS state pointer is empty.' }
+    if (-not $pointerText) { throw 'The Boostix state pointer is empty.' }
     $pointerPath = [IO.Path]::GetFullPath($pointerText)
     $requestedPath = [IO.Path]::GetFullPath($StatePath)
     if ($requestedPath -ine $pointerPath) { throw 'StatePath does not exactly match the protected latest-state pointer.' }
@@ -1193,7 +1206,7 @@ try {
                     $activeScheme = Get-ActivePowerScheme
                     if ($activeScheme -eq $maxScheme) {
                         if (-not (Test-PowerSchemeExists -Guid $originalScheme)) {
-                            throw "Original power scheme is missing; active MAX FPS scheme was not deleted: $originalScheme"
+                            throw "Original power scheme is missing; active Boostix scheme was not deleted: $originalScheme"
                         }
                         [void](Invoke-PowerCfg -Arguments @('/setactive', $originalScheme))
                         if ((Get-ActivePowerScheme) -ne $originalScheme) { throw 'Original power scheme activation verification failed.' }
@@ -1203,7 +1216,7 @@ try {
                     }
                     if ($schemeCreated -and (Get-ActivePowerScheme) -ne $maxScheme) {
                         [void](Invoke-PowerCfg -Arguments @('/delete', $maxScheme))
-                        if (Test-PowerSchemeExists -Guid $maxScheme) { throw 'MAX FPS power scheme deletion verification failed.' }
+                        if (Test-PowerSchemeExists -Guid $maxScheme) { throw 'Boostix power scheme deletion verification failed.' }
                     }
                 }
                 Set-ObjectProperty -Object $state.Power -Name 'Restored' -Value $true

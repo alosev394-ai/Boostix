@@ -9,11 +9,11 @@ $frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $compiler = Join-Path $frameworkRoot 'csc.exe'
 $fixture = Join-Path $PSScriptRoot 'fixtures\presentmon-v2.csv'
 $captureSource = [IO.File]::ReadAllText(
-    (Join-Path $projectRoot 'MajesticBoost\PerformanceCapture.cs'))
+    (Join-Path $projectRoot 'Boostix\PerformanceCapture.cs'))
 $installerSource = [IO.File]::ReadAllText(
-    (Join-Path $projectRoot 'MajesticBoostInstaller\Program.cs'))
+    (Join-Path $projectRoot 'BoostixInstaller\Program.cs'))
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) (
-    'MajesticBoost-PerformanceCapture-' + [Guid]::NewGuid().ToString('N'))
+    'Boostix-PerformanceCapture-' + [Guid]::NewGuid().ToString('N'))
 $harness = Join-Path $temporaryRoot 'PerformanceCaptureParserHarness.exe'
 
 foreach ($required in @(
@@ -21,11 +21,30 @@ foreach ($required in @(
     'ResolveProtectedCaptureDirectory()',
     'ValidateProtectedCaptureDirectory',
     'ValidateElevatedCaptureFile(elevatedOutputPath);',
-    'MajesticBoost-PresentMon-',
-    'FileAttributes.ReparsePoint'
+    'ProductBrand.ProductFileName + "-PresentMon-"',
+    'FileAttributes.ReparsePoint',
+    'CalculateOnePercentLowFps(sorted)',
+    'Math.Ceiling(sortedFrameTimes.Count * 0.01)',
+    'Process.GetProcesses()',
+    'process.MainWindowHandle == IntPtr.Zero',
+    'process.WorkingSet64 < MinimumTargetWorkingSetBytes',
+    'ExcludedTargetProcesses.Contains(processName)'
 )) {
     if (-not $captureSource.Contains($required)) {
         throw "Protected elevated capture contract is missing: $required"
+    }
+}
+
+if ($captureSource.Contains('OnePercentLowFps = 1000.0 / p99')) {
+    throw '1% low must average the slowest 1% frame times, not reuse P99.'
+}
+foreach ($forbiddenPublicTarget in @(
+    '"GTA V',
+    '"GTA5"',
+    '"GTA5_Enhanced"'
+)) {
+    if ($captureSource.Contains($forbiddenPublicTarget)) {
+        throw "Performance capture is still tied to a single game: $forbiddenPublicTarget"
     }
 }
 
@@ -76,9 +95,11 @@ try {
         '/reference:System.Core.dll',
         '/reference:System.Management.dll',
         "/out:$harness",
-        (Join-Path $projectRoot 'MajesticBoost\BoostFeatures.cs'),
-        (Join-Path $projectRoot 'MajesticBoost\DiagnosticsFeatures.cs'),
-        (Join-Path $projectRoot 'MajesticBoost\PerformanceCapture.cs'),
+        (Join-Path $projectRoot 'ProductBrand.cs'),
+        (Join-Path $projectRoot 'Boostix\BoostFeatures.cs'),
+        (Join-Path $projectRoot 'Boostix\DiagnosticsFeatures.cs'),
+        (Join-Path $projectRoot 'Boostix\SessionInsights.cs'),
+        (Join-Path $projectRoot 'Boostix\PerformanceCapture.cs'),
         (Join-Path $PSScriptRoot 'PerformanceCaptureParserHarness.cs')
     )
 
@@ -99,7 +120,7 @@ finally {
     $resolvedTarget = [IO.Path]::GetFullPath($temporaryRoot)
     if (
         $resolvedTarget.StartsWith(
-            $resolvedTemp + 'MajesticBoost-PerformanceCapture-',
+            $resolvedTemp + 'Boostix-PerformanceCapture-',
             [StringComparison]::OrdinalIgnoreCase) -and
         (Test-Path -LiteralPath $resolvedTarget)
     ) {

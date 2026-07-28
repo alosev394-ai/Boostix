@@ -12,9 +12,15 @@ $ErrorActionPreference = 'Stop'
 $utf8NoBom = New-Object Text.UTF8Encoding($false)
 $systemDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
 $programDataRoot = [IO.Path]::GetFullPath([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData))
-$programFilesRoot = [IO.Path]::GetFullPath([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles))
-if (-not $systemDirectory -or -not $programDataRoot -or -not $programFilesRoot) { throw 'Trusted Windows security roots could not be resolved from the OS.' }
-$stateRoot = Join-Path $programDataRoot 'CodexGamingOptimization'
+if (-not $systemDirectory -or -not $programDataRoot) { throw 'Trusted Windows security roots could not be resolved from the OS.' }
+$boostixStateRoot = Join-Path $programDataRoot 'BoostixOptimization'
+$legacyStateRoot = Join-Path $programDataRoot 'CodexGamingOptimization'
+$stateRoot = $boostixStateRoot
+if ($AdoptExistingState -and
+    -not (Test-Path -LiteralPath (Join-Path $boostixStateRoot 'latest-state.txt') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $legacyStateRoot 'latest-state.txt') -PathType Leaf)) {
+    $stateRoot = $legacyStateRoot
+}
 $backupRoot = Join-Path $stateRoot 'Backups'
 $latestStatePointer = Join-Path $stateRoot 'latest-state.txt'
 $transactionLockPath = Join-Path $stateRoot 'transaction.lock'
@@ -41,13 +47,13 @@ function Get-SafeResultPath {
         [IO.Path]::GetFullPath($RequestedPath)
     }
     else {
-        Join-Path $tempRoot ('MajesticBoost-apply-{0}.json' -f [Guid]::NewGuid().ToString('N'))
+        Join-Path $tempRoot ('Boostix-apply-{0}.json' -f [Guid]::NewGuid().ToString('N'))
     }
     if ([IO.Path]::GetDirectoryName($candidate) -ine $tempRoot) {
         throw 'ResultPath must be a direct child of the current user TEMP directory.'
     }
-    if ([IO.Path]::GetFileName($candidate) -notmatch '^MajesticBoost-apply-[0-9a-fA-F]{32}\.json$') {
-        throw 'ResultPath must use the MajesticBoost apply GUID filename format.'
+    if ([IO.Path]::GetFileName($candidate) -notmatch '^Boostix-apply-[0-9a-fA-F]{32}\.json$') {
+        throw 'ResultPath must use the Boostix apply GUID filename format.'
     }
     if (Test-Path -LiteralPath $candidate) {
         throw 'ResultPath must be a new, non-existing unique file.'
@@ -89,19 +95,9 @@ if (-not (Test-IsAdministrator)) {
 }
 
 # Elevated Windows PowerShell inherits the caller's environment.  Do not let a
-# user-writable PSModulePath select code for privileged CIM/task/Defender calls.
+# user-writable PSModulePath select code for privileged Windows calls.
 $systemModuleRoot = Join-Path $systemDirectory 'WindowsPowerShell\v1.0\Modules'
 $env:PSModulePath = $systemModuleRoot
-foreach ($moduleManifest in @(
-    (Join-Path $systemModuleRoot 'CimCmdlets\CimCmdlets.psd1'),
-    (Join-Path $systemModuleRoot 'ScheduledTasks\ScheduledTasks.psd1'),
-    (Join-Path $systemModuleRoot 'Defender\Defender.psd1')
-)) {
-    if (-not (Test-Path -LiteralPath $moduleManifest -PathType Leaf)) {
-        throw "Required protected Windows module is missing: $moduleManifest"
-    }
-    Microsoft.PowerShell.Core\Import-Module -Name $moduleManifest -Force -ErrorAction Stop
-}
 
 function Set-ObjectProperty {
     param(
@@ -440,7 +436,7 @@ function Enter-TransactionLock {
         return $stream
     }
     catch [IO.IOException] {
-        throw 'Another MAX FPS apply/restore transaction is already running.'
+        throw 'Another Boostix apply/restore transaction is already running.'
     }
 }
 
@@ -501,7 +497,6 @@ function Get-AllowedRegistryTarget {
         'hkcu:\software\microsoft\windows\currentversion\gamedvr|appcaptureenabled' = 0
         'hkcu:\software\microsoft\windows\currentversion\gamedvr|historicalcaptureenabled' = 0
         'hkcu:\system\gameconfigstore|gamedvr_enabled' = 0
-        'hklm:\system\currentcontrolset\control\graphicsdrivers|hwschmode' = 2
         'hklm:\system\currentcontrolset\control\power\powerthrottling|powerthrottlingoff' = 1
         'hklm:\software\microsoft\windows nt\currentversion\multimedia\systemprofile|systemresponsiveness' = 10
         'hkcu:\software\microsoft\windows\currentversion\explorer\visualeffects|visualfxsetting' = 2
@@ -511,22 +506,6 @@ function Get-AllowedRegistryTarget {
     }
     if ($dwordTargets.ContainsKey($key)) {
         return [pscustomobject]@{ KeyExists = $true; Exists = $true; Kind = 'DWord'; Value = [int]$dwordTargets[$key] }
-    }
-    $shadowPrefix = 'hkcu:\software\nvidia corporation\global\shadowplay\nvspcaps|'
-    $shadowNames = @('recenabled','dwmenabled','dwmdvrenabledv1','enablemicrophone','isshadowplayenabled','isshadowplayenableduser','hlenabled','dwmenableduser')
-    if ($key.StartsWith($shadowPrefix, [StringComparison]::OrdinalIgnoreCase) -and
-        $shadowNames -contains $Name.ToLowerInvariant()) {
-        return [pscustomobject]@{ KeyExists = $true; Exists = $true; Kind = 'Binary'; Value = [byte[]](0, 0, 0, 0) }
-    }
-    if ($Path.TrimEnd('\') -ieq 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences') {
-        try {
-            if (-not [IO.Path]::IsPathRooted($Name)) { return $null }
-            $canonical = [IO.Path]::GetFullPath($Name)
-            if ($canonical -ine $Name) { return $null }
-            if (@('GTA5.exe','GTA5_Enhanced.exe','GTA5_BE.exe','PlayGTAV.exe','Majestic Launcher.exe') -notcontains [IO.Path]::GetFileName($canonical)) { return $null }
-            return [pscustomobject]@{ KeyExists = $true; Exists = $true; Kind = 'String'; Value = 'GpuPreference=2;' }
-        }
-        catch { return $null }
     }
     return $null
 }
@@ -542,31 +521,6 @@ function Assert-RegistryMutationAllowed {
     $requested = [pscustomobject]@{ KeyExists = $true; Exists = $true; Kind = $Kind; Value = $Value }
     if ($null -eq $allowed -or -not (Test-RegistrySnapshotEqual -Left $allowed -Right $requested)) {
         throw "Registry mutation target is not allowlisted: $Path::$Name"
-    }
-}
-
-function Test-AllowedManagedFile {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    try {
-        $candidate = [IO.Path]::GetFullPath($Path)
-        $documents = [Environment]::GetFolderPath('MyDocuments')
-        $allowed = @(
-            (Join-Path $documents 'Rockstar Games\GTA V\settings.xml'),
-            (Join-Path $env:APPDATA 'majestic-launcher\Multiplayer\majestic.json')
-        ) | ForEach-Object { [IO.Path]::GetFullPath($_) }
-        return @($allowed | Where-Object { $_ -ieq $candidate }).Count -eq 1
-    }
-    catch { return $false }
-}
-
-function Assert-ManagedFileNotReparse {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    if (-not (Test-AllowedManagedFile -Path $Path)) { throw "Managed file target is not allowlisted: $Path" }
-    $candidate = [IO.Path]::GetFullPath($Path)
-    $profileRoot = [Environment]::GetFolderPath('UserProfile')
-    Assert-NoReparsePath -Path $candidate -StopAt $profileRoot
-    if ((Test-Path -LiteralPath $candidate) -and -not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-        throw "Managed file target is not a regular file: $candidate"
     }
 }
 
@@ -607,43 +561,6 @@ function Test-RegistrySnapshotEqual {
     if (-not [bool]$Left.Exists) { return $true }
     return ([string]$Left.Kind -ceq [string]$Right.Kind) -and
         (Test-ValueEqual -Left $Left.Value -Right $Right.Value)
-}
-
-function Get-FileSha256 {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-}
-
-function Get-ServiceSnapshot {
-    param([Parameter(Mandatory = $true)][string]$Name)
-    $escapedName = $Name.Replace("'", "''")
-    $service = CimCmdlets\Get-CimInstance Win32_Service -Filter "Name='$escapedName'" -ErrorAction SilentlyContinue
-    if (-not $service) { return $null }
-    return [pscustomobject]@{
-        StartMode = [string]$service.StartMode
-        Running = ([string]$service.State -eq 'Running')
-    }
-}
-
-function Get-TaskSnapshot {
-    param(
-        [Parameter(Mandatory = $true)][string]$TaskName,
-        [Parameter(Mandatory = $true)][string]$TaskPath
-    )
-    $task = ScheduledTasks\Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction SilentlyContinue
-    if (-not $task) { return $null }
-    return [pscustomobject]@{ Enabled = ([string]$task.State -ne 'Disabled') }
-}
-
-function Get-DefenderSnapshot {
-    $preference = Defender\Get-MpPreference -ErrorAction Stop
-    return [pscustomobject]@{
-        PUAProtection = [int]$preference.PUAProtection
-        MAPSReporting = [int]$preference.MAPSReporting
-        SubmitSamplesConsent = [int]$preference.SubmitSamplesConsent
-        DisableRemovableDriveScanning = [bool]$preference.DisableRemovableDriveScanning
-    }
 }
 
 function Test-StateActive {
@@ -718,11 +635,10 @@ function Upgrade-LegacyState {
                 StartMode = [string]$entry.StartMode
                 Running = [bool]$entry.WasRunning
             } }
-        $target = if ([string]$entry.Name -ceq 'Wallpaper Engine Service') { [pscustomobject]@{ StartMode = 'Manual'; Running = $false } } else { $null }
         $upgradedServices += [pscustomobject]@{
             Name = [string]$entry.Name
             Before = $before
-            Target = $target
+            Target = $null
             ChangedByUs = $false
             Applied = $false
             Restored = $false
@@ -734,12 +650,11 @@ function Upgrade-LegacyState {
     $upgradedTasks = @()
     foreach ($entry in @($LegacyState.Tasks)) {
         $before = if ($entry.PSObject.Properties.Name -contains 'Before') { $entry.Before } else { [pscustomobject]@{ Enabled = [bool]$entry.WasEnabled } }
-        $target = if ([string]$entry.TaskName -ceq 'nefarius_VirtualPad_Updater' -and [string]$entry.TaskPath -ceq '\') { [pscustomobject]@{ Enabled = $false } } else { $null }
         $upgradedTasks += [pscustomobject]@{
             TaskName = [string]$entry.TaskName
             TaskPath = [string]$entry.TaskPath
             Before = $before
-            Target = $target
+            Target = $null
             ChangedByUs = $false
             Applied = $false
             Restored = $false
@@ -826,7 +741,7 @@ try {
     $existingState = $null
     if (Test-Path -LiteralPath $latestStatePointer -PathType Leaf) {
         if ((Get-Item -LiteralPath $latestStatePointer -Force).Length -gt 4096) {
-            throw 'The MAX FPS state pointer exceeds the safe size limit.'
+            throw 'The Boostix state pointer exceeds the safe size limit.'
         }
         $pointerText = (Get-Content -LiteralPath $latestStatePointer -Raw -Encoding UTF8).Trim()
         if ($pointerText) {
@@ -892,7 +807,7 @@ try {
                 Status = 'BlockedActiveTransaction'
                 OperationId = $(if ($existingState.PSObject.Properties.Name -contains 'OperationId') { $existingState.OperationId } else { $null })
                 StateFile = $existingStatePath
-                Message = 'An active MAX FPS transaction already exists. Use -AdoptExistingState or restore it first.'
+                Message = 'An active Boostix optimization transaction already exists. Use -AdoptExistingState or restore it first.'
             }
             Write-ResultJson -Value $blockedResult -Depth 8
             $failureResultAlreadyWritten = $true
@@ -910,12 +825,12 @@ try {
         }
         $maxScheme = [string]$existingState.MaxPowerScheme
         if (-not (Test-GuidText -Value $maxScheme) -or -not (Test-PowerSchemeExists -Guid $maxScheme)) {
-            throw "The adopted state references a missing MAX FPS power scheme: $maxScheme"
+            throw "The adopted state references a missing Boostix power scheme: $maxScheme"
         }
         $activeScheme = Get-ActivePowerScheme
         $powerPlanPreserved = $activeScheme -ne $maxScheme.ToLowerInvariant()
         if ($powerPlanPreserved) {
-            Set-ObjectProperty -Object $existingState -Name 'Warnings' -Value (@($existingState.Warnings) + 'The active power plan differs from the adopted MAX FPS plan and was preserved as a user override.')
+            Set-ObjectProperty -Object $existingState -Name 'Warnings' -Value (@($existingState.Warnings) + 'The active power plan differs from the adopted Boostix plan and was preserved as a user override.')
             Write-ProtectedJsonAtomic -Path $existingStatePath -Value $existingState
         }
         Write-ProtectedTextAtomic -Path $latestStatePointer -Text $existingStatePath
@@ -944,6 +859,7 @@ try {
 
         $state = [ordered]@{
             Version = 2
+            Profile = 'BoostixWindowsPerformanceV1'
             OperationId = $operationId
             Status = 'Applying'
             Phase = 'Prepared'
@@ -1028,62 +944,6 @@ try {
             }
         }
 
-        function Apply-PreparedFile {
-            param(
-                [Parameter(Mandatory = $true)][string]$Original,
-                [Parameter(Mandatory = $true)][string]$Prepared,
-                [Parameter(Mandatory = $true)][string]$Purpose
-            )
-            Assert-ManagedFileNotReparse -Path $Original
-            Assert-NoReparsePath -Path $Prepared -StopAt $backupDirectory
-            $backup = Join-Path $backupDirectory ('{0}-{1}' -f [Guid]::NewGuid().ToString('N'), (Split-Path -Leaf $Original))
-            Copy-Item -LiteralPath $Original -Destination $backup -Force
-            Set-ProtectedFileSecurity -Path $backup
-            $beforeHash = Get-FileSha256 -Path $Original
-            $backupHash = Get-FileSha256 -Path $backup
-            $afterHash = Get-FileSha256 -Path $Prepared
-            if (-not $beforeHash -or $beforeHash -ne $backupHash -or -not $afterHash) {
-                throw "File backup/hash verification failed for $Original"
-            }
-            $changedByUs = $beforeHash -ne $afterHash
-            $entry = [pscustomobject]@{
-                Original = $Original
-                Backup = $backup
-                BeforeHash = $beforeHash
-                AfterHash = $afterHash
-                Target = $afterHash
-                ChangedByUs = $changedByUs
-                Applied = (-not $changedByUs)
-                Purpose = $Purpose
-                Restored = $false
-                RestoredAt = $null
-            }
-            $state.Files = @($state.Files) + $entry
-            Save-State
-            if ($changedByUs) {
-                Assert-ManagedFileNotReparse -Path $Original
-                if ((Get-FileSha256 -Path $Original) -ne $beforeHash) {
-                    $entry.ChangedByUs = $false
-                    $entry.Applied = $false
-                    Set-ObjectProperty -Object $entry -Name 'Conflict' -Value 'OriginalChangedBeforeReplacement'
-                    Save-State
-                    if (Test-Path -LiteralPath $Prepared) { Remove-Item -LiteralPath $Prepared -Force }
-                    Add-Warning -Message "Managed file changed while Boost was preparing it and was preserved: $Original"
-                    return $entry
-                }
-                Replace-FileWithoutRetainedBackup -Source $Prepared -Destination $Original
-                if ((Get-FileSha256 -Path $Original) -ne $afterHash) {
-                    throw "File replacement verification failed for $Original"
-                }
-                $entry.Applied = $true
-                Save-State
-            }
-            elseif (Test-Path -LiteralPath $Prepared) {
-                Remove-Item -LiteralPath $Prepared -Force
-            }
-            return $entry
-        }
-
         Save-State
         Write-ProtectedTextAtomic -Path $latestStatePointer -Text $statePath
         Start-Transcript -Path $logPath -Force | Out-Null
@@ -1152,12 +1012,12 @@ try {
 
         if ($duplicateFailure) { throw $duplicateFailure }
 
-        [void](Invoke-PowerCfg -Arguments @('/changename', $maxPowerScheme, 'Majestic Boost MAX FPS', 'Reversible desktop gaming performance plan.'))
+        [void](Invoke-PowerCfg -Arguments @('/changename', $maxPowerScheme, 'Boostix Performance', 'Reversible Windows performance profile created by Boostix.'))
         $state.Phase = 'ApplyingSettings'
         Save-State
 
         try {
-            Microsoft.PowerShell.Management\Checkpoint-Computer -Description 'Before Majestic Boost MAX FPS optimization' -RestorePointType MODIFY_SETTINGS | Out-Null
+            Microsoft.PowerShell.Management\Checkpoint-Computer -Description 'Before Boostix performance optimization' -RestorePointType MODIFY_SETTINGS | Out-Null
         }
         catch {
             Add-Warning -Message "Restore point was not created: $($_.Exception.Message)"
@@ -1183,7 +1043,7 @@ try {
         }
         [void](Invoke-PowerCfg -Arguments @('/setactive', $maxPowerScheme))
         if ((Get-ActivePowerScheme) -ne $maxPowerScheme) {
-            throw 'MAX FPS power scheme activation verification failed.'
+            throw 'Boostix power scheme activation verification failed.'
         }
 
         Set-TrackedRegistryValue -Path 'HKCU:\Software\Microsoft\GameBar' -Name 'AutoGameModeEnabled' -Value 1 -Kind DWord
@@ -1191,306 +1051,12 @@ try {
         Set-TrackedRegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR' -Name 'AppCaptureEnabled' -Value 0 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR' -Name 'HistoricalCaptureEnabled' -Value 0 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKCU:\System\GameConfigStore' -Name 'GameDVR_Enabled' -Value 0 -Kind DWord
-        Set-TrackedRegistryValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' -Name 'HwSchMode' -Value 2 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling' -Name 'PowerThrottlingOff' -Value 1 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' -Name 'SystemResponsiveness' -Value 10 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects' -Name 'VisualFXSetting' -Value 2 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'EnableTransparency' -Value 0 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Dsh' -Name 'AllowNewsAndInterests' -Value 0 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Dsh' -Name 'IsPrelaunchEnabled' -Value 0 -Kind DWord
-
-        $shadowPlayKey = 'HKCU:\SOFTWARE\NVIDIA Corporation\Global\ShadowPlay\NVSPCAPS'
-        $disabledBinary = [byte[]](0, 0, 0, 0)
-        foreach ($shadowPlayValue in @(
-            'RecEnabled', 'DwmEnabled', 'DwmDvrEnabledV1', 'EnableMicrophone',
-            'IsShadowPlayEnabled', 'IsShadowPlayEnabledUser', 'HLEnabled', 'DwmEnabledUser'
-        )) {
-            Set-TrackedRegistryValue -Path $shadowPlayKey -Name $shadowPlayValue -Value $disabledBinary -Kind Binary
-        }
-
-        $gpuPreferenceKey = 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences'
-        $gpuExecutables = New-Object System.Collections.Generic.List[string]
-        $manifestDirectory = Join-Path $programDataRoot 'Epic\EpicGamesLauncher\Data\Manifests'
-        if (Test-Path -LiteralPath $manifestDirectory) {
-            foreach ($manifestFile in Get-ChildItem -LiteralPath $manifestDirectory -Filter '*.item' -File) {
-                try {
-                    $manifest = Get-Content -LiteralPath $manifestFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-                    if ($manifest.DisplayName -eq 'Grand Theft Auto V' -and (Test-Path -LiteralPath $manifest.InstallLocation)) {
-                        foreach ($exeName in @('GTA5.exe', 'GTA5_Enhanced.exe', 'GTA5_BE.exe', 'PlayGTAV.exe')) {
-                            $candidate = Join-Path $manifest.InstallLocation $exeName
-                            if (Test-Path -LiteralPath $candidate) { $gpuExecutables.Add($candidate) }
-                        }
-                    }
-                }
-                catch {
-                    Add-Warning -Message "Epic manifest could not be parsed ($($manifestFile.FullName)): $($_.Exception.Message)"
-                }
-            }
-        }
-        foreach ($candidate in @(
-            (Join-Path $env:LOCALAPPDATA 'MajesticLauncher\Majestic Launcher.exe'),
-            (Join-Path $env:APPDATA 'majestic-launcher\Multiplayer\backup\GTA5.exe'),
-            (Join-Path $env:APPDATA 'majestic-launcher\Multiplayer\backup\GTA5_Enhanced.exe')
-        )) {
-            if (Test-Path -LiteralPath $candidate) { $gpuExecutables.Add($candidate) }
-        }
-        foreach ($exePath in $gpuExecutables | Select-Object -Unique) {
-            Set-TrackedRegistryValue -Path $gpuPreferenceKey -Name $exePath -Value 'GpuPreference=2;' -Kind String
-        }
-
-        $documents = [Environment]::GetFolderPath('MyDocuments')
-        $gtaSettingsPath = Join-Path $documents 'Rockstar Games\GTA V\settings.xml'
-        if (Test-Path -LiteralPath $gtaSettingsPath -PathType Leaf) {
-            try {
-                Assert-ManagedFileNotReparse -Path $gtaSettingsPath
-                [xml]$settings = Get-Content -LiteralPath $gtaSettingsPath -Raw -Encoding UTF8
-                $settingsChanged = $false
-                if ($settings.Settings.graphics.AnisotropicFiltering -and $settings.Settings.graphics.AnisotropicFiltering.value -ne '0') {
-                    $settings.Settings.graphics.AnisotropicFiltering.value = '0'
-                    $settingsChanged = $true
-                }
-                if ($settings.Settings.graphics.FXAA_Enabled -and $settings.Settings.graphics.FXAA_Enabled.value -ne 'false') {
-                    $settings.Settings.graphics.FXAA_Enabled.value = 'false'
-                    $settingsChanged = $true
-                }
-                if ($settingsChanged) {
-                    $prepared = Join-Path $backupDirectory 'prepared-gta-settings.xml'
-                    $xmlWriterSettings = New-Object Xml.XmlWriterSettings
-                    $xmlWriterSettings.Encoding = $utf8NoBom
-                    $xmlWriterSettings.Indent = $true
-                    $writer = [Xml.XmlWriter]::Create($prepared, $xmlWriterSettings)
-                    try { $settings.Save($writer) } finally { $writer.Dispose() }
-                    Set-ProtectedFileSecurity -Path $prepared
-                    [void](Apply-PreparedFile -Original $gtaSettingsPath -Prepared $prepared -Purpose 'GTA V graphics settings')
-                }
-            }
-            catch {
-                Add-Warning -Message "Optional GTA V settings optimization was skipped safely: $($_.Exception.Message)"
-            }
-        }
-
-        $majesticConfigPath = Join-Path $env:APPDATA 'majestic-launcher\Multiplayer\majestic.json'
-        if (Test-Path -LiteralPath $majesticConfigPath -PathType Leaf) {
-            try {
-                Assert-ManagedFileNotReparse -Path $majesticConfigPath
-                $majesticConfig = Get-Content -LiteralPath $majesticConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                $majesticChanged = $false
-                foreach ($propertyName in @('netgraph', 'expandedConsole', 'discordRichPresence')) {
-                    if (($majesticConfig.PSObject.Properties.Name -contains $propertyName) -and [bool]$majesticConfig.$propertyName) {
-                        $majesticConfig.$propertyName = $false
-                        $majesticChanged = $true
-                    }
-                }
-                if ($majesticChanged) {
-                    $prepared = Join-Path $backupDirectory 'prepared-majestic.json'
-                    [IO.File]::WriteAllText($prepared, ($majesticConfig | ConvertTo-Json -Depth 20), $utf8NoBom)
-                    Set-ProtectedFileSecurity -Path $prepared
-                    [void](Apply-PreparedFile -Original $majesticConfigPath -Prepared $prepared -Purpose 'Majestic client settings')
-                }
-            }
-            catch {
-                Add-Warning -Message "Optional Majestic client settings optimization was skipped safely: $($_.Exception.Message)"
-            }
-        }
-
-        # Never execute PATH-resolved helpers or modify live SteelSeries SQLite
-        # databases from an elevated process.  That optional optimization is
-        # deliberately omitted because safe ownership/locking cannot be proven.
-        Add-Warning -Message 'SteelSeries GG/Moments database optimization was skipped for security; no live databases were modified.'
-
-        $wallpaperServiceName = 'Wallpaper Engine Service'
-        $serviceBefore = Get-ServiceSnapshot -Name $wallpaperServiceName
-        if ($serviceBefore) {
-            $serviceTarget = [pscustomobject]@{ StartMode = 'Manual'; Running = $false }
-            $serviceChanged = -not (Test-ValueEqual -Left $serviceBefore -Right $serviceTarget)
-            $serviceEntry = [pscustomobject]@{
-                Name = $wallpaperServiceName
-                Before = $serviceBefore
-                Target = $serviceTarget
-                ChangedByUs = $serviceChanged
-                Applied = (-not $serviceChanged)
-                Restored = $false
-                RestoredAt = $null
-            }
-            $state.Services = @($state.Services) + $serviceEntry
-            Save-State
-            if ($serviceChanged) {
-                $serviceBeforeWrite = Get-ServiceSnapshot -Name $wallpaperServiceName
-                if (-not (Test-ValueEqual -Left $serviceBeforeWrite -Right $serviceBefore)) {
-                    $serviceEntry.ChangedByUs = $false
-                    $serviceEntry.Applied = $false
-                    Set-ObjectProperty -Object $serviceEntry -Name 'Conflict' -Value 'ServiceChangedBeforeWrite'
-                    $state.Conflicts = @($state.Conflicts) + 'Wallpaper Engine service changed while Boost was preparing it and was preserved.'
-                    Save-State
-                }
-                else {
-                    Set-Service -Name $wallpaperServiceName -StartupType Manual -ErrorAction Stop
-                    Stop-Service -Name $wallpaperServiceName -Force -ErrorAction Stop
-                if (-not (Test-ValueEqual -Left (Get-ServiceSnapshot -Name $wallpaperServiceName) -Right $serviceTarget)) {
-                    throw 'Wallpaper Engine service optimization verification failed.'
-                }
-                $serviceEntry.Applied = $true
-                Save-State
-                }
-            }
-        }
-
-        $virtualPadTaskName = 'nefarius_VirtualPad_Updater'
-        $virtualPadTaskPath = '\'
-        $taskBefore = Get-TaskSnapshot -TaskName $virtualPadTaskName -TaskPath $virtualPadTaskPath
-        if ($taskBefore) {
-            $taskTarget = [pscustomobject]@{ Enabled = $false }
-            $taskChanged = -not (Test-ValueEqual -Left $taskBefore -Right $taskTarget)
-            $taskEntry = [pscustomobject]@{
-                TaskName = $virtualPadTaskName
-                TaskPath = $virtualPadTaskPath
-                Before = $taskBefore
-                Target = $taskTarget
-                ChangedByUs = $taskChanged
-                Applied = (-not $taskChanged)
-                Restored = $false
-                RestoredAt = $null
-            }
-            $state.Tasks = @($state.Tasks) + $taskEntry
-            Save-State
-            if ($taskChanged) {
-                $taskBeforeWrite = Get-TaskSnapshot -TaskName $virtualPadTaskName -TaskPath $virtualPadTaskPath
-                if (-not (Test-ValueEqual -Left $taskBeforeWrite -Right $taskBefore)) {
-                    $taskEntry.ChangedByUs = $false
-                    $taskEntry.Applied = $false
-                    Set-ObjectProperty -Object $taskEntry -Name 'Conflict' -Value 'TaskChangedBeforeWrite'
-                    $state.Conflicts = @($state.Conflicts) + 'VirtualPad updater task changed while Boost was preparing it and was preserved.'
-                    Save-State
-                }
-                else {
-                    ScheduledTasks\Disable-ScheduledTask -TaskName $virtualPadTaskName -TaskPath $virtualPadTaskPath | Out-Null
-                    if (-not (Test-ValueEqual -Left (Get-TaskSnapshot -TaskName $virtualPadTaskName -TaskPath $virtualPadTaskPath) -Right $taskTarget)) {
-                        throw 'VirtualPad updater task optimization verification failed.'
-                    }
-                    $taskEntry.Applied = $true
-                    Save-State
-                }
-            }
-        }
-
-        $spUserOriginal = Join-Path $programFilesRoot 'NVIDIA Corporation\NvContainer\plugins\SPUser'
-        $spUserParent = Split-Path -Parent $spUserOriginal
-        $spUserDisabled = Join-Path $spUserParent ("SPUser.disabled-by-majesticboost-$operationId")
-        Assert-NoReparsePath -Path $spUserParent -StopAt $programFilesRoot
-        $otherDisabled = @()
-        if (Test-Path -LiteralPath $spUserParent) {
-            $otherDisabled = @(Get-ChildItem -LiteralPath $spUserParent -Directory -Filter 'SPUser.disabled-by-*' -ErrorAction SilentlyContinue)
-        }
-        if (Test-Path -LiteralPath $spUserDisabled) {
-            $state.Conflicts = @($state.Conflicts) + "SPUser target already exists: $spUserDisabled"
-            Save-State
-        }
-        elseif ((Test-Path -LiteralPath $spUserOriginal) -and $otherDisabled.Count -eq 0) {
-            $moveEntry = [pscustomobject]@{
-                Original = $spUserOriginal
-                Disabled = $spUserDisabled
-                Target = [pscustomobject]@{ OriginalExists = $false; DisabledExists = $true }
-                ChangedByUs = $true
-                Applied = $false
-                Conflict = $null
-                Restored = $false
-                RestoredAt = $null
-            }
-            $state.MovedDirectories = @($state.MovedDirectories) + $moveEntry
-            Save-State
-            Assert-NoReparsePath -Path $spUserParent -StopAt $programFilesRoot
-            $currentOtherDisabled = @(Get-ChildItem -LiteralPath $spUserParent -Directory -Filter 'SPUser.disabled-by-*' -ErrorAction SilentlyContinue)
-            $spUserItem = Get-Item -LiteralPath $spUserOriginal -Force -ErrorAction SilentlyContinue
-            if (-not $spUserItem -or -not $spUserItem.PSIsContainer -or
-                (($spUserItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) -or
-                (Test-Path -LiteralPath $spUserDisabled) -or $currentOtherDisabled.Count -gt 0) {
-                $moveEntry.ChangedByUs = $false
-                $moveEntry.Applied = $false
-                $moveEntry.Conflict = 'DirectoryChangedBeforeMove'
-                $state.Conflicts = @($state.Conflicts) + 'SPUser directory changed while Boost was preparing it and was preserved.'
-                Save-State
-            }
-            else {
-                Move-Item -LiteralPath $spUserOriginal -Destination $spUserDisabled
-                if ((Test-Path -LiteralPath $spUserOriginal) -or -not (Test-Path -LiteralPath $spUserDisabled)) {
-                    throw 'SPUser directory move verification failed.'
-                }
-                $moveEntry.Applied = $true
-                Save-State
-            }
-        }
-        elseif ($otherDisabled.Count -gt 0 -or -not (Test-Path -LiteralPath $spUserOriginal)) {
-            $description = 'SPUser was not changed because its current/orphaned disabled-directory state is ambiguous.'
-            $state.Conflicts = @($state.Conflicts) + $description
-            Save-State
-        }
-
-        try {
-            $defenderBefore = Get-DefenderSnapshot
-            $defenderTarget = [pscustomobject]@{
-                PUAProtection = 1
-                MAPSReporting = 2
-                SubmitSamplesConsent = 1
-                DisableRemovableDriveScanning = $false
-            }
-            $defenderSettings = @()
-            foreach ($settingName in @('PUAProtection', 'MAPSReporting', 'SubmitSamplesConsent', 'DisableRemovableDriveScanning')) {
-                $needsChange = -not (Test-ValueEqual -Left $defenderBefore.$settingName -Right $defenderTarget.$settingName)
-                $defenderSettings += [pscustomobject]@{
-                    Name = $settingName
-                    Before = $defenderBefore.$settingName
-                    Target = $defenderTarget.$settingName
-                    ChangedByUs = $needsChange
-                    Applied = (-not $needsChange)
-                    Error = $null
-                    Restored = $false
-                    RestoredAt = $null
-                }
-            }
-            $state.Defender = [pscustomobject]@{
-                Before = $defenderBefore
-                Target = $defenderTarget
-                ChangedByUs = [bool](@($defenderSettings | Where-Object { $_.ChangedByUs }).Count -gt 0)
-                Applied = $false
-                Settings = $defenderSettings
-            }
-            Save-State
-            foreach ($setting in $defenderSettings) {
-                if (-not $setting.ChangedByUs) { continue }
-                try {
-                    $defenderBeforeWrite = Get-DefenderSnapshot
-                    if (-not (Test-ValueEqual -Left $defenderBeforeWrite.($setting.Name) -Right $setting.Before)) {
-                        $setting.ChangedByUs = $false
-                        $setting.Applied = $false
-                        $setting.Error = 'SettingChangedBeforeWrite'
-                        $state.Conflicts = @($state.Conflicts) + "Defender setting changed while Boost was preparing it and was preserved: $($setting.Name)"
-                        Save-State
-                        continue
-                    }
-                    switch ($setting.Name) {
-                        'PUAProtection' { Defender\Set-MpPreference -PUAProtection Enabled }
-                        'MAPSReporting' { Defender\Set-MpPreference -MAPSReporting Advanced }
-                        'SubmitSamplesConsent' { Defender\Set-MpPreference -SubmitSamplesConsent SendSafeSamples }
-                        'DisableRemovableDriveScanning' { Defender\Set-MpPreference -DisableRemovableDriveScanning $false }
-                    }
-                    $currentDefender = Get-DefenderSnapshot
-                    if (-not (Test-ValueEqual -Left $currentDefender.($setting.Name) -Right $setting.Target)) {
-                        throw "Defender setting verification failed: $($setting.Name)"
-                    }
-                    $setting.Applied = $true
-                }
-                catch {
-                    $setting.Error = $_.Exception.Message
-                    Add-Warning -Message "Defender setting $($setting.Name) was not applied: $($_.Exception.Message)"
-                }
-                Save-State
-            }
-            $state.Defender.Applied = @($defenderSettings | Where-Object { $_.ChangedByUs -and -not $_.Applied }).Count -eq 0
-            Save-State
-        }
-        catch {
-            Add-Warning -Message "Defender hardening was unavailable and was skipped: $($_.Exception.Message)"
-        }
 
         $state.Status = 'Active'
         $state.Phase = 'Active'

@@ -13,11 +13,23 @@ $wpfRoot = Join-Path $frameworkRoot 'WPF'
 $compiler = Join-Path $frameworkRoot 'csc.exe'
 $workDirectory = Join-Path $projectRoot 'work'
 $distDirectory = Join-Path $projectRoot 'dist'
-$releaseVersion = '1.8.1'
-$appOutput = Join-Path $workDirectory 'MajesticBoost.exe'
-$setupOutput = Join-Path $workDirectory "MajesticBoost-Setup-$releaseVersion.exe"
-$versionedSetupOutput = Join-Path $distDirectory "MajesticBoost-Setup-$releaseVersion.exe"
-$latestSetupOutput = Join-Path $distDirectory 'MajesticBoost-Setup-Latest.exe'
+$brandSourcePath = Join-Path $projectRoot 'ProductBrand.cs'
+$brandSource = [IO.File]::ReadAllText($brandSourcePath)
+$versionMatch = [regex]::Match(
+    $brandSource,
+    'ProductVersion\s*=\s*"(?<version>[0-9]+\.[0-9]+\.[0-9]+)"')
+if (-not $versionMatch.Success) {
+    throw "Product version was not found in $brandSourcePath"
+}
+$releaseVersion = $versionMatch.Groups['version'].Value
+$appOutput = Join-Path $workDirectory 'Boostix.exe'
+$setupOutput = Join-Path $workDirectory "Boostix-Setup-$releaseVersion.exe"
+$legacySetupOutput = Join-Path $workDirectory (
+    "MajesticBoost-Setup-$releaseVersion.exe")
+$versionedSetupOutput = Join-Path $distDirectory "Boostix-Setup-$releaseVersion.exe"
+$latestSetupOutput = Join-Path $distDirectory 'Boostix-Setup-Latest.exe'
+$legacyCompatibilitySetupOutput = Join-Path $distDirectory (
+    "MajesticBoost-Setup-$releaseVersion.exe")
 $presentMonPath = Join-Path $projectRoot 'third_party\PresentMon\PresentMon.exe'
 $presentMonLicensePath = Join-Path $projectRoot 'third_party\PresentMon\LICENSE.txt'
 $presentMonThirdPartyPath = Join-Path $projectRoot 'third_party\PresentMon\THIRD_PARTY.txt'
@@ -41,13 +53,24 @@ foreach ($licensePath in @($presentMonLicensePath, $presentMonThirdPartyPath)) {
 [void](New-Item -ItemType Directory -Path $workDirectory -Force)
 [void](New-Item -ItemType Directory -Path $distDirectory -Force)
 
+# A Boostix release must not leave a stale legacy "Latest" binary beside the
+# newly produced artifacts. Match only known product executable names directly
+# under dist; release history remains recoverable from Git.
+$resolvedDistDirectory = [IO.Path]::GetFullPath($distDirectory)
+foreach ($legacyArtifact in Get-ChildItem -LiteralPath $resolvedDistDirectory -File) {
+    if ((Split-Path -Parent $legacyArtifact.FullName) -ceq $resolvedDistDirectory -and
+        $legacyArtifact.Name -cmatch '^MajesticBoost(?:-Setup-(?:Latest|[0-9]+\.[0-9]+\.[0-9]+))?\.exe$') {
+        Remove-Item -LiteralPath $legacyArtifact.FullName -Force
+    }
+}
+
 $appArguments = @(
     '/nologo',
     '/target:winexe',
     '/platform:anycpu',
     '/optimize+',
-    "/win32icon:$projectRoot\MajesticBoost\MajesticBoost.ico",
-    "/win32manifest:$projectRoot\MajesticBoost\app.manifest",
+    "/win32icon:$projectRoot\Boostix\Boostix.ico",
+    "/win32manifest:$projectRoot\Boostix\app.manifest",
     '/reference:System.dll',
     '/reference:System.Core.dll',
     '/reference:System.Management.dll',
@@ -56,19 +79,20 @@ $appArguments = @(
     "/reference:$wpfRoot\PresentationCore.dll",
     "/reference:$wpfRoot\PresentationFramework.dll",
     "/out:$appOutput",
-    "$projectRoot\MajesticBoost\Program.cs",
-    "$projectRoot\MajesticBoost\BoostFeatures.cs",
-    "$projectRoot\MajesticBoost\DiagnosticsFeatures.cs",
-    "$projectRoot\MajesticBoost\SessionInsights.cs",
-    "$projectRoot\MajesticBoost\BoostCenterOverlay.cs",
-    "$projectRoot\MajesticBoost\PerformanceCapture.cs",
-    "$projectRoot\MajesticBoost\OptimizationFlow.cs",
-    "$projectRoot\MajesticBoost\UpdateFlow.cs"
+    "$projectRoot\ProductBrand.cs",
+    "$projectRoot\Boostix\Program.cs",
+    "$projectRoot\Boostix\BoostFeatures.cs",
+    "$projectRoot\Boostix\DiagnosticsFeatures.cs",
+    "$projectRoot\Boostix\SessionInsights.cs",
+    "$projectRoot\Boostix\BoostCenterOverlay.cs",
+    "$projectRoot\Boostix\PerformanceCapture.cs",
+    "$projectRoot\Boostix\OptimizationFlow.cs",
+    "$projectRoot\Boostix\UpdateFlow.cs"
 )
 
 & $compiler @appArguments
 if ($LASTEXITCODE -ne 0) {
-    throw "Majestic Boost compilation failed with exit code $LASTEXITCODE."
+    throw "Boostix compilation failed with exit code $LASTEXITCODE."
 }
 
 $setupArguments = @(
@@ -76,35 +100,53 @@ $setupArguments = @(
     '/target:winexe',
     '/platform:anycpu',
     '/optimize+',
-    "/win32icon:$projectRoot\MajesticBoost\MajesticBoost.ico",
-    "/win32manifest:$projectRoot\MajesticBoostInstaller\app.manifest",
+    "/win32icon:$projectRoot\Boostix\Boostix.ico",
+    "/win32manifest:$projectRoot\BoostixInstaller\app.manifest",
     '/reference:System.dll',
     '/reference:System.Drawing.dll',
     '/reference:System.Windows.Forms.dll',
-    "/resource:$appOutput,MajesticBoost.Payload.exe",
-    "/resource:$projectRoot\outputs\Game-Boost.ps1,MajesticBoost.GameBoost.ps1",
-    "/resource:$projectRoot\outputs\MaxFPS-Apply.ps1,MajesticBoost.MaxFPSApply.ps1",
-    "/resource:$projectRoot\outputs\MaxFPS-Restore.ps1,MajesticBoost.MaxFPSRestore.ps1",
-    "/resource:$presentMonPath,MajesticBoost.PresentMon.exe",
-    "/resource:$presentMonLicensePath,MajesticBoost.PresentMon.License.txt",
-    "/resource:$presentMonThirdPartyPath,MajesticBoost.PresentMon.ThirdParty.txt",
+    "/resource:$appOutput,Boostix.Payload.exe",
+    "/resource:$projectRoot\outputs\Boost-Session.ps1,Boostix.BoostSession.ps1",
+    "/resource:$projectRoot\outputs\MaxFPS-Apply.ps1,Boostix.MaxFPSApply.ps1",
+    "/resource:$projectRoot\outputs\MaxFPS-Restore.ps1,Boostix.MaxFPSRestore.ps1",
+    "/resource:$presentMonPath,Boostix.PresentMon.exe",
+    "/resource:$presentMonLicensePath,Boostix.PresentMon.License.txt",
+    "/resource:$presentMonThirdPartyPath,Boostix.PresentMon.ThirdParty.txt",
     "/out:$setupOutput",
-    "$projectRoot\MajesticBoostInstaller\Program.cs"
+    "$projectRoot\ProductBrand.cs",
+    "$projectRoot\BoostixInstaller\Program.cs"
 )
 
 & $compiler @setupArguments
 if ($LASTEXITCODE -ne 0) {
-    throw "Majestic Boost installer compilation failed with exit code $LASTEXITCODE."
+    throw "Boostix installer compilation failed with exit code $LASTEXITCODE."
 }
 
-Copy-Item -LiteralPath $appOutput -Destination (Join-Path $distDirectory 'MajesticBoost.exe') -Force
+$legacySetupArguments = @(
+    '/define:LEGACY_UPDATE_BRIDGE',
+    "/out:$legacySetupOutput"
+) + @(
+    $setupArguments | Where-Object {
+        -not $_.StartsWith('/out:', [StringComparison]::OrdinalIgnoreCase)
+    })
+& $compiler @legacySetupArguments
+if ($LASTEXITCODE -ne 0) {
+    throw "Boostix compatibility bridge compilation failed with exit code $LASTEXITCODE."
+}
+
+Copy-Item -LiteralPath $appOutput -Destination (Join-Path $distDirectory 'Boostix.exe') -Force
 Copy-Item -LiteralPath $setupOutput -Destination $versionedSetupOutput -Force
 Copy-Item -LiteralPath $setupOutput -Destination $latestSetupOutput -Force
+# Transport-only bridge for signed-manifest schema v1 clients. Only its file
+# version ProductName remains legacy for the strict 1.8.x validation contract;
+# its payload, UI, install paths, and shortcuts are Boostix.
+Copy-Item -LiteralPath $legacySetupOutput -Destination $legacyCompatibilitySetupOutput -Force
 
 $releaseFiles = @(
-    (Join-Path $distDirectory 'MajesticBoost.exe'),
+    (Join-Path $distDirectory 'Boostix.exe'),
     $versionedSetupOutput,
-    $latestSetupOutput
+    $latestSetupOutput,
+    $legacyCompatibilitySetupOutput
 )
 $hashes = Get-FileHash -Algorithm SHA256 -LiteralPath $releaseFiles
 $hashLines = foreach ($hash in $hashes) {
@@ -120,6 +162,10 @@ if ($PrepareSignedUpdate) {
     $installerHash = (
         Get-FileHash -Algorithm SHA256 -LiteralPath $versionedSetupOutput
     ).Hash
+    $legacyInstaller = Get-Item -LiteralPath $legacyCompatibilitySetupOutput
+    $legacyInstallerHash = (
+        Get-FileHash -Algorithm SHA256 -LiteralPath $legacyCompatibilitySetupOutput
+    ).Hash
     $manifestPath = Join-Path $projectRoot 'update-v2.json'
     $signaturePath = Join-Path $projectRoot 'update-v2.json.sig'
     $manifest = [string]::Join(
@@ -129,8 +175,11 @@ if ($PrepareSignedUpdate) {
             '  "schemaVersion": 1,',
             ('  "version": "' + $releaseVersion + '",'),
             ('  "installerUrl": "https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/dist/MajesticBoost-Setup-' + $releaseVersion + '.exe",'),
-            ('  "sha256": "' + $installerHash + '",'),
-            ('  "size": ' + $installer.Length),
+            ('  "sha256": "' + $legacyInstallerHash + '",'),
+            ('  "size": ' + $legacyInstaller.Length + ','),
+            ('  "boostixInstallerUrl": "https://raw.githubusercontent.com/alosev394-ai/Boostix/main/dist/Boostix-Setup-' + $releaseVersion + '.exe",'),
+            ('  "boostixSha256": "' + $installerHash + '",'),
+            ('  "boostixSize": ' + $installer.Length),
             '}',
             ''
         ))

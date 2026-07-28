@@ -11,17 +11,18 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $ApplicationPath) {
-    $ApplicationPath = Join-Path $projectRoot 'dist\MajesticBoost.exe'
+    $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
 }
 $ApplicationPath = (Resolve-Path -LiteralPath $ApplicationPath).Path
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 
-$activateName = [Text.Encoding]::UTF8.GetString(
-    [Convert]::FromBase64String('0JDQutGC0LjQstC40YDQvtCy0LDRgtGMIEJvb3N0INC/0YDQvtC40LfQstC+0LTQuNGC0LXQu9GM0L3QvtGB0YLQuA=='))
-$deactivateName = [Text.Encoding]::UTF8.GetString(
-    [Convert]::FromBase64String('0J7RgtC60LvRjtGH0LjRgtGMIEJvb3N0INC/0YDQvtC40LfQstC+0LTQuNGC0LXQu9GM0L3QvtGB0YLQuA=='))
+$activatePrefix = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String('0JDQutGC0LjQstC40YDQvtCy0LDRgtGM'))
+$deactivatePrefix = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String('0J7RgtC60LvRjtGH0LjRgtGM'))
+$boostAutomationId = 'Boostix.Activate'
 
 function Wait-ForMainWindow {
     param([Diagnostics.Process]$Process, [int]$TimeoutMilliseconds)
@@ -40,25 +41,32 @@ function Wait-ForMainWindow {
     throw 'Portable application window did not appear.'
 }
 
-function Wait-ForButton {
+function Wait-ForButtonState {
     param(
         [Windows.Automation.AutomationElement]$Root,
-        [string]$Name,
+        [string]$AutomationId,
+        [string]$ExpectedNamePrefix,
         [int]$TimeoutMilliseconds
     )
 
     $condition = New-Object Windows.Automation.PropertyCondition(
-        [Windows.Automation.AutomationElement]::NameProperty,
-        $Name)
+        [Windows.Automation.AutomationElement]::AutomationIdProperty,
+        $AutomationId)
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     while ([DateTime]::UtcNow -lt $deadline) {
         $button = $Root.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
-        if ($button -and $button.Current.IsEnabled) {
+        if ($button -and
+            $button.Current.IsEnabled -and
+            $button.Current.Name.StartsWith(
+                $ExpectedNamePrefix,
+                [StringComparison]::CurrentCultureIgnoreCase)) {
             return $button
         }
         Start-Sleep -Milliseconds 100
     }
-    throw "Button state did not appear: $Name"
+    throw (
+        "Button state did not appear: $AutomationId / " +
+        "$ExpectedNamePrefix")
 }
 
 function Invoke-AutomationButton {
@@ -85,7 +93,11 @@ $process = $null
 try {
     $process = Start-Process -FilePath $ApplicationPath -ArgumentList '--skip-setup', '--demo' -PassThru
     $window = Wait-ForMainWindow -Process $process -TimeoutMilliseconds 8000
-    $activateButton = Wait-ForButton -Root $window -Name $activateName -TimeoutMilliseconds 20000
+    $activateButton = Wait-ForButtonState `
+        -Root $window `
+        -AutomationId $boostAutomationId `
+        -ExpectedNamePrefix $activatePrefix `
+        -TimeoutMilliseconds 20000
 
     $bounds = $window.Current.BoundingRectangle
     $aspectRatio = $bounds.Height / $bounds.Width
@@ -97,11 +109,19 @@ try {
     }
 
     Invoke-AutomationButton -Button $activateButton
-    $deactivateButton = Wait-ForButton -Root $window -Name $deactivateName -TimeoutMilliseconds 5000
-    $monitorSignal = Join-Path $env:TEMP ("MajesticBoost-demo-monitor-$($process.Id).flag")
+    $deactivateButton = Wait-ForButtonState `
+        -Root $window `
+        -AutomationId $boostAutomationId `
+        -ExpectedNamePrefix $deactivatePrefix `
+        -TimeoutMilliseconds 5000
+    $monitorSignal = Join-Path $env:TEMP ("Boostix-demo-monitor-$($process.Id).flag")
     Wait-ForPathState -Path $monitorSignal -Exists $true -TimeoutMilliseconds 3000
     Invoke-AutomationButton -Button $deactivateButton
-    [void](Wait-ForButton -Root $window -Name $activateName -TimeoutMilliseconds 5000)
+    [void](Wait-ForButtonState `
+        -Root $window `
+        -AutomationId $boostAutomationId `
+        -ExpectedNamePrefix $activatePrefix `
+        -TimeoutMilliseconds 5000)
     Wait-ForPathState -Path $monitorSignal -Exists $false -TimeoutMilliseconds 3000
 
     "Boost UI state test passed: $($bounds.Width)x$($bounds.Height), activate -> deactivate."

@@ -100,10 +100,10 @@ public sealed class MajesticBoostSlowDripServer : IDisposable
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $ApplicationPath) {
-    $ApplicationPath = Join-Path $projectRoot 'dist\MajesticBoost.exe'
+    $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
 }
 if (-not $InstallerPath) {
-    $InstallerPath = Join-Path $projectRoot 'dist\MajesticBoost-Setup-1.8.1.exe'
+    $InstallerPath = Join-Path $projectRoot 'dist\Boostix-Setup-1.9.0.exe'
 }
 $ApplicationPath = (Resolve-Path -LiteralPath $ApplicationPath).Path
 $InstallerPath = (Resolve-Path -LiteralPath $InstallerPath).Path
@@ -155,7 +155,7 @@ catch [IO.IOException] {
     }
 }
 
-$sourcePath = Join-Path $projectRoot 'MajesticBoost\UpdateFlow.cs'
+$sourcePath = Join-Path $projectRoot 'Boostix\UpdateFlow.cs'
 $source = [IO.File]::ReadAllText($sourcePath)
 $downloadClose = $source.IndexOf('using (var downloadStream = new FileStream(', [StringComparison]::Ordinal)
 $verificationOpen = $source.IndexOf('using (FileStream verificationStream = OpenInstallerForVerification(installerPath))', [StringComparison]::Ordinal)
@@ -164,7 +164,7 @@ if ($downloadClose -lt 0 -or $verificationOpen -le $downloadClose) {
 }
 
 $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($ApplicationPath))
-$overlayType = $assembly.GetType('MajesticBoost.UpdateFlowOverlay', $true, $false)
+$overlayType = $assembly.GetType('Boostix.UpdateFlowOverlay', $true, $false)
 $staticFlags = [Reflection.BindingFlags]::NonPublic -bor [Reflection.BindingFlags]::Static
 $nestedFlags = [Reflection.BindingFlags]::NonPublic
 $openMethod = $overlayType.GetMethod('OpenInstallerForVerification', $staticFlags)
@@ -178,17 +178,18 @@ $transientFailureMethod = $overlayType.GetMethod('IsTransientManifestFailure', $
 $waitForRetryMethod = $overlayType.GetMethod('WaitForManifestRetry', $staticFlags)
 $downloadSmallFileMethod = $overlayType.GetMethod('DownloadSmallFile', $staticFlags)
 $createRequestMethod = $overlayType.GetMethod('CreateRequest', $staticFlags)
+$parseManifestMethod = $overlayType.GetMethod('ParseAndValidateManifest', $staticFlags)
 if (-not $openMethod -or -not $validateMethod -or -not $refreshMethod -or -not $lockMethod -or
     -not $buildHeadAddressMethod -or -not $parseHeadMethod -or -not $buildImmutableAddressMethod -or
     -not $transientFailureMethod -or -not $waitForRetryMethod -or -not $downloadSmallFileMethod -or
-    -not $createRequestMethod) {
+    -not $createRequestMethod -or -not $parseManifestMethod) {
     throw 'Compiled updater validation helpers were not found.'
 }
 
 $headAddressArguments = New-Object 'object[]' 1
 $headAddressArguments[0] = 'test-token-1'
 $headAddress = [string]$buildHeadAddressMethod.Invoke($null, $headAddressArguments)
-if ($headAddress -cne 'https://api.github.com/repos/alosev394-ai/MajesticBoost/git/ref/heads/main?mb=test-token-1') {
+if ($headAddress -cne 'https://api.github.com/repos/alosev394-ai/Boostix/git/ref/heads/main?mb=test-token-1') {
     throw "Repository-head cache-busting URL is unexpected: $headAddress"
 }
 
@@ -205,7 +206,7 @@ $immutableArguments = New-Object 'object[]' 2
 $immutableArguments[0] = $commitSha
 $immutableArguments[1] = 'update-v2.json'
 $immutableAddress = [string]$buildImmutableAddressMethod.Invoke($null, $immutableArguments)
-if ($immutableAddress -cne ('https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/' + $commitSha + '/update-v2.json')) {
+if ($immutableAddress -cne ('https://raw.githubusercontent.com/alosev394-ai/Boostix/' + $commitSha + '/update-v2.json')) {
     throw "Immutable manifest URL is unexpected: $immutableAddress"
 }
 
@@ -313,6 +314,79 @@ if (-not $manifestType -or -not $semanticType) {
     throw 'Compiled updater manifest types were not found.'
 }
 
+$dualManifestJson = @'
+{
+  "schemaVersion": 1,
+  "version": "1.9.0",
+  "installerUrl": "https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/dist/MajesticBoost-Setup-1.9.0.exe",
+  "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "size": 123,
+  "boostixInstallerUrl": "https://raw.githubusercontent.com/alosev394-ai/Boostix/main/dist/Boostix-Setup-1.9.0.exe",
+  "boostixSha256": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+  "boostixSize": 456
+}
+'@
+$parseManifestArguments = New-Object 'object[]' 1
+$parseManifestArguments[0] = [Text.Encoding]::UTF8.GetBytes($dualManifestJson)
+$parsedDualManifest = $parseManifestMethod.Invoke($null, $parseManifestArguments)
+$selectedInstallerUrl = [string]$manifestType.GetField(
+    'InstallerUrl').GetValue($parsedDualManifest)
+if ($selectedInstallerUrl -cne
+    'https://raw.githubusercontent.com/alosev394-ai/Boostix/main/dist/Boostix-Setup-1.9.0.exe') {
+    throw 'The updater did not prefer the validated Boostix URL over the schema-v1 bridge.'
+}
+$selectedSha256 = [string]$manifestType.GetField(
+    'Sha256').GetValue($parsedDualManifest)
+$selectedSize = [long]$manifestType.GetField(
+    'Size').GetValue($parsedDualManifest)
+if ($selectedSha256 -cne ('B' * 64) -or $selectedSize -ne 456L) {
+    throw 'The updater mixed legacy and Boostix integrity metadata.'
+}
+
+$tamperedDualManifest = $dualManifestJson.Replace(
+    '/Boostix/main/dist/Boostix-Setup-1.9.0.exe',
+    '/Boostix/main/dist/other.exe')
+$parseManifestArguments[0] = [Text.Encoding]::UTF8.GetBytes($tamperedDualManifest)
+try {
+    [void]$parseManifestMethod.Invoke($null, $parseManifestArguments)
+    throw 'A dual-field manifest with an untrusted Boostix URL was accepted.'
+}
+catch {
+    $failure = $_.Exception
+    while (($failure -is [Reflection.TargetInvocationException] -or
+        $failure -is [Management.Automation.MethodInvocationException]) -and
+        $failure.InnerException) {
+        $failure = $failure.InnerException
+    }
+    if ($failure -isnot [IO.InvalidDataException]) {
+        throw $failure
+    }
+}
+
+$incompleteDualManifest = $dualManifestJson -replace
+    '(?m)^\s*"boostixSize": 456\s*\r?\n',
+    ''
+$incompleteDualManifest = $incompleteDualManifest.Replace(
+    '"boostixSha256": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",',
+    '"boostixSha256": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"')
+$parseManifestArguments[0] = [Text.Encoding]::UTF8.GetBytes(
+    $incompleteDualManifest)
+try {
+    [void]$parseManifestMethod.Invoke($null, $parseManifestArguments)
+    throw 'An incomplete Boostix integrity metadata triple was accepted.'
+}
+catch {
+    $failure = $_.Exception
+    while (($failure -is [Reflection.TargetInvocationException] -or
+        $failure -is [Management.Automation.MethodInvocationException]) -and
+        $failure.InnerException) {
+        $failure = $failure.InnerException
+    }
+    if ($failure -isnot [IO.InvalidDataException]) {
+        throw $failure
+    }
+}
+
 $verificationStream = $null
 try {
     [void](New-Item -ItemType Directory -Path $testRoot)
@@ -342,7 +416,7 @@ try {
     }
 
     $heldVersionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($fixturePath)
-    if ($heldVersionInfo.ProductName -cne 'Majestic Boost' -or
+    if ($heldVersionInfo.ProductName -cne 'Boostix' -or
         [string]::IsNullOrWhiteSpace($heldVersionInfo.FileVersion)) {
         throw 'Windows version metadata is not readable while the verification handle is held.'
     }

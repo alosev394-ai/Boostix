@@ -8,18 +8,28 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$program = [IO.File]::ReadAllText((Join-Path $projectRoot 'MajesticBoost\Program.cs'))
-$center = [IO.File]::ReadAllText((Join-Path $projectRoot 'MajesticBoost\BoostCenterOverlay.cs'))
-$features = [IO.File]::ReadAllText((Join-Path $projectRoot 'MajesticBoost\BoostFeatures.cs'))
-$capture = [IO.File]::ReadAllText((Join-Path $projectRoot 'MajesticBoost\PerformanceCapture.cs'))
-$optimization = [IO.File]::ReadAllText((Join-Path $projectRoot 'MajesticBoost\OptimizationFlow.cs'))
-$installer = [IO.File]::ReadAllText((Join-Path $projectRoot 'MajesticBoostInstaller\Program.cs'))
+$program = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\Program.cs'))
+$center = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\BoostCenterOverlay.cs'))
+$features = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\BoostFeatures.cs'))
+$capture = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\PerformanceCapture.cs'))
+$optimization = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\OptimizationFlow.cs'))
+$installer = [IO.File]::ReadAllText((Join-Path $projectRoot 'BoostixInstaller\Program.cs'))
 $build = [IO.File]::ReadAllText((Join-Path $projectRoot 'build.ps1'))
 
+foreach ($forbiddenLauncherContract in @(
+    'AddLauncherCheck',
+    'MajesticLauncher',
+    'MAJESTIC LAUNCHER'
+)) {
+    if ($features.Contains($forbiddenLauncherContract)) {
+        throw "Preflight is still coupled to the legacy launcher: $forbiddenLauncherContract"
+    }
+}
+
 foreach ($required in @(
-    'AssemblyVersion("1.8.1.0")',
-    'AssemblyCompany("Silas Suspect")',
-    'GetApplicationVersion() + "  BETA"',
+    'AssemblyVersion(ProductBrand.AssemblyVersion)',
+    'AssemblyCompany(ProductBrand.CompanyName)',
+    'GetApplicationVersion() + "  " + ProductBrand.ReleaseLabel',
     'MakeText(',
     '"by Silas Suspect"',
     'Panel.SetZIndex(watermark, 400)',
@@ -29,14 +39,13 @@ foreach ($required in @(
     'current != ProcessPriorityClass.AboveNormal',
     'BoostActionOutcome.ExternalOverridePreserved',
     'Interval = TimeSpan.FromSeconds(5)',
-    'AutoBoost=" + centerSettings.AutoBoost',
     'CheckBeforeBoost=" + centerSettings.CheckBeforeBoost',
     'Interlocked.Increment(ref preflightGeneration)',
     'generation != Interlocked.CompareExchange(ref preflightGeneration, 0, 0)',
     'lastSession.Complete(',
     '"Interrupted"',
     'BoostSessionReportStore.Save',
-    'PerformanceCaptureService.CaptureRunningGameAsync'
+    'PerformanceCaptureService.CaptureRunningTargetAsync'
 )) {
     if (-not $program.Contains($required)) {
         throw "The Boost session contract is missing: $required"
@@ -165,7 +174,7 @@ foreach ($required in @(
 }
 
 $maintenanceStart = $program.IndexOf('private void RunActiveBoostMaintenance', [StringComparison]::Ordinal)
-$restoreStart = $program.IndexOf('private void RestoreOwnedGamePriorities', $maintenanceStart, [StringComparison]::Ordinal)
+$restoreStart = $program.IndexOf('private void RestoreOwnedTargetPriorities', $maintenanceStart, [StringComparison]::Ordinal)
 if ($maintenanceStart -lt 0 -or $restoreStart -le $maintenanceStart) {
     throw 'The Active Boost maintenance section could not be located.'
 }
@@ -196,8 +205,14 @@ foreach ($required in @(
     'AutomationProperties.SetName',
     'KeyboardNavigationMode.Cycle',
     'SystemParameters.ClientAreaAnimation',
-    'Color.FromRgb(232, 28, 90)',
-    'MakeMajesticVerticalScrollBarStyle',
+    'using Boostix.Branding;',
+    'ProductBrand.AccentRed',
+    'ProductBrand.AccentTextRed',
+    'Color targetColor = selected ? AccentTextColor : MutedColor;',
+    'MakeBoostixVerticalScrollBarStyle',
+    'ProductBrand.AccentVisualHex',
+    'ProductBrand.AccentTextHex',
+    'ProductBrand.AccentHex',
     'CanContentScroll = false',
     'PageScrollerPreviewMouseWheel',
     'CalculateSmoothScrollTarget',
@@ -211,10 +226,37 @@ foreach ($required in @(
     'AnimateTabColor(foreground, targetColor, animate);',
     'AnimateTabIndicator(',
     'FillBehavior = FillBehavior.Stop',
+    'MakeKeyboardFocusVisualStyle',
+    'FocusVisualStyle = MakeKeyboardFocusVisualStyle(6)',
+    '"Boostix.Center"',
+    '"Boostix.Center.Tab." + page',
     'Raise(RestoreRequested)'
 )) {
     if (-not $center.Contains($required)) {
         throw "The Boost Center UI contract is missing: $required"
+    }
+}
+foreach ($forbiddenPublicUi in @(
+    '"Majestic',
+    'GTA',
+    'settings.AutoBoost',
+    '#E81C5A',
+    'Color.FromRgb(232, 28, 90)',
+    'MakeMajesticVerticalScrollBarStyle',
+    '"MajesticBoost.Center'
+)) {
+    if ($center.Contains($forbiddenPublicUi)) {
+        throw "The Boostix Center still contains legacy public UI: $forbiddenPublicUi"
+    }
+}
+foreach ($requiredPublicUi in @(
+    'BOOSTIX",',
+    '"Boostix.Center"',
+    '"Boostix.Center.Setting."',
+    'settings.CheckBeforeBoost'
+)) {
+    if (-not $center.Contains($requiredPublicUi)) {
+        throw "The Boostix Center public copy is missing: $requiredPublicUi"
     }
 }
 if ($center -notmatch '(?s)AnimatePageVisual\(\s*pageScroller,.*?PageTransitionExitMilliseconds,\s*EasingMode\.EaseIn' -or
@@ -266,12 +308,14 @@ if ($mainToggle.Contains('content.Width = 300') -or
 }
 foreach ($required in @(
     'Width = new GridLength(36 + ToggleSafeGutter)',
-    'Margin = new Thickness(0, 0, ToggleSafeGutter, 0)',
+    'HorizontalAlignment = HorizontalAlignment.Center',
+    'Margin = new Thickness(0)',
     'Margin = new Thickness(3, 0, 0, 0)',
     'new TranslateTransform(isChecked ? 14 : 0, 0)',
     'double targetX = active ? 14 : 0',
     'UseLayoutRounding = true',
-    'ClipToBounds = false'
+    'ClipToBounds = false',
+    'Margin = new Thickness(0, 8, ScrollSafeInset, 8)'
 )) {
     if (-not $center.Contains($required)) {
         throw "The Boost Center toggle anti-clipping contract is missing: $required"
@@ -324,7 +368,7 @@ foreach ($required in @(
     'BoostCenterOverlay.cs',
     'PerformanceCapture.cs',
     'Pinned PresentMon 2.5.1',
-    'MajesticBoost.PresentMon.exe'
+    'Boostix.PresentMon.exe'
 )) {
     if (-not $build.Contains($required)) {
         throw "The release build contract is missing: $required"

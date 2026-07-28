@@ -12,7 +12,7 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $ApplicationPath) {
-    $ApplicationPath = Join-Path $projectRoot 'dist\MajesticBoost.exe'
+    $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
 }
 $ApplicationPath = (Resolve-Path -LiteralPath $ApplicationPath).Path
 
@@ -23,7 +23,7 @@ Add-Type -AssemblyName System.Windows.Forms
 
 $compiledAssembly = [Reflection.Assembly]::LoadFile($ApplicationPath)
 $overlayType = $compiledAssembly.GetType(
-    'MajesticBoost.BoostCenterOverlay',
+    'Boostix.BoostCenterOverlay',
     $true)
 $bindingFlags = [Reflection.BindingFlags]::NonPublic -bor
     [Reflection.BindingFlags]::Static
@@ -38,7 +38,7 @@ if ($transitionMilliseconds -lt 220 -or $transitionMilliseconds -gt 260) {
     throw "Compiled page transition is $transitionMilliseconds ms; expected 220..260 ms."
 }
 
-$windowType = $compiledAssembly.GetType('MajesticBoost.BoostWindow', $true)
+$windowType = $compiledAssembly.GetType('Boostix.BoostWindow', $true)
 $placementMethod = $windowType.GetMethod(
     'CalculateMonitorPlacement',
     [Reflection.BindingFlags]::NonPublic -bor
@@ -231,7 +231,7 @@ function Wait-ForWindow {
     while ([DateTime]::UtcNow -lt $deadline) {
         $Process.Refresh()
         if ($Process.HasExited) {
-            throw "Majestic Boost exited unexpectedly with code $($Process.ExitCode)."
+            throw "Boostix exited unexpectedly with code $($Process.ExitCode)."
         }
         if ($Process.MainWindowHandle -ne [IntPtr]::Zero) {
             return [Windows.Automation.AutomationElement]::FromHandle(
@@ -239,7 +239,7 @@ function Wait-ForWindow {
         }
         Start-Sleep -Milliseconds 50
     }
-    throw 'Majestic Boost did not expose a top-level window.'
+    throw 'Boostix did not expose a top-level window.'
 }
 
 function Find-ById {
@@ -357,17 +357,21 @@ foreach ($scale in $scales) {
 
         $windowBounds = $window.Current.BoundingRectangle
         $aspect = $windowBounds.Height / $windowBounds.Width
-        Assert-Between $aspect 1.18 1.22 "Window aspect at $scale scale"
+        Assert-Between `
+            $aspect `
+            1.18 `
+            1.22 `
+            "Window aspect at $scale scale ($($windowBounds.Width)x$($windowBounds.Height))"
 
-        $gear = Find-ById $window 'MajesticBoost.OpenCenter' 15000
-        $version = Find-ById $window 'MajesticBoost.Version'
-        $minimize = Find-ById $window 'MajesticBoost.Minimize'
-        $close = Find-ById $window 'MajesticBoost.Close'
-        $boost = Find-ById $window 'MajesticBoost.Activate' 20000
-        $discord = Find-ById $window 'MajesticBoost.Keep.DISCORD'
-        $epic = Find-ById $window 'MajesticBoost.Keep.EPICGAMES'
-        $steam = Find-ById $window 'MajesticBoost.Keep.STEAM'
-        $watermark = Find-ById $window 'MajesticBoost.Watermark' 10000 -AllowDisabled
+        $gear = Find-ById $window 'Boostix.OpenCenter' 15000
+        $version = Find-ById $window 'Boostix.Version'
+        $minimize = Find-ById $window 'Boostix.Minimize'
+        $close = Find-ById $window 'Boostix.Close'
+        $boost = Find-ById $window 'Boostix.Activate' 20000
+        $discord = Find-ById $window 'Boostix.Keep.DISCORD'
+        $epic = Find-ById $window 'Boostix.Keep.EPICGAMES'
+        $steam = Find-ById $window 'Boostix.Keep.STEAM'
+        $watermark = Find-ById $window 'Boostix.Watermark' 10000 -AllowDisabled
 
         foreach ($pair in @(
             @($gear, 'Settings button'),
@@ -430,22 +434,22 @@ foreach ($scale in $scales) {
                 throw 'The production-size window is not contained in its target monitor work area.'
             }
             $gear.SetFocus()
-            Wait-ForFocusedId 'MajesticBoost.OpenCenter' 1000
+            Wait-ForFocusedId 'Boostix.OpenCenter' 1000
             [Windows.Forms.SendKeys]::SendWait('{TAB}')
-            Wait-ForFocusedId 'MajesticBoost.Activate' 1000
+            Wait-ForFocusedId 'Boostix.Activate' 1000
             [Windows.Forms.SendKeys]::SendWait('{TAB}')
-            Wait-ForFocusedId 'MajesticBoost.Keep.DISCORD' 1000
+            Wait-ForFocusedId 'Boostix.Keep.DISCORD' 1000
             [Windows.Forms.SendKeys]::SendWait('{TAB}')
-            Wait-ForFocusedId 'MajesticBoost.Keep.EPICGAMES' 1000
+            Wait-ForFocusedId 'Boostix.Keep.EPICGAMES' 1000
             [Windows.Forms.SendKeys]::SendWait('{TAB}')
-            Wait-ForFocusedId 'MajesticBoost.Keep.STEAM' 1000
+            Wait-ForFocusedId 'Boostix.Keep.STEAM' 1000
         }
 
         Invoke-Element $gear
-        $readiness = Find-ById $window 'MajesticBoost.Center.Tab.Readiness'
-        $report = Find-ById $window 'MajesticBoost.Center.Tab.Report'
-        $history = Find-ById $window 'MajesticBoost.Center.Tab.History'
-        $settings = Find-ById $window 'MajesticBoost.Center.Tab.Settings'
+        $readiness = Find-ById $window 'Boostix.Center.Tab.Readiness'
+        $report = Find-ById $window 'Boostix.Center.Tab.Report'
+        $history = Find-ById $window 'Boostix.Center.Tab.History'
+        $settings = Find-ById $window 'Boostix.Center.Tab.Settings'
         foreach ($tab in @($readiness, $report, $history, $settings)) {
             Assert-KeyboardFocusable $tab 'Boost Center tab'
         }
@@ -453,7 +457,7 @@ foreach ($scale in $scales) {
         $stopwatch = [Diagnostics.Stopwatch]::StartNew()
         Invoke-Element $report
         if ([System.Windows.SystemParameters]::ClientAreaAnimation) {
-            Wait-ForFocusedId 'MajesticBoost.Center.ReportBenchmark' 1500
+            Wait-ForFocusedId 'Boostix.Center.ReportBenchmark' 1500
             $stopwatch.Stop()
             Assert-Between `
                 $stopwatch.Elapsed.TotalMilliseconds `
@@ -463,16 +467,18 @@ foreach ($scale in $scales) {
         }
 
         Invoke-Element $settings
-        $setting = Find-ById $window 'MajesticBoost.Center.Setting.0'
+        $setting = Find-ById $window 'Boostix.Center.Setting.0'
+        # The new page enters from the right by design. Measure the permanent
+        # scroll/toggle gutter only after the directional transition settles.
+        Start-Sleep -Milliseconds ($transitionMilliseconds + 40)
         $settingBounds = Get-NormalizedBounds $setting $window
         if ($settingBounds.RightInset -lt 36) {
             throw "Boost Center switch entered the scroll/toggle safe gutter."
         }
         Assert-KeyboardFocusable $setting 'Boost Center setting switch'
-        Start-Sleep -Milliseconds ($transitionMilliseconds + 40)
         $oldReportCondition = New-Object Windows.Automation.PropertyCondition(
             [Windows.Automation.AutomationElement]::AutomationIdProperty,
-            'MajesticBoost.Center.ReportBenchmark')
+            'Boostix.Center.ReportBenchmark')
         $oldReportButton = $window.FindFirst(
             [Windows.Automation.TreeScope]::Descendants,
             $oldReportCondition)
@@ -480,7 +486,7 @@ foreach ($scale in $scales) {
             throw 'Report and settings content overlap after the directional transition.'
         }
 
-        $restore = Find-ById $window 'MajesticBoost.Center.Restore'
+        $restore = Find-ById $window 'Boostix.Center.Restore'
         $restoreBounds = Get-NormalizedBounds $restore $window
         $watermarkBounds = Get-NormalizedBounds $watermark $window
         $horizontalOverlap =
@@ -523,7 +529,7 @@ try {
     }
     $compactSteam = Find-ById `
         $compactWindow `
-        'MajesticBoost.Keep.STEAM' `
+        'Boostix.Keep.STEAM' `
         15000
     $compactSteamBounds = Get-NormalizedBounds `
         $compactSteam `
@@ -558,12 +564,12 @@ try {
         throw "Ultra-compact layout height was $($ultraBounds.Height); expected at most 368 DIP."
     }
     foreach ($automationId in @(
-        'MajesticBoost.OpenCenter',
-        'MajesticBoost.Activate',
-        'MajesticBoost.Keep.DISCORD',
-        'MajesticBoost.Keep.EPICGAMES',
-        'MajesticBoost.Keep.STEAM',
-        'MajesticBoost.Close')) {
+        'Boostix.OpenCenter',
+        'Boostix.Activate',
+        'Boostix.Keep.DISCORD',
+        'Boostix.Keep.EPICGAMES',
+        'Boostix.Keep.STEAM',
+        'Boostix.Close')) {
         $element = Find-ById $ultraWindow $automationId 15000
         $bounds = $element.Current.BoundingRectangle
         if ($bounds.Left -lt $ultraBounds.Left -or
@@ -587,12 +593,12 @@ finally {
 }
 
 $overlaySource = Get-Content -Raw -Encoding UTF8 (
-    Join-Path $projectRoot 'MajesticBoost\BoostCenterOverlay.cs')
+    Join-Path $projectRoot 'Boostix\BoostCenterOverlay.cs')
 if ($overlaySource -notmatch 'SystemParameters\.ClientAreaAnimation') {
     throw 'Boost Center transition no longer respects the Windows animation preference.'
 }
 $programSource = Get-Content -Raw -Encoding UTF8 (
-    Join-Path $projectRoot 'MajesticBoost\Program.cs')
+    Join-Path $projectRoot 'Boostix\Program.cs')
 if ($programSource -notmatch 'BuildKeyboardFocusVisualStyle' -or
     $programSource -notmatch 'SystemParameters\.FocusVisualStyleKey' -or
     $programSource -notmatch 'MonitorFromWindow\(' -or
@@ -604,13 +610,13 @@ if ($programSource -notmatch 'BuildKeyboardFocusVisualStyle' -or
     $programSource -notmatch 'CalculateMonitorPlacement\(' -or
     $programSource -notmatch 'compactMainLayout' -or
     $programSource -notmatch 'scaleMainLayoutToWorkArea') {
-    throw 'Per-monitor DPI/work-area layout or the Majestic keyboard focus visual is missing.'
+    throw 'Per-monitor DPI/work-area layout or the Boostix keyboard focus visual is missing.'
 }
 if ($programSource -match 'SystemParameters\.WorkArea') {
     throw 'Main-window placement regressed to the primary-monitor SystemParameters.WorkArea.'
 }
 $manifest = Get-Content -Raw -Encoding UTF8 (
-    Join-Path $projectRoot 'MajesticBoost\app.manifest')
+    Join-Path $projectRoot 'Boostix\app.manifest')
 if ($manifest -notmatch '<dpiAwareness[^>]*>PerMonitorV2</dpiAwareness>') {
     throw 'The app manifest no longer declares PerMonitorV2 awareness.'
 }
@@ -618,9 +624,9 @@ foreach ($sourceText in @(
     $programSource,
     $overlaySource,
     (Get-Content -Raw -Encoding UTF8 (
-        Join-Path $projectRoot 'MajesticBoost\OptimizationFlow.cs')),
+        Join-Path $projectRoot 'Boostix\OptimizationFlow.cs')),
     (Get-Content -Raw -Encoding UTF8 (
-        Join-Path $projectRoot 'MajesticBoost\UpdateFlow.cs')))) {
+        Join-Path $projectRoot 'Boostix\UpdateFlow.cs')))) {
     if ($sourceText -match 'FocusVisualStyle\s*=\s*null') {
         throw 'A keyboard-focusable application control still suppresses its focus visual.'
     }

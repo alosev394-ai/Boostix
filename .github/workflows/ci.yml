@@ -1,0 +1,137 @@
+name: Boostix CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: boostix-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Clean Windows build and mandatory regression suite
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Preserve signed release snapshot
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $snapshot = Join-Path $env:RUNNER_TEMP 'boostix-release-snapshot'
+          [void](New-Item -ItemType Directory -Path $snapshot -Force)
+          foreach ($name in @(
+              'Boostix.exe',
+              'Boostix-Setup-1.9.0.exe',
+              'Boostix-Setup-Latest.exe',
+              'MajesticBoost-Setup-1.9.0.exe'
+          )) {
+            $source = Join-Path $env:GITHUB_WORKSPACE ('dist\' + $name)
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+              throw "Signed release snapshot is missing: $source"
+            }
+            Copy-Item -LiteralPath $source -Destination (
+              Join-Path $snapshot $name)
+          }
+          "BOOSTIX_RELEASE_SNAPSHOT_DIRECTORY=$snapshot" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Remove checked-in build outputs
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\')
+          foreach ($relativePath in @('work', 'dist')) {
+            $target = [IO.Path]::GetFullPath((Join-Path $root $relativePath))
+            if (-not $target.StartsWith(
+                    $root + [IO.Path]::DirectorySeparatorChar,
+                    [StringComparison]::OrdinalIgnoreCase)) {
+              throw "Refusing to clean a path outside the checkout: $target"
+            }
+            if (Test-Path -LiteralPath $target) {
+              Remove-Item -LiteralPath $target -Recurse -Force
+            }
+          }
+
+      - name: Validate PowerShell syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(Get-ChildItem -LiteralPath $env:GITHUB_WORKSPACE `
+            -Recurse -Filter '*.ps1' -File)
+          if ($files.Count -eq 0) {
+            throw 'No PowerShell sources were found.'
+          }
+          $failures = New-Object 'System.Collections.Generic.List[string]'
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][Management.Automation.Language.Parser]::ParseFile(
+              $file.FullName,
+              [ref]$tokens,
+              [ref]$errors)
+            foreach ($error in @($errors)) {
+              [void]$failures.Add(
+                "$($file.FullName):$($error.Extent.StartLineNumber):" +
+                "$($error.Extent.StartColumnNumber) $($error.Message)")
+            }
+          }
+          if ($failures.Count -ne 0) {
+            throw [string]::Join([Environment]::NewLine, $failures)
+          }
+          Write-Host "Parsed $($files.Count) PowerShell files without errors."
+
+      - name: Build Release from source
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\build.ps1 -Configuration Release
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release build failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Verify clean build metadata
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = [Diagnostics.FileVersionInfo]::GetVersionInfo(
+            (Join-Path $env:GITHUB_WORKSPACE 'dist\Boostix.exe'))
+          $setup = [Diagnostics.FileVersionInfo]::GetVersionInfo(
+            (Join-Path $env:GITHUB_WORKSPACE 'dist\Boostix-Setup-1.9.0.exe'))
+          foreach ($item in @($app, $setup)) {
+            if ($item.ProductName -cne 'Boostix' -or
+                $item.CompanyName -cne 'Silas Suspect' -or
+                $item.FileVersion -cne '1.9.0.0') {
+              throw 'A clean-build artifact has incorrect product metadata.'
+            }
+          }
+
+      - name: Run every regression test
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\tests\Run-All.ps1 `
+            -TestTimeoutSeconds 300 `
+            -ResultsPath (Join-Path $env:RUNNER_TEMP 'boostix-test-results.json')
+          if ($LASTEXITCODE -ne 0) {
+            throw "Regression suite failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Upload machine-readable test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: boostix-test-results
+          path: ${{ runner.temp }}/boostix-test-results.json
+          if-no-files-found: warn
+          retention-days: 14

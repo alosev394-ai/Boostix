@@ -8,16 +8,16 @@ Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $ApplicationPath) {
-    $ApplicationPath = Join-Path $projectRoot 'dist\MajesticBoost.exe'
+    $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
 }
 $ApplicationPath = (Resolve-Path -LiteralPath $ApplicationPath).Path
 $program = [IO.File]::ReadAllText(
-    (Join-Path $projectRoot 'MajesticBoost\Program.cs'))
+    (Join-Path $projectRoot 'Boostix\Program.cs'))
 $features = [IO.File]::ReadAllText(
-    (Join-Path $projectRoot 'MajesticBoost\BoostFeatures.cs'))
+    (Join-Path $projectRoot 'Boostix\BoostFeatures.cs'))
 
 foreach ($required in @(
-    'Local\SilasSuspect.MajesticBoost.Application',
+    'Local\SilasSuspect.Boostix.Application',
     'applicationMutex.WaitOne(0, false)',
     'catch (AbandonedMutexException)',
     'applicationMutex.ReleaseMutex()',
@@ -26,12 +26,6 @@ foreach ($required in @(
     'TaskScheduler.UnobservedTaskException',
     'internal static class CrashLog',
     'MaximumLogBytes = 512 * 1024',
-    'TryGetRecentGameCrash(',
-    'lastGameSeenUtc.AddSeconds(-10)',
-    'IsExpectedCrashProcessId(',
-    'entry.InstanceId != 1000',
-    '0xC0000005',
-    '0xC0000017',
     'BoostSessionReportStore.WriteAllTextAtomic('
 )) {
     if (-not $program.Contains($required)) {
@@ -43,9 +37,12 @@ foreach ($required in @(
     'public int MemorySamples;',
     'public long MemoryReliefBytes;',
     'public long MinimumCommitHeadroomBytes;',
-    'public long PeakGamePrivateBytes;',
-    'public string GameCrashCode;',
-    '(version != 1 && version != 2 && version != 3)',
+    'public long PeakTargetPrivateBytes;',
+    'public string TargetCrashCode;',
+    '(version != 1 && version != 2 && version != 3 && version != 4)',
+    'LegacySessionsDirectory',
+    'IsSafeKnownSessionsDirectory',
+    '(file.Attributes & FileAttributes.ReparsePoint) != 0',
     'public static void WriteAllTextAtomic('
 )) {
     if (-not $features.Contains($required)) {
@@ -57,7 +54,7 @@ $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($ApplicationPath
 $allStatic = [Reflection.BindingFlags]::Public -bor
     [Reflection.BindingFlags]::NonPublic -bor
     [Reflection.BindingFlags]::Static
-$windowType = $assembly.GetType('MajesticBoost.BoostWindow', $true)
+$windowType = $assembly.GetType('Boostix.BoostWindow', $true)
 $indexedKey = $windowType.GetMethod('IsIndexedResultKey', $allStatic)
 if (-not $indexedKey) {
     throw 'The structured result key parser was not compiled.'
@@ -89,74 +86,13 @@ foreach ($case in @(
     }
 }
 
-$parseCrashProcessId = $windowType.GetMethod(
-    'TryParseCrashProcessId',
-    $allStatic)
-if (-not $parseCrashProcessId) {
-    throw 'The crash-event process-id parser was not compiled.'
-}
-
-foreach ($case in @(
-    @{ Value = '0x2f0'; ExpectedResult = $true; ExpectedId = 752 },
-    @{ Value = '752'; ExpectedResult = $true; ExpectedId = 752 },
-    @{ Value = ' 0X000002F0 '; ExpectedResult = $true; ExpectedId = 752 },
-    @{ Value = '0x0'; ExpectedResult = $false; ExpectedId = 0 },
-    @{ Value = 'not-a-pid'; ExpectedResult = $false; ExpectedId = 0 }
-)) {
-    $arguments = New-Object 'System.Object[]' 2
-    $arguments.SetValue([string]$case.Value, 0)
-    $arguments.SetValue([int]0, 1)
-    $actualResult = [bool]$parseCrashProcessId.Invoke($null, $arguments)
-    $actualId = [int]$arguments[1]
-    if ($actualResult -ne $case.ExpectedResult -or
-        ($actualResult -and $actualId -ne $case.ExpectedId)) {
-        throw "Unexpected crash PID parse for '$($case.Value)': result=$actualResult id=$actualId"
-    }
-}
-
-$matchCrashProcessId = $windowType.GetMethod(
-    'IsExpectedCrashProcessId',
-    $allStatic)
-if (-not $matchCrashProcessId) {
-    throw 'The crash-event process-id matcher was not compiled.'
-}
-
-$expectedPids = New-Object 'System.Collections.Generic.HashSet[int]'
-[void]$expectedPids.Add(752)
-foreach ($case in @(
-    @{ Expected = $expectedPids; Value = '0x2f0'; Result = $true },
-    @{ Expected = $expectedPids; Value = '752'; Result = $true },
-    @{ Expected = $expectedPids; Value = '753'; Result = $false },
-    @{ Expected = $expectedPids; Value = ''; Result = $false },
-    @{ Expected = $expectedPids; Value = 'not-a-pid'; Result = $false },
-    @{ Expected = (New-Object 'System.Collections.Generic.HashSet[int]'); Value = ''; Result = $true },
-    @{ Expected = $null; Value = ''; Result = $true }
-)) {
-    $matchArguments = New-Object 'System.Object[]' 2
-    if ($null -eq $case.Expected) {
-        $matchArguments.SetValue($null, 0)
-    }
-    else {
-        $matchArguments.SetValue(
-            ([System.Collections.Generic.ISet[int]]$case.Expected),
-            0)
-    }
-    $matchArguments.SetValue([string]$case.Value, 1)
-    $actual = [bool]$matchCrashProcessId.Invoke(
-        $null,
-        $matchArguments)
-    if ($actual -ne $case.Result) {
-        throw "Unexpected crash PID match for '$($case.Value)': $actual"
-    }
-}
-
-$storeType = $assembly.GetType('MajesticBoost.BoostSessionReportStore', $true)
+$storeType = $assembly.GetType('Boostix.BoostSessionReportStore', $true)
 $atomicWrite = $storeType.GetMethod('WriteAllTextAtomic', $allStatic)
 if (-not $atomicWrite) {
     throw 'Atomic settings writer was not compiled.'
 }
 $testRoot = Join-Path $env:TEMP (
-    'MajesticBoost-AppReliability-' + [Guid]::NewGuid().ToString('N'))
+    'Boostix-AppReliability-' + [Guid]::NewGuid().ToString('N'))
 try {
     [void](New-Item -ItemType Directory -Path $testRoot)
     [string]$destination = Join-Path $testRoot 'boost-preferences.ini'
@@ -179,4 +115,4 @@ finally {
     }
 }
 
-'Application single-instance, result parsing, telemetry, and crash-safety tests passed.'
+'Application single-instance, result parsing, telemetry, and atomic-write tests passed.'

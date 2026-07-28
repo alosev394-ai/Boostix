@@ -12,10 +12,10 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $ApplicationPath) {
-    $ApplicationPath = Join-Path $projectRoot 'dist\MajesticBoost.exe'
+    $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
 }
 if (-not $InstallerPath) {
-    $InstallerPath = Join-Path $projectRoot 'dist\MajesticBoost-Setup-1.8.1.exe'
+    $InstallerPath = Join-Path $projectRoot 'dist\Boostix-Setup-1.9.0.exe'
 }
 
 $testRoot = Join-Path $env:TEMP ('MajesticBoost-CompiledReplace-Test-' + [Guid]::NewGuid().ToString('N'))
@@ -58,7 +58,7 @@ function Test-CompiledHelper {
 function Test-ApplicationCaller {
     param([Parameter(Mandatory = $true)][string]$AssemblyPath)
     $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($AssemblyPath))
-    $type = $assembly.GetType('MajesticBoost.OptimizationFlowOverlay', $true, $false)
+    $type = $assembly.GetType('Boostix.OptimizationFlowOverlay', $true, $false)
     $flags = [Reflection.BindingFlags]::NonPublic -bor [Reflection.BindingFlags]::Static
     $method = $type.GetMethod('WriteUtf8Atomically', $flags)
     if (-not $method) { throw 'Compiled WriteUtf8Atomically caller was not found.' }
@@ -78,7 +78,7 @@ function Test-ApplicationCaller {
 function Test-InstallerCallers {
     param([Parameter(Mandatory = $true)][string]$AssemblyPath)
     $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($AssemblyPath))
-    $type = $assembly.GetType('MajesticBoostSetup.InstallerEngine', $true, $false)
+    $type = $assembly.GetType('BoostixSetup.InstallerEngine', $true, $false)
     $flags = [Reflection.BindingFlags]::NonPublic -bor [Reflection.BindingFlags]::Static
     $commit = $type.GetMethod('CommitStagedFile', $flags)
     $restore = $type.GetMethod('RestoreCommittedFile', $flags)
@@ -113,8 +113,8 @@ function Test-InstallerCallers {
 
 try {
     [void](New-Item -ItemType Directory -Path $testRoot)
-    Test-CompiledHelper -AssemblyPath $ApplicationPath -TypeName 'MajesticBoost.OptimizationFlowOverlay' -FixtureName 'app'
-    Test-CompiledHelper -AssemblyPath $InstallerPath -TypeName 'MajesticBoostSetup.InstallerEngine' -FixtureName 'setup'
+    Test-CompiledHelper -AssemblyPath $ApplicationPath -TypeName 'Boostix.OptimizationFlowOverlay' -FixtureName 'app'
+    Test-CompiledHelper -AssemblyPath $InstallerPath -TypeName 'BoostixSetup.InstallerEngine' -FixtureName 'setup'
     Test-ApplicationCaller -AssemblyPath $ApplicationPath
     Test-InstallerCallers -AssemblyPath $InstallerPath
     Write-Host 'PASS: compiled application and installer atomic replace helpers work on .NET Framework.'

@@ -13,7 +13,7 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($ApplicationPath)) {
-    $ApplicationPath = Join-Path $projectRoot 'dist\MajesticBoost.exe'
+    $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
 }
 
 if (-not (Test-Path -LiteralPath $ApplicationPath -PathType Leaf)) {
@@ -22,16 +22,16 @@ if (-not (Test-Path -LiteralPath $ApplicationPath -PathType Leaf)) {
 
 $assembly = [Reflection.Assembly]::LoadFile(
     [IO.Path]::GetFullPath($ApplicationPath))
-$reportType = $assembly.GetType('MajesticBoost.BoostSessionReport', $true)
-$performanceType = $assembly.GetType('MajesticBoost.BoostPerformanceResult', $true)
-$assistantType = $assembly.GetType('MajesticBoost.BoostCrashAssistant', $true)
-$comparisonType = $assembly.GetType('MajesticBoost.BoostSessionComparison', $true)
-$categoryType = $assembly.GetType('MajesticBoost.BoostCrashCategory', $true)
-$snapshotType = $assembly.GetType('MajesticBoost.DiagnosticSnapshot', $true)
-$pressureType = $assembly.GetType('MajesticBoost.DiagnosticPressureLevel', $true)
-$storeType = $assembly.GetType('MajesticBoost.BoostSessionReportStore', $true)
-$outcomeType = $assembly.GetType('MajesticBoost.BoostActionOutcome', $true)
-$windowType = $assembly.GetType('MajesticBoost.BoostWindow', $true)
+$reportType = $assembly.GetType('Boostix.BoostSessionReport', $true)
+$performanceType = $assembly.GetType('Boostix.BoostPerformanceResult', $true)
+$assistantType = $assembly.GetType('Boostix.BoostCrashAssistant', $true)
+$comparisonType = $assembly.GetType('Boostix.BoostSessionComparison', $true)
+$categoryType = $assembly.GetType('Boostix.BoostCrashCategory', $true)
+$snapshotType = $assembly.GetType('Boostix.DiagnosticSnapshot', $true)
+$pressureType = $assembly.GetType('Boostix.DiagnosticPressureLevel', $true)
+$storeType = $assembly.GetType('Boostix.BoostSessionReportStore', $true)
+$outcomeType = $assembly.GetType('Boostix.BoostActionOutcome', $true)
+$windowType = $assembly.GetType('Boostix.BoostWindow', $true)
 
 $bindingFlags = [Reflection.BindingFlags]'Public,NonPublic,Static,Instance'
 
@@ -68,8 +68,8 @@ if ($null -eq $analyzeMethod) {
 }
 
 $accessReport = New-Report -Id ([Guid]::NewGuid().ToString('N')) -StartedUtc ([datetime]::UtcNow)
-Set-Field $accessReport $reportType 'GameCrashCode' 'c0000005'
-Set-Field $accessReport $reportType 'GameCrashModule' 'C:\Users\private\ReShade64.dll'
+Set-Field $accessReport $reportType 'TargetCrashCode' 'c0000005'
+Set-Field $accessReport $reportType 'TargetCrashModule' 'C:\Users\private\ReShade64.dll'
 $accessInsight = $analyzeMethod.Invoke($null, @($accessReport))
 $accessCategory = $accessInsight.GetType().GetField('Category', $bindingFlags).GetValue($accessInsight)
 if ([string]$accessCategory -cne 'AccessViolation') {
@@ -81,7 +81,7 @@ if ($accessEvidence -notmatch 'ReShade64\.dll' -or $accessEvidence -match 'Users
 }
 
 $memoryReport = New-Report -Id ([Guid]::NewGuid().ToString('N')) -StartedUtc ([datetime]::UtcNow)
-Set-Field $memoryReport $reportType 'GameCrashCode' '0xC000012D'
+Set-Field $memoryReport $reportType 'TargetCrashCode' '0xC000012D'
 $memoryInsight = $analyzeMethod.Invoke($null, @($memoryReport))
 $memoryCategory = $memoryInsight.GetType().GetField('Category', $bindingFlags).GetValue($memoryInsight)
 if ([string]$memoryCategory -cne 'MemoryPressure') {
@@ -89,7 +89,7 @@ if ([string]$memoryCategory -cne 'MemoryPressure') {
 }
 
 $graphicsReport = New-Report -Id ([Guid]::NewGuid().ToString('N')) -StartedUtc ([datetime]::UtcNow)
-Set-Field $graphicsReport $reportType 'GameCrashCode' '0x887A0006'
+Set-Field $graphicsReport $reportType 'TargetCrashCode' '0x887A0006'
 $graphicsInsight = $analyzeMethod.Invoke($null, @($graphicsReport))
 $graphicsCategory = $graphicsInsight.GetType().GetField('Category', $bindingFlags).GetValue($graphicsInsight)
 if ([string]$graphicsCategory -cne 'GraphicsDevice') {
@@ -106,7 +106,7 @@ Set-Field $previousPerformance $performanceType 'OnePercentLowFps' ([double]70)
 Set-Field $previousPerformance $performanceType 'P95FrameTimeMs' ([double]15)
 Set-Field $previousPerformance $performanceType 'Frames' 1000
 Set-Field $previousPerformance $performanceType 'FramesOver50Ms' 12
-Set-Field $previousPerformance $performanceType 'ProcessName' 'GTA5.exe'
+Set-Field $previousPerformance $performanceType 'ProcessName' 'SampleApp.exe'
 Set-Field $previous $reportType 'Performance' $previousPerformance
 
 $currentPerformance = [Activator]::CreateInstance($performanceType, $true)
@@ -116,10 +116,10 @@ Set-Field $currentPerformance $performanceType 'OnePercentLowFps' ([double]78)
 Set-Field $currentPerformance $performanceType 'P95FrameTimeMs' ([double]12)
 Set-Field $currentPerformance $performanceType 'Frames' 1000
 Set-Field $currentPerformance $performanceType 'FramesOver50Ms' 5
-Set-Field $currentPerformance $performanceType 'ProcessName' 'gta5'
+Set-Field $currentPerformance $performanceType 'ProcessName' 'sampleapp'
 Set-Field $current $reportType 'Performance' $currentPerformance
 
-$differentGame = New-Report -Id ([Guid]::NewGuid().ToString('N')) -StartedUtc ([datetime]::UtcNow.AddMinutes(-90))
+$differentTarget = New-Report -Id ([Guid]::NewGuid().ToString('N')) -StartedUtc ([datetime]::UtcNow.AddMinutes(-90))
 $differentPerformance = [Activator]::CreateInstance($performanceType, $true)
 Set-Field $differentPerformance $performanceType 'Available' $true
 Set-Field $differentPerformance $performanceType 'AverageFps' ([double]1)
@@ -127,18 +127,25 @@ Set-Field $differentPerformance $performanceType 'OnePercentLowFps' ([double]1)
 Set-Field $differentPerformance $performanceType 'P95FrameTimeMs' ([double]999)
 Set-Field $differentPerformance $performanceType 'Frames' 1000
 Set-Field $differentPerformance $performanceType 'FramesOver50Ms' 999
-Set-Field $differentPerformance $performanceType 'ProcessName' 'GTA5_Enhanced.exe'
-Set-Field $differentGame $reportType 'Performance' $differentPerformance
+Set-Field $differentPerformance $performanceType 'ProcessName' 'DifferentApp.exe'
+Set-Field $differentTarget $reportType 'Performance' $differentPerformance
 
 $listType = [Collections.Generic.List``1].MakeGenericType($reportType)
 $recent = [Activator]::CreateInstance($listType)
 [void]$listType.GetMethod('Add').Invoke($recent, @($current))
-[void]$listType.GetMethod('Add').Invoke($recent, @($differentGame))
+[void]$listType.GetMethod('Add').Invoke($recent, @($differentTarget))
 [void]$listType.GetMethod('Add').Invoke($recent, @($previous))
 
 $compareMethod = $comparisonType.GetMethod('Compare', $bindingFlags)
 $comparison = $compareMethod.Invoke($null, @($current, $recent))
 $comparisonResultType = $comparison.GetType()
+if ([bool]$comparisonResultType.GetField('Available', $bindingFlags).GetValue($comparison)) {
+    throw 'Process-name equality alone must not produce an FPS delta claim.'
+}
+
+Set-Field $previousPerformance $performanceType 'ComparisonContextKey' 'repeatable-scene-v1'
+Set-Field $currentPerformance $performanceType 'ComparisonContextKey' 'repeatable-scene-v1'
+$comparison = $compareMethod.Invoke($null, @($current, $recent))
 if (-not [bool]$comparisonResultType.GetField('Available', $bindingFlags).GetValue($comparison)) {
     throw 'Comparable FPS sessions were not matched.'
 }
@@ -150,8 +157,15 @@ if ([int]$comparisonResultType.GetField('FramesOver50MsDelta', $bindingFlags).Ge
 }
 if ([string]$comparisonResultType.GetField('ComparedSessionId', $bindingFlags).GetValue($comparison) -cne
     [string]$reportType.GetField('SessionId', $bindingFlags).GetValue($previous)) {
-    throw 'FPS comparison mixed measurements from different tracked game processes.'
+    throw 'FPS comparison mixed measurements from different tracked processes.'
 }
+
+Set-Field $previousPerformance $performanceType 'ComparisonContextKey' 'different-scene'
+$comparison = $compareMethod.Invoke($null, @($current, $recent))
+if ([bool]$comparisonResultType.GetField('Available', $bindingFlags).GetValue($comparison)) {
+    throw 'FPS comparison mixed measurements with different explicit contexts.'
+}
+Set-Field $previousPerformance $performanceType 'ComparisonContextKey' 'repeatable-scene-v1'
 
 $resourceReport = New-Report -Id ([Guid]::NewGuid().ToString('N')) -StartedUtc ([datetime]::UtcNow)
 $snapshot = [Activator]::CreateInstance($snapshotType, $true)
@@ -218,22 +232,85 @@ if ([string]$reportType.GetField('GpuAdapterLuid', $bindingFlags).GetValue($reso
 
 $serialize = $storeType.GetMethod('Serialize', $bindingFlags)
 $deserialize = $storeType.GetMethod('Deserialize', $bindingFlags)
+$resourcePerformance = [Activator]::CreateInstance($performanceType, $true)
+Set-Field $resourcePerformance $performanceType 'Available' $true
+Set-Field $resourcePerformance $performanceType 'Frames' 1000
+Set-Field $resourcePerformance $performanceType 'ProcessName' 'test-game'
+Set-Field $resourcePerformance $performanceType 'ComparisonContextKey' 'roundtrip-context'
+Set-Field $resourceReport $reportType 'Performance' $resourcePerformance
+Set-Field $resourceReport $reportType 'TargetName' 'SampleApp'
+Set-Field $resourceReport $reportType 'PeakTargetWorkingSetBytes' ([long](2GB))
+Set-Field $resourceReport $reportType 'PeakTargetPrivateBytes' ([long](3GB))
+Set-Field $resourceReport $reportType 'TargetCrashCode' '0xC0000005'
+Set-Field $resourceReport $reportType 'TargetCrashModule' 'sample.dll'
 $serialized = [string]$serialize.Invoke($null, @($resourceReport))
+foreach ($legacyKey in @(
+    'PeakGameWorkingSetBytes=',
+    'PeakGamePrivateBytes=',
+    'GameCrashCode=',
+    'GameCrashModule=',
+    'GameCrashOffset=',
+    'GameCrashUtc=',
+    'GameName='
+)) {
+    if ($serialized -match ('(?m)^' + [regex]::Escape($legacyKey))) {
+        throw "A new session report wrote the legacy key $legacyKey"
+    }
+}
 $roundTrip = $deserialize.Invoke(
     $null,
     [object[]](,[string[]]($serialized -split "\r?\n")))
 if ($null -eq $roundTrip -or
-    [int]$reportType.GetField('Version', $bindingFlags).GetValue($roundTrip) -ne 3 -or
+    [int]$reportType.GetField('Version', $bindingFlags).GetValue($roundTrip) -ne 4 -or
     [string]$reportType.GetField('GpuAdapterNames', $bindingFlags).GetValue($roundTrip) -cne 'Other GPU' -or
     [string]$reportType.GetField('GpuAdapterLuid', $bindingFlags).GetValue($roundTrip) -cne '00000003_00000004' -or
-    [long]$reportType.GetField('PageFileAllocatedBytes', $bindingFlags).GetValue($roundTrip) -ne 8GB) {
-    throw 'Version 3 session telemetry did not survive serialization.'
+    [long]$reportType.GetField('PageFileAllocatedBytes', $bindingFlags).GetValue($roundTrip) -ne 8GB -or
+    [string]$reportType.GetField('TargetName', $bindingFlags).GetValue($roundTrip) -cne 'SampleApp' -or
+    [long]$reportType.GetField('PeakTargetWorkingSetBytes', $bindingFlags).GetValue($roundTrip) -ne 2GB -or
+    [long]$reportType.GetField('PeakTargetPrivateBytes', $bindingFlags).GetValue($roundTrip) -ne 3GB -or
+    [string]$reportType.GetField('TargetCrashCode', $bindingFlags).GetValue($roundTrip) -cne '0xC0000005' -or
+    [string]$performanceType.GetField(
+        'ComparisonContextKey',
+        $bindingFlags).GetValue(
+            $reportType.GetField('Performance', $bindingFlags).GetValue($roundTrip)) -cne
+        'roundtrip-context') {
+    throw 'Version 4 session telemetry did not survive serialization.'
+}
+
+$legacySerialized = $serialized.Replace('Version=4', 'Version=3')
+$legacySerialized = $legacySerialized.Replace(
+    'PeakTargetWorkingSetBytes=',
+    'PeakGameWorkingSetBytes=')
+$legacySerialized = $legacySerialized.Replace(
+    'PeakTargetPrivateBytes=',
+    'PeakGamePrivateBytes=')
+$legacySerialized = $legacySerialized.Replace('TargetCrashCode=', 'GameCrashCode=')
+$legacySerialized = $legacySerialized.Replace('TargetCrashModule=', 'GameCrashModule=')
+$legacySerialized = $legacySerialized.Replace('TargetCrashOffset=', 'GameCrashOffset=')
+$legacySerialized = $legacySerialized.Replace('TargetCrashUtc=', 'GameCrashUtc=')
+$legacySerialized = $legacySerialized.Replace('TargetName=', 'GameName=')
+$legacyStatus = [Convert]::ToBase64String(
+    [Text.Encoding]::UTF8.GetBytes('GameCrashed'))
+$legacySerialized = [regex]::Replace(
+    $legacySerialized,
+    '(?m)^Status=.*$',
+    'Status=' + $legacyStatus)
+$legacyRoundTrip = $deserialize.Invoke(
+    $null,
+    [object[]](,[string[]]($legacySerialized -split "\r?\n")))
+if ($null -eq $legacyRoundTrip -or
+    [string]$reportType.GetField('TargetName', $bindingFlags).GetValue($legacyRoundTrip) -cne 'SampleApp' -or
+    [long]$reportType.GetField('PeakTargetPrivateBytes', $bindingFlags).GetValue($legacyRoundTrip) -ne 3GB -or
+    [string]$reportType.GetField('TargetCrashModule', $bindingFlags).GetValue($legacyRoundTrip) -cne 'sample.dll' -or
+    [string]$reportType.GetField('Status', $bindingFlags).GetValue($legacyRoundTrip) -cne 'TargetCrashed') {
+    throw 'Legacy version 3 session keys were not migrated into the generic schema.'
 }
 
 $cloneSource = New-Report -Id ([Guid]::NewGuid().ToString('N')) -StartedUtc ([datetime]::UtcNow)
 $clonePerformance = [Activator]::CreateInstance($performanceType, $true)
 Set-Field $clonePerformance $performanceType 'Available' $true
 Set-Field $clonePerformance $performanceType 'AverageFps' ([double]60)
+Set-Field $clonePerformance $performanceType 'ComparisonContextKey' 'clone-context'
 Set-Field $cloneSource $reportType 'Performance' $clonePerformance
 $addAction = $reportType.GetMethod('AddAction', $bindingFlags)
 $changedOutcome = [Enum]::Parse($outcomeType, 'Changed')
@@ -251,6 +328,9 @@ $clonedActions = $reportType.GetField(
 if ([double]$performanceType.GetField(
         'AverageFps',
         $bindingFlags).GetValue($clonedPerformance) -ne 60 -or
+    [string]$performanceType.GetField(
+        'ComparisonContextKey',
+        $bindingFlags).GetValue($clonedPerformance) -cne 'clone-context' -or
     [int]$clonedActions.Count -ne 1) {
     throw 'Session report cloning did not isolate mutable performance/actions state.'
 }

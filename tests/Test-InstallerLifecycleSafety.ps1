@@ -5,7 +5,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$sourcePath = Join-Path $projectRoot 'MajesticBoostInstaller\Program.cs'
+$sourcePath = Join-Path $projectRoot 'BoostixInstaller\Program.cs'
+$brandSource = Join-Path $projectRoot 'ProductBrand.cs'
 $source = [IO.File]::ReadAllText($sourcePath)
 $frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $compiler = Join-Path $frameworkRoot 'csc.exe'
@@ -13,7 +14,8 @@ $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) (
     'MajesticBoost-InstallerLifecycle-' + [Guid]::NewGuid().ToString('N'))
 $harnessPath = Join-Path $temporaryRoot (
     'InstallerLifecycleHarness-' + [Guid]::NewGuid().ToString('N') + '.dll')
-$stateRoot = Join-Path $temporaryRoot 'CodexGamingOptimization'
+$stateRoot = Join-Path $temporaryRoot 'BoostixOptimization'
+$legacyStateRoot = Join-Path $temporaryRoot 'CodexGamingOptimization'
 $utf8 = New-Object Text.UTF8Encoding($false)
 
 function Get-DeepestException {
@@ -79,39 +81,50 @@ try {
         /reference:System.Drawing.dll `
         /reference:System.Windows.Forms.dll `
         /reference:System.Security.dll `
+        $brandSource `
         $sourcePath 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Installer source did not compile:`r`n$($compilerOutput -join [Environment]::NewLine)"
     }
 
     $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($harnessPath))
-    $engineType = $assembly.GetType('MajesticBoostSetup.InstallerEngine', $true, $false)
+    $engineType = $assembly.GetType('BoostixSetup.InstallerEngine', $true, $false)
     $flags = [Reflection.BindingFlags]::NonPublic -bor [Reflection.BindingFlags]::Static
     $acquireGuard = $engineType.GetMethod(
         'AcquireSystemTransactionGuardAtRoot',
         $flags)
+    $acquireGuards = $engineType.GetMethod(
+        'AcquireSystemTransactionGuardsAtRoots',
+        $flags)
     $validateUninstall = $engineType.GetMethod(
         'EnsureUninstallStateAllowsRemovalAtRoot',
         $flags)
-    if (-not $acquireGuard -or -not $validateUninstall) {
+    $validateUninstallRoots = $engineType.GetMethod(
+        'EnsureUninstallStateAllowsRemovalAtRoots',
+        $flags)
+    if (-not $acquireGuard -or -not $acquireGuards -or
+        -not $validateUninstall -or -not $validateUninstallRoots) {
         throw 'Installer lifecycle safety helpers were not found in the compiled source.'
     }
 
-    # This uses only a unique temporary root. It never opens the real ProgramData lock.
-    $guardArguments = New-Object 'object[]' 2
-    $guardArguments[0] = [string]$stateRoot
-    $guardArguments[1] = [string]'test operation'
-    $guard = [IDisposable]$acquireGuard.Invoke(
+    # This uses only unique temporary roots. It never opens a real ProgramData lock.
+    $dualGuardArguments = New-Object 'object[]' 3
+    $dualGuardArguments[0] = [string]$stateRoot
+    $dualGuardArguments[1] = [string]$legacyStateRoot
+    $dualGuardArguments[2] = [string]'test operation'
+    $guard = [IDisposable]$acquireGuards.Invoke(
         $null,
-        $guardArguments)
+        $dualGuardArguments)
     try {
-        $secondGuardArguments = New-Object 'object[]' 2
-        $secondGuardArguments[0] = [string]$stateRoot
-        $secondGuardArguments[1] = [string]'second test operation'
-        Assert-InvocationFails `
-            -Method $acquireGuard `
-            -Arguments $secondGuardArguments `
-            -Scenario 'A second operation while transaction.lock is held'
+        foreach ($lockedRoot in @($stateRoot, $legacyStateRoot)) {
+            $secondGuardArguments = New-Object 'object[]' 2
+            $secondGuardArguments[0] = [string]$lockedRoot
+            $secondGuardArguments[1] = [string]'second test operation'
+            Assert-InvocationFails `
+                -Method $acquireGuard `
+                -Arguments $secondGuardArguments `
+                -Scenario "A second operation while $lockedRoot transaction.lock is held"
+        }
     }
     finally {
         $guard.Dispose()
@@ -124,6 +137,13 @@ try {
         $null,
         $releasedGuardArguments)
     $guardAfterRelease.Dispose()
+    $legacyReleasedArguments = New-Object 'object[]' 2
+    $legacyReleasedArguments[0] = [string]$legacyStateRoot
+    $legacyReleasedArguments[1] = [string]'legacy operation after release'
+    $legacyGuardAfterRelease = [IDisposable]$acquireGuard.Invoke(
+        $null,
+        $legacyReleasedArguments)
+    $legacyGuardAfterRelease.Dispose()
 
     $backupRoot = Join-Path $stateRoot 'Backups'
     $backupDirectory = Join-Path $backupRoot 'test-transaction'
@@ -140,8 +160,17 @@ try {
         -Arguments $stateArguments `
         -Scenario 'Uninstall with an Active optimization transaction'
 
+    $rootArguments = New-Object 'object[]' 2
+    $rootArguments[0] = [string]$stateRoot
+    $rootArguments[1] = [string](Join-Path $temporaryRoot 'MissingLegacyState')
+    Assert-InvocationFails `
+        -Method $validateUninstallRoots `
+        -Arguments $rootArguments `
+        -Scenario 'Uninstall with an Active BoostixOptimization transaction'
+
     Write-Utf8File -Path $statePath -Content '{"Version":2,"Status":"Restored"}'
     [void]$validateUninstall.Invoke($null, $stateArguments)
+    [void]$validateUninstallRoots.Invoke($null, $rootArguments)
 
     Write-Utf8File -Path $statePath -Content '{"Version":2,"Status":"UnknownState"}'
     Assert-InvocationFails `
@@ -209,6 +238,9 @@ try {
         'OptimizationStateMaximumBytes',
         'IsDirectChildPath',
         'CreateUnsafeUninstallStateException',
+        '"BoostixOptimization"',
+        'AcquireSystemTransactionGuardsAtRoots',
+        'EnsureUninstallStateAllowsRemovalAtRoots',
         'if (quiet)',
         'throw;'
     )) {

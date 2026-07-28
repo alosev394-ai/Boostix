@@ -13,10 +13,10 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $ApplicationPath) {
-    $ApplicationPath = Join-Path $projectRoot 'dist\MajesticBoost.exe'
+    $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
 }
 $ApplicationPath = (Resolve-Path -LiteralPath $ApplicationPath).Path
-$featuresPath = Join-Path $projectRoot 'MajesticBoost\BoostFeatures.cs'
+$featuresPath = Join-Path $projectRoot 'Boostix\BoostFeatures.cs'
 $features = [IO.File]::ReadAllText($featuresPath)
 
 foreach ($required in @(
@@ -103,13 +103,13 @@ $allInstance = [Reflection.BindingFlags]::Public -bor
     [Reflection.BindingFlags]::NonPublic -bor
     [Reflection.BindingFlags]::Instance
 
-$metricsType = $assembly.GetType('MajesticBoost.BoostSystemMetrics', $true)
-$snapshotType = $assembly.GetType('MajesticBoost.MemoryPressureSnapshot', $true)
-$policyType = $assembly.GetType('MajesticBoost.MemoryPressureReliefPolicy', $true)
-$stateType = $assembly.GetType('MajesticBoost.MemoryPressureReliefPolicyState', $true)
-$serviceType = $assembly.GetType('MajesticBoost.ActiveMemoryMaintenanceService', $true)
-$reportType = $assembly.GetType('MajesticBoost.BoostSessionReport', $true)
-$storeType = $assembly.GetType('MajesticBoost.BoostSessionReportStore', $true)
+$metricsType = $assembly.GetType('Boostix.BoostSystemMetrics', $true)
+$snapshotType = $assembly.GetType('Boostix.MemoryPressureSnapshot', $true)
+$policyType = $assembly.GetType('Boostix.MemoryPressureReliefPolicy', $true)
+$stateType = $assembly.GetType('Boostix.MemoryPressureReliefPolicyState', $true)
+$serviceType = $assembly.GetType('Boostix.ActiveMemoryMaintenanceService', $true)
+$reportType = $assembly.GetType('Boostix.BoostSessionReport', $true)
+$storeType = $assembly.GetType('Boostix.BoostSessionReportStore', $true)
 
 $nativeType = $metricsType.GetNestedType(
     'PerformanceInformationNative',
