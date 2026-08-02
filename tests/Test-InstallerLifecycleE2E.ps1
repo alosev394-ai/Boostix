@@ -286,16 +286,34 @@ function Remove-SafeOwnedDirectory {
         -not (Test-DirectChildPath -Root $fullRoot -Path $fullPath)) {
         throw "Refusing to remove a directory outside the E2E allowlist: $fullPath"
     }
-    foreach ($item in @(
-        Get-Item -LiteralPath $fullRoot -Force
-        Get-Item -LiteralPath $fullPath -Force
-        Get-ChildItem -LiteralPath $fullPath -Recurse -Force
-    )) {
-        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw "Refusing to follow a reparse point during E2E cleanup: $($item.FullName)"
+    $cleanupDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ($true) {
+        try {
+            foreach ($item in @(
+                Get-Item -LiteralPath $fullRoot -Force
+                Get-Item -LiteralPath $fullPath -Force
+                Get-ChildItem -LiteralPath $fullPath -Recurse -Force
+            )) {
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "Refusing to follow a reparse point during E2E cleanup: $($item.FullName)"
+                }
+            }
+            Remove-Item -LiteralPath $fullPath -Recurse -Force
+            return
+        }
+        catch [IO.IOException] {
+            if ([DateTime]::UtcNow -ge $cleanupDeadline) {
+                throw
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        catch [UnauthorizedAccessException] {
+            if ([DateTime]::UtcNow -ge $cleanupDeadline) {
+                throw
+            }
+            Start-Sleep -Milliseconds 250
         }
     }
-    Remove-Item -LiteralPath $fullPath -Recurse -Force
 }
 
 function Remove-SafeOwnedFile {

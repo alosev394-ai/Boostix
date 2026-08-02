@@ -3008,7 +3008,11 @@ namespace BoostixSetup
                 Arguments = "/update-recovery " + transaction.Id + " " +
                     Process.GetCurrentProcess().Id.ToString(
                         CultureInfo.InvariantCulture),
-                WorkingDirectory = Path.GetDirectoryName(recoveryPath),
+                // Do not make the protected rollback root the process current
+                // directory. Windows otherwise keeps that directory busy briefly
+                // after a successful update and can obstruct immediate uninstall
+                // or machine cleanup.
+                WorkingDirectory = Environment.SystemDirectory,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
@@ -3625,6 +3629,7 @@ namespace BoostixSetup
                         "-EncodedCommand " +
                         Convert.ToBase64String(
                             Encoding.Unicode.GetBytes(command)),
+                    WorkingDirectory = Environment.SystemDirectory,
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden

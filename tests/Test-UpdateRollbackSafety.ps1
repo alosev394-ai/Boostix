@@ -419,6 +419,11 @@ try {
             throw "Installer rollback contract is missing: $required"
         }
     }
+    if ([regex]::Matches(
+            $installerText,
+            'WorkingDirectory\s*=\s*Environment\.SystemDirectory').Count -lt 2) {
+        throw 'Recovery watchdog or its self-delete helper can still lock UpdateRollback as its current directory.'
+    }
     foreach ($required in @(
         'CompleteReadyHandshakeIfRequested',
         '--update-health-probe',
