@@ -6658,6 +6658,19 @@ namespace BoostixSetup
         protected override Color PressedGlyph { get { return Color.White; } }
         protected override float CornerRadius { get { return 6F; } }
 
+        protected override void ScaleControl(
+            SizeF factor,
+            BoundsSpecified specified)
+        {
+            base.ScaleControl(factor, specified);
+            if (Parent != null)
+            {
+                Location = new Point(
+                    Math.Max(0, Parent.ClientSize.Width - Width),
+                    0);
+            }
+        }
+
         protected override void DrawContent(Graphics graphics, Rectangle bounds, Color glyphColor)
         {
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -7041,6 +7054,18 @@ namespace BoostixSetup
             MouseDown += DragWindow;
         }
 
+        private void LayoutWindowChrome()
+        {
+            if (closeButton == null)
+            {
+                return;
+            }
+
+            closeButton.Location = new Point(
+                Math.Max(0, ClientSize.Width - closeButton.Width),
+                0);
+        }
+
         protected override CreateParams CreateParams
         {
             get
@@ -7209,6 +7234,7 @@ namespace BoostixSetup
 
         private void UpdateProgressFormShown(object sender, EventArgs e)
         {
+            LayoutWindowChrome();
             ApplyRoundedRegion();
             BeginInvoke(new Action(StartInstallation));
         }
@@ -7556,8 +7582,24 @@ namespace BoostixSetup
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             BuildInterface();
             Resize += delegate { ApplyRoundedRegion(); };
-            Shown += delegate { ApplyRoundedRegion(); };
+            Shown += delegate
+            {
+                LayoutWindowChrome();
+                ApplyRoundedRegion();
+            };
             MouseDown += DragWindow;
+        }
+
+        private void LayoutWindowChrome()
+        {
+            if (closeButton == null)
+            {
+                return;
+            }
+
+            closeButton.Location = new Point(
+                Math.Max(0, ClientSize.Width - closeButton.Width),
+                0);
         }
 
         protected override CreateParams CreateParams
