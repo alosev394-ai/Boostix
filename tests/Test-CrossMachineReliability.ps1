@@ -376,9 +376,6 @@ $boostixRawUrl =
 $releaseUrl =
     'https://github.com/alosev394-ai/Boostix/releases/download/v' +
     $productVersion + '/Boostix-Setup-' + $productVersion + '.exe'
-$jsDelivrUrl =
-    'https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@v' +
-    $productVersion + '/dist/Boostix-Setup-' + $productVersion + '.exe'
 $manifestJson =
     '{"schemaVersion":1,"version":"' + $productVersion +
     '","installerUrl":"' + $legacyRawUrl +
@@ -406,12 +403,11 @@ $fallbackSources = [string[]]@($manifestType.GetField(
     'FallbackInstallerUrls',
     $allFlags).GetValue($manifest))
 $trustedSources = @($primarySource) + @($fallbackSources)
-if ($trustedSources.Count -ne 3 -or
-    @($trustedSources | Sort-Object -Unique).Count -ne 3 -or
+if ($trustedSources.Count -ne 2 -or
+    @($trustedSources | Sort-Object -Unique).Count -ne 2 -or
     $trustedSources[0] -cne $boostixRawUrl -or
-    $trustedSources[1] -cne $releaseUrl -or
-    $trustedSources[2] -cne $jsDelivrUrl) {
-    throw 'The updater does not compile exactly three trusted installer sources.'
+    $trustedSources[1] -cne $releaseUrl) {
+    throw 'The updater does not compile exactly two trusted installer sources.'
 }
 
 $trustedReleaseMethod = Get-RequiredMethod `

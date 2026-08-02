@@ -563,7 +563,6 @@ try {
     $rawInstallerPath = Join-Path $canaryRoot 'raw-boostix-setup.exe'
     $latestInstallerPath = Join-Path $canaryRoot 'raw-boostix-latest.exe'
     $releaseInstallerPath = Join-Path $canaryRoot 'release-boostix-setup.exe'
-    $jsDelivrInstallerPath = Join-Path $canaryRoot 'jsdelivr-boostix-setup.exe'
     $legacyInstallerPath = Join-Path $canaryRoot 'legacy-bridge-setup.exe'
     $releaseInstallerUrl =
         'https://github.com/' + $repository + '/releases/download/v' +
@@ -571,10 +570,6 @@ try {
     $latestInstallerUrl =
         'https://raw.githubusercontent.com/' + $repository +
         '/main/dist/Boostix-Setup-Latest.exe'
-    $jsDelivrInstallerUrl =
-        'https://cdn.jsdelivr.net/gh/' + $repository + '@v' + $version +
-        '/dist/' + $canonicalFileName
-
     if ([string]::IsNullOrWhiteSpace($OfflineFixtureRoot)) {
         Invoke-BoundedDownload -Address $expectedRawInstaller `
             -Destination $rawInstallerPath -MaximumBytes $canonicalSize `
@@ -588,9 +583,6 @@ try {
                 'github.com',
                 'release-assets.githubusercontent.com',
                 'objects.githubusercontent.com')
-        Invoke-BoundedDownload -Address $jsDelivrInstallerUrl `
-            -Destination $jsDelivrInstallerPath -MaximumBytes $canonicalSize `
-            -AllowedHosts @('cdn.jsdelivr.net')
         Invoke-BoundedDownload -Address $expectedLegacyInstaller `
             -Destination $legacyInstallerPath -MaximumBytes $legacySize `
             -AllowedHosts @('raw.githubusercontent.com')
@@ -602,8 +594,7 @@ try {
         $fixtureLegacy = Join-Path $fixtureRoot ('dist\' + $legacyFileName)
         foreach ($destination in @(
             $rawInstallerPath,
-            $releaseInstallerPath,
-            $jsDelivrInstallerPath
+            $releaseInstallerPath
         )) {
             Copy-OfflineFixture -Source $fixtureCanonical `
                 -Destination $destination -MaximumBytes $canonicalSize
@@ -617,8 +608,7 @@ try {
     foreach ($artifact in @(
         @{ Role = 'raw canonical installer'; Path = $rawInstallerPath },
         @{ Role = 'raw latest installer'; Path = $latestInstallerPath },
-        @{ Role = 'GitHub Release asset'; Path = $releaseInstallerPath },
-        @{ Role = 'jsDelivr tagged fallback'; Path = $jsDelivrInstallerPath }
+        @{ Role = 'GitHub Release asset'; Path = $releaseInstallerPath }
     )) {
         Assert-ReleaseArtifact -Role $artifact.Role -Path $artifact.Path `
             -ExpectedSize $canonicalSize `

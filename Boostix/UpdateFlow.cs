@@ -1063,8 +1063,6 @@ namespace Boostix
             "https://raw.githubusercontent.com/alosev394-ai/Boostix/main/dist/Boostix-Setup-";
         private const string ReleaseInstallerUrlPrefix =
             "https://github.com/alosev394-ai/Boostix/releases/download/v";
-        private const string JsDelivrInstallerUrlPrefix =
-            "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@v";
         private const string MirrorManifestUrl =
             "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@latest/update-v2.json";
         private const string MirrorManifestSignatureUrl =
@@ -1660,8 +1658,7 @@ namespace Boostix
                 InstallerUrl = selectedInstallerUrl,
                 FallbackInstallerUrls = new[]
                 {
-                    BuildReleaseInstallerAddress(version),
-                    BuildJsDelivrInstallerAddress(version)
+                    BuildReleaseInstallerAddress(version)
                 },
                 Sha256 = selectedSha256.ToUpperInvariant(),
                 Size = selectedSize
@@ -1673,13 +1670,6 @@ namespace Boostix
             string text = version.ToString();
             return ReleaseInstallerUrlPrefix + text +
                 "/Boostix-Setup-" + text + ".exe";
-        }
-
-        private static string BuildJsDelivrInstallerAddress(SemanticVersion version)
-        {
-            string text = version.ToString();
-            return JsDelivrInstallerUrlPrefix + text +
-                "/dist/Boostix-Setup-" + text + ".exe";
         }
 
         private static void ValidateInstallerAddress(
