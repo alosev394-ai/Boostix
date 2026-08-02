@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "version": "1.9.1",
-  "installerUrl": "https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/dist/MajesticBoost-Setup-1.9.1.exe",
-  "sha256": "50838A83184B61EF2CF7260323B97AAFABB2817FCEB98DF342D84797102B82C4",
+  "version": "1.9.2",
+  "installerUrl": "https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/dist/MajesticBoost-Setup-1.9.2.exe",
+  "sha256": "878D9E12FADACC2A13DF71D5E5D5E39DF18580A5E7C6186A3C061FD3BAABB47D",
   "size": 3158528
 }

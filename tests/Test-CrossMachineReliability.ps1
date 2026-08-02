@@ -354,6 +354,19 @@ finally {
 
 # Parse a synthetic signed-manifest payload locally. This exercises the exact
 # compiled URL construction without making a live request.
+$mirrorManifestUrl = [string]$updateType.GetField(
+    'MirrorManifestUrl',
+    $allFlags).GetRawConstantValue()
+$mirrorSignatureUrl = [string]$updateType.GetField(
+    'MirrorManifestSignatureUrl',
+    $allFlags).GetRawConstantValue()
+$expectedMirrorManifestUrl =
+    'https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@latest/update-v2.json'
+if ($mirrorManifestUrl -cne $expectedMirrorManifestUrl -or
+    $mirrorSignatureUrl -cne ($expectedMirrorManifestUrl + '.sig')) {
+    throw 'The signed manifest mirror is not pinned to the purgeable latest semver alias.'
+}
+
 $legacyRawUrl =
     'https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/dist/' +
     'MajesticBoost-Setup-' + $productVersion + '.exe'

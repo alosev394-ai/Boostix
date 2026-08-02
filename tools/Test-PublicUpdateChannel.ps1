@@ -35,7 +35,7 @@ $rawManifestUrl =
 $rawSignatureUrl = $rawManifestUrl + '.sig'
 $mirrorManifestUrl =
     'https://cdn.jsdelivr.net/gh/' + $repository +
-    '@main/update-v2.json'
+    '@latest/update-v2.json'
 $mirrorSignatureUrl = $mirrorManifestUrl + '.sig'
 $legacyManifestUrl =
     'https://raw.githubusercontent.com/' + $legacyRepository +

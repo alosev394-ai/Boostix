@@ -1066,9 +1066,9 @@ namespace Boostix
         private const string JsDelivrInstallerUrlPrefix =
             "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@v";
         private const string MirrorManifestUrl =
-            "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@main/update-v2.json";
+            "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@latest/update-v2.json";
         private const string MirrorManifestSignatureUrl =
-            "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@main/update-v2.json.sig";
+            "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@latest/update-v2.json.sig";
         // Schema v1 keeps this signed transport field for installed 1.8.x
         // clients. New clients prefer boostixInstallerUrl and never display the
         // compatibility name.
