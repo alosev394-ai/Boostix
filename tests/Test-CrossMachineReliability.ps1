@@ -609,13 +609,14 @@ $probeReferences = @(Get-MethodIlReferences -Method $moveNextMethod)
 Assert-ReferencesContain `
     -References $probeReferences `
     -Required @(
-        'Boostix.OptimizationFlowOverlay::GetOptimizationStatus',
+        'Boostix.OptimizationFlowOverlay::IsInitializedForUpdateHealth',
         'System.Windows.Threading.Dispatcher::InvokeAsync',
         'System.Windows.Threading.Dispatcher::get_HasShutdownStarted',
         'System.Windows.Threading.Dispatcher::get_HasShutdownFinished'
     ) `
     -ContractName 'The local update health probe'
 foreach ($forbiddenProbeReference in @(
+    'Boostix\.OptimizationFlowOverlay::GetOptimizationStatus',
     '::get_IsVisible$',
     '::get_ActualWidth$',
     '::get_ActualHeight$',
@@ -670,18 +671,30 @@ function Test-InstallerAssemblyContracts {
 
     $desktopMethod = Get-RequiredMethod `
         -Type $engineType `
-        -Name 'GetMachineDesktopDirectory' `
-        -ParameterCount 0
-    $actualDesktop = [string](Invoke-ReflectedStatic -Method $desktopMethod)
-    $expectedDesktop = [IO.Path]::GetFullPath(
-        [Environment]::GetFolderPath(
-            [Environment+SpecialFolder]::CommonDesktopDirectory))
-    if ([string]::IsNullOrWhiteSpace($actualDesktop) -or
-        -not [string]::Equals(
-            [IO.Path]::GetFullPath($actualDesktop),
-            $expectedDesktop,
-            [StringComparison]::OrdinalIgnoreCase)) {
-        throw "The installer does not target the machine-wide desktop: $Path"
+        -Name 'TryResolveOptionalShortcutRoot' `
+        -ParameterCount 3
+    $desktopArguments = New-Object 'object[]' 3
+    $desktopArguments[0] = [Environment+SpecialFolder]::CommonDesktopDirectory
+    $desktopArguments[1] = [string]'desktop contract'
+    $desktopArguments[2] = $null
+    $desktopResolved = [bool](Invoke-ReflectedStatic `
+        -Method $desktopMethod `
+        -Arguments $desktopArguments)
+    $actualDesktop = [string]$desktopArguments[2]
+    $configuredDesktop = [Environment]::GetFolderPath(
+        [Environment+SpecialFolder]::CommonDesktopDirectory)
+    if ($desktopResolved) {
+        if ([string]::IsNullOrWhiteSpace($configuredDesktop) -or
+            [string]::IsNullOrWhiteSpace($actualDesktop) -or
+            -not [string]::Equals(
+                [IO.Path]::GetFullPath($actualDesktop),
+                [IO.Path]::GetFullPath($configuredDesktop),
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw "The installer does not target the machine-wide desktop: $Path"
+        }
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($actualDesktop)) {
+        throw "The installer returned a path for an unavailable optional desktop: $Path"
     }
 
     $registryViewProperty = $engineType.GetProperty(
@@ -762,9 +775,9 @@ function Test-InstallerAssemblyContracts {
         -References @(Get-MethodIlReferences -Method $ensureLogMethod) `
         -Required @(
             'System.Environment::GetFolderPath',
-            'System.IO.Directory::CreateDirectory',
+            'BoostixSetup.InstallerDiagnostics::EnsureProtectedLogDirectory',
             'STRING::Logs',
-            'STRING::setup.log'
+            'STRING::setup-'
         ) `
         -ContractName 'The durable setup log path'
     Assert-ReferencesContain `
@@ -777,7 +790,7 @@ function Test-InstallerAssemblyContracts {
     Assert-ReferencesContain `
         -References @(Get-MethodIlReferences -Method $rotateLogMethod) `
         -Required @(
-            'System.IO.File::Copy',
+            'System.IO.File::Move',
             'System.IO.File::Delete',
             'STRING::.previous'
         ) `
@@ -830,13 +843,17 @@ if ($installerSource.IndexOf(
 $initializeDiagnosticsIndex = $installerSource.IndexOf(
     'InstallerDiagnostics.Initialize(args);',
     [StringComparison]::Ordinal)
+$dllHardeningIndex = $installerSource.IndexOf(
+    'if (!HardenNativeDllSearch())',
+    [StringComparison]::Ordinal)
 $mainCoreIndex = $installerSource.IndexOf(
     'MainCore(args);',
     [StringComparison]::Ordinal)
-if ($initializeDiagnosticsIndex -lt 0 -or
+if ($dllHardeningIndex -lt 0 -or
+    $initializeDiagnosticsIndex -le $dllHardeningIndex -or
     $mainCoreIndex -lt 0 -or
     $initializeDiagnosticsIndex -ge $mainCoreIndex) {
-    throw 'Durable setup logging is not initialized before installer execution.'
+    throw 'DLL search hardening and protected logging are not ordered safely before installer execution.'
 }
 $installStart = $installerSource.IndexOf(
     'public static void Install(bool createDesktopShortcut',

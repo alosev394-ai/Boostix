@@ -321,7 +321,16 @@ foreach ($required in @(
         throw "The Boost Center toggle anti-clipping contract is missing: $required"
     }
 }
-if (-not $installer.Contains('float trackLeft = Width - 38F;')) {
+foreach ($required in @(
+    'float rightInset = 2F * dpiScale',
+    'float trackWidth = 36F * dpiScale',
+    'float trackLeft = Width - rightInset - trackWidth'
+)) {
+    if (-not $installer.Contains($required)) {
+        throw "The installer toggle DPI-safe right-edge inset is missing: $required"
+    }
+}
+if ($installer.Contains('float trackLeft = Width - trackWidth;')) {
     throw 'The installer toggle does not preserve its rounded right-edge inset.'
 }
 

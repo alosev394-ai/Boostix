@@ -220,8 +220,8 @@ foreach ($requiredText in @(
     'CaptureRegistryTree(child, childName)',
     'RestoreRegistryKey(baseKey, snapshot.AppPathsKey)',
     'RestoreRegistryKey(baseKey, snapshot.UninstallKey)',
-    'RestoreShortcut(snapshot.DesktopShortcut)',
-    'RestoreShortcut(snapshot.StartMenuShortcut)',
+    'TryRestoreOptionalShortcut(snapshot.DesktopShortcut)',
+    'TryRestoreOptionalShortcut(snapshot.StartMenuShortcut)',
     '^(?:Boostix|MajesticBoost)\.Update\.[0-9a-f]{32}$'
 )) {
     if (-not $source.Contains($requiredText)) {

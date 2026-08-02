@@ -64,6 +64,8 @@ namespace Boostix
                 return;
             }
 
+            CrashLog.Configure(args);
+
             using (var applicationMutex = new Mutex(
                 false,
                 GetApplicationMutexName(args)))
@@ -392,11 +394,17 @@ namespace Boostix
             new Dictionary<int, TrackedTargetPriority>();
         private readonly bool demoMode;
         private readonly bool safeMode;
+        private readonly bool updateHealthProbe;
         private readonly double demoUiScale;
-        private readonly bool compactMainLayout;
+        private bool compactMainLayout;
         private readonly bool scaleMainLayoutToWorkArea;
         private readonly string[] launchArguments;
         private Viewbox monitorAdaptiveViewbox;
+        private Grid monitorDesignSurface;
+        private RowDefinition mainTitleRow;
+        private RowDefinition mainBoostRow;
+        private RowDefinition mainCaptionRow;
+        private RowDefinition mainFooterRow;
         private HwndSource windowSource;
         private IntPtr windowHandle;
         private bool applyingMonitorBounds;
@@ -407,6 +415,9 @@ namespace Boostix
             launchArguments = args ?? new string[0];
             demoMode = HasLaunchArgument(launchArguments, "--demo");
             safeMode = HasLaunchArgument(launchArguments, "--safe-mode");
+            updateHealthProbe = HasLaunchArgument(
+                launchArguments,
+                UpdateHealthHandshake.ProbeArgument);
             demoUiScale = demoMode
                 ? GetDemoUiScale(launchArguments)
                 : 1.0;
@@ -509,7 +520,7 @@ namespace Boostix
             Closed += WindowClosed;
         }
 
-        private static Grid BuildAdaptiveDesignSurface(
+        private Grid BuildAdaptiveDesignSurface(
             FrameworkElement shell)
         {
             if (shell == null)
@@ -517,15 +528,17 @@ namespace Boostix
                 throw new ArgumentNullException("shell");
             }
 
-            var designSurface = new Grid
+            monitorDesignSurface = new Grid
             {
                 Width = BaseWindowWidth,
-                Height = BaseWindowHeight,
+                Height = compactMainLayout
+                    ? CompactWindowHeight
+                    : BaseWindowHeight,
                 UseLayoutRounding = true,
                 SnapsToDevicePixels = true
             };
-            designSurface.Children.Add(shell);
-            return designSurface;
+            monitorDesignSurface.Children.Add(shell);
+            return monitorDesignSurface;
         }
 
         private Grid BuildShell()
@@ -551,24 +564,28 @@ namespace Boostix
             var root = new Grid();
             root.Background = Brushes.Transparent;
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
-            root.RowDefinitions.Add(new RowDefinition
+            mainTitleRow = new RowDefinition
             {
                 Height = new GridLength(compactMainLayout ? 62 : 70)
-            });
-            root.RowDefinitions.Add(new RowDefinition
+            };
+            root.RowDefinitions.Add(mainTitleRow);
+            mainBoostRow = new RowDefinition
             {
-                Height = new GridLength(compactMainLayout ? 172 : 190)
-            });
-            root.RowDefinitions.Add(new RowDefinition
+                Height = new GridLength(compactMainLayout ? 184 : 190)
+            };
+            root.RowDefinitions.Add(mainBoostRow);
+            mainCaptionRow = new RowDefinition
             {
                 Height = new GridLength(compactMainLayout ? 32 : 36)
-            });
+            };
+            root.RowDefinitions.Add(mainCaptionRow);
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(114) });
-            root.RowDefinitions.Add(new RowDefinition
+            mainFooterRow = new RowDefinition
             {
                 Height = new GridLength(1, GridUnitType.Star),
                 MinHeight = compactMainLayout ? 12 : MainContentInset
-            });
+            };
+            root.RowDefinitions.Add(mainFooterRow);
             KeyboardNavigation.SetTabNavigation(
                 root,
                 KeyboardNavigationMode.Cycle);
@@ -811,10 +828,6 @@ namespace Boostix
         {
             var stage = new Grid();
             stage.ClipToBounds = false;
-            if (compactMainLayout)
-            {
-                stage.LayoutTransform = new ScaleTransform(0.9, 0.9);
-            }
 
             boostButton = new Button();
             boostButton.Width = 184;
@@ -863,6 +876,39 @@ namespace Boostix
             return stage;
         }
 
+        private void SetCompactMainLayout(bool compact)
+        {
+            if (compactMainLayout == compact)
+            {
+                return;
+            }
+
+            compactMainLayout = compact;
+
+            if (mainTitleRow != null)
+            {
+                mainTitleRow.Height = new GridLength(compact ? 62 : 70);
+            }
+            if (mainBoostRow != null)
+            {
+                mainBoostRow.Height = new GridLength(compact ? 184 : 190);
+            }
+            if (mainCaptionRow != null)
+            {
+                mainCaptionRow.Height = new GridLength(compact ? 32 : 36);
+            }
+            if (mainFooterRow != null)
+            {
+                mainFooterRow.MinHeight = compact ? 12 : MainContentInset;
+            }
+            if (monitorDesignSurface != null)
+            {
+                monitorDesignSurface.Height = compact
+                    ? CompactWindowHeight
+                    : BaseWindowHeight;
+            }
+        }
+
         private Grid BuildPreferencePanel()
         {
             preferencesLoaded = false;
@@ -903,7 +949,21 @@ namespace Boostix
             panel.Children.Add(keepEpicToggle);
             panel.Children.Add(keepSteamToggle);
 
-            LoadBoostPreferences();
+            if (updateHealthProbe)
+            {
+                // The installer starts this probe with an elevated token. Do not
+                // traverse user-controlled LocalAppData paths while that token is
+                // active; the probe only needs deterministic in-memory defaults.
+                centerSettings.CheckBeforeBoost = true;
+                centerSettings.KeepOneDrive = true;
+                centerSettings.KeepTeams = true;
+                centerSettings.KeepWallpaper = true;
+                centerSettings.KeepNvidiaOverlay = true;
+            }
+            else
+            {
+                LoadBoostPreferences();
+            }
             UpdatePreferenceToggle(keepDiscordToggle, false);
             UpdatePreferenceToggle(keepEpicToggle, false);
             UpdatePreferenceToggle(keepSteamToggle, false);
@@ -3310,6 +3370,9 @@ namespace Boostix
             applyingMonitorBounds = true;
             try
             {
+                bool useCompactLayout =
+                    placement.Length >= 5 && placement[4] != 0;
+                SetCompactMainLayout(useCompactLayout);
                 double widthDip = placement[2] * 96.0 / dpiX;
                 double heightDip = placement[3] * 96.0 / dpiY;
                 MinWidth = 0;
@@ -3404,8 +3467,16 @@ namespace Boostix
                 (int)Math.Round(WorkAreaSafetyInset * dpiY / 96.0));
             long availableWidth = Math.Max(1L, workWidth - insetX * 2L);
             long availableHeight = Math.Max(1L, workHeight - insetY * 2L);
+            double normalWidthPixels = BaseWindowWidth * dpiX / 96.0;
+            double normalHeightPixels = BaseWindowHeight * dpiY / 96.0;
+            bool useCompactLayout =
+                normalWidthPixels > availableWidth + 0.5 ||
+                normalHeightPixels > availableHeight + 0.5;
+            double layoutHeightDip = useCompactLayout
+                ? CompactWindowHeight
+                : BaseWindowHeight;
             double baseWidthPixels = BaseWindowWidth * dpiX / 96.0;
-            double baseHeightPixels = BaseWindowHeight * dpiY / 96.0;
+            double baseHeightPixels = layoutHeightDip * dpiY / 96.0;
             double scale = Math.Min(
                 1.0,
                 Math.Min(
@@ -3446,7 +3517,8 @@ namespace Boostix
                 ClampToInt32(left),
                 ClampToInt32(top),
                 width,
-                height
+                height,
+                useCompactLayout ? 1 : 0
             };
         }
 
@@ -3465,9 +3537,6 @@ namespace Boostix
 
         private async void BoostWindowLoaded(object sender, RoutedEventArgs e)
         {
-            bool updateHealthProbe = HasLaunchArgument(
-                launchArguments,
-                UpdateHealthHandshake.ProbeArgument);
             if (updateHealthProbe)
             {
                 try
@@ -3579,8 +3648,7 @@ namespace Boostix
             // session-history parsing and visibility checks. Those dependencies can
             // be slow or unavailable in RDP/session-0 and used to roll back healthy
             // updates. Normal startup performs the full diagnostics afterwards.
-            string optimizationStatus = optimizationOverlay.GetOptimizationStatus();
-            if (optimizationStatus == null)
+            if (!optimizationOverlay.IsInitializedForUpdateHealth())
             {
                 throw new InvalidOperationException(
                     "The optimization service did not initialize.");
@@ -4090,9 +4158,37 @@ namespace Boostix
     {
         private const long MaximumLogBytes = 512 * 1024;
         private static readonly object Sync = new object();
+        private static volatile bool suppressFileLogging;
+
+        public static void Configure(string[] arguments)
+        {
+            bool healthProbe = false;
+            foreach (string argument in arguments ?? new string[0])
+            {
+                if (string.Equals(
+                    argument,
+                    UpdateHealthHandshake.ProbeArgument,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    healthProbe = true;
+                    break;
+                }
+            }
+
+            // LocalAppData belongs to the interactive user and can contain
+            // junctions or reparse points. Never write there with an elevated
+            // token, and keep the installer health probe file-system neutral.
+            suppressFileLogging = healthProbe || IsCurrentProcessElevated();
+        }
 
         public static void Write(string message, Exception exception)
         {
+            if (suppressFileLogging)
+            {
+                Trace.WriteLine(BuildEntry(message, exception));
+                return;
+            }
+
             try
             {
                 lock (Sync)
@@ -4116,24 +4212,48 @@ namespace Boostix
                         File.Move(path, previousPath);
                     }
 
-                    var entry = new StringBuilder();
-                    entry.Append('[');
-                    entry.Append(DateTime.UtcNow.ToString("o"));
-                    entry.Append("] ");
-                    entry.AppendLine(message ?? "Unknown application error.");
-                    if (exception != null)
-                    {
-                        entry.AppendLine(exception.ToString());
-                    }
                     File.AppendAllText(
                         path,
-                        entry.ToString(),
+                        BuildEntry(message, exception),
                         new UTF8Encoding(false));
                 }
             }
             catch
             {
                 // Crash logging must never trigger another application failure.
+            }
+        }
+
+        private static string BuildEntry(string message, Exception exception)
+        {
+            var entry = new StringBuilder();
+            entry.Append('[');
+            entry.Append(DateTime.UtcNow.ToString("o"));
+            entry.Append("] ");
+            entry.AppendLine(message ?? "Unknown application error.");
+            if (exception != null)
+            {
+                entry.AppendLine(exception.ToString());
+            }
+            return entry.ToString();
+        }
+
+        private static bool IsCurrentProcessElevated()
+        {
+            try
+            {
+                using (var identity = System.Security.Principal.WindowsIdentity.GetCurrent())
+                {
+                    var principal = new System.Security.Principal.WindowsPrincipal(identity);
+                    return principal.IsInRole(
+                        System.Security.Principal.WindowsBuiltInRole.Administrator);
+                }
+            }
+            catch
+            {
+                // If token inspection is unavailable, prefer disabling a
+                // diagnostic file over risking a privileged profile write.
+                return true;
             }
         }
     }

@@ -178,16 +178,21 @@ function Assert-ProductMetadata {
 }
 
 function Get-HealthHandshakeCount {
-    param([Parameter(Mandatory = $true)][string[]]$LogPaths)
+    param([Parameter(Mandatory = $true)][string]$LogDirectory)
 
     $count = 0
-    foreach ($path in $LogPaths) {
-        if (Test-Path -LiteralPath $path -PathType Leaf) {
-            $content = [IO.File]::ReadAllText($path)
-            $count += [regex]::Matches(
-                $content,
-                'Update health probe succeeded after ').Count
-        }
+    if (-not (Test-Path -LiteralPath $LogDirectory -PathType Container)) {
+        return $count
+    }
+    foreach ($path in @(Get-ChildItem `
+            -LiteralPath $LogDirectory `
+            -Filter 'setup-*.log' `
+            -File `
+            -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })) {
+        $content = [IO.File]::ReadAllText($path)
+        $count += [regex]::Matches(
+            $content,
+            'Update health probe succeeded after ').Count
     }
     return $count
 }
@@ -457,10 +462,7 @@ $optimizationStateDirectory = Join-Path `
     $commonApplicationData 'BoostixOptimization'
 $legacyOptimizationStateDirectory = Join-Path `
     $commonApplicationData 'CodexGamingOptimization'
-$setupLogPaths = @(
-    (Join-Path $programDataDirectory 'Logs\setup.log'),
-    (Join-Path ([IO.Path]::GetTempPath()) 'Boostix-Setup.log')
-)
+$setupLogDirectory = Join-Path $programDataDirectory 'Logs'
 
 $preexistingEvidence = New-Object 'System.Collections.Generic.List[string]'
 $candidatePaths = @(
@@ -563,13 +565,13 @@ try {
     }
 
     $healthSignalsBeforeRepair = Get-HealthHandshakeCount `
-        -LogPaths $setupLogPaths
+        -LogDirectory $setupLogDirectory
     Invoke-SetupProcess `
         -Path $PrimaryInstallerPath `
         -Arguments '/quiet' `
         -Stage 'same-version repair'
     $healthSignalsAfterRepair = Get-HealthHandshakeCount `
-        -LogPaths $setupLogPaths
+        -LogDirectory $setupLogDirectory
     if ($healthSignalsAfterRepair -le $healthSignalsBeforeRepair) {
         throw 'The same-version repair did not complete the update health handshake.'
     }
@@ -626,6 +628,18 @@ try {
 }
 catch {
     $testFailure = $_.Exception
+    $setupLogPaths = if (Test-Path `
+            -LiteralPath $setupLogDirectory `
+            -PathType Container) {
+        @(Get-ChildItem `
+            -LiteralPath $setupLogDirectory `
+            -Filter 'setup-*.log' `
+            -File `
+            -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    }
+    else {
+        @()
+    }
     foreach ($logPath in $setupLogPaths) {
         try {
             if (Test-Path -LiteralPath $logPath -PathType Leaf) {

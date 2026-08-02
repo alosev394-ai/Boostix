@@ -89,6 +89,44 @@ try {
         [Math]::Abs($adaptiveMatrix.M22 - 1.0) -gt 0.001) {
         throw "Production UI is fractionally resampled at $($adaptiveMatrix.M11)x$($adaptiveMatrix.M22); expected a crisp 1.0x transform."
     }
+
+    $compactLayoutMethod = $windowType.GetMethod(
+        'SetCompactMainLayout',
+        [Reflection.BindingFlags]::NonPublic -bor
+            [Reflection.BindingFlags]::Instance)
+    if (-not $compactLayoutMethod) {
+        throw 'Production window does not expose its high-DPI compact reflow.'
+    }
+    [void]$compactLayoutMethod.Invoke($productionWindow, @($true))
+    $adaptiveViewbox.Measure([Windows.Size]::new(460.0, 492.0))
+    $adaptiveViewbox.Arrange([Windows.Rect]::new(
+        0.0,
+        0.0,
+        460.0,
+        492.0))
+    $adaptiveViewbox.UpdateLayout()
+    if ([Math]::Abs($designSurface.Height - 492.0) -gt 0.001) {
+        throw "High-DPI compact design surface height was $($designSurface.Height); expected 492 DIP."
+    }
+    $compactMatrix = $designSurface.
+        TransformToAncestor($adaptiveViewbox).Value
+    if ([Math]::Abs($compactMatrix.M11 - 1.0) -gt 0.001 -or
+        [Math]::Abs($compactMatrix.M22 - 1.0) -gt 0.001) {
+        throw "High-DPI compact UI is fractionally resampled at $($compactMatrix.M11)x$($compactMatrix.M22)."
+    }
+    $boostSurfaceField = $windowType.GetField(
+        'boostSurface',
+        [Reflection.BindingFlags]::NonPublic -bor
+            [Reflection.BindingFlags]::Instance)
+    $boostSurface = $boostSurfaceField.GetValue($productionWindow)
+    $boostSurfaceMatrix = $boostSurface.
+        TransformToAncestor($designSurface).Value
+    if ([Math]::Abs($boostSurfaceMatrix.M11 - 1.0) -gt 0.001 -or
+        [Math]::Abs($boostSurfaceMatrix.M22 - 1.0) -gt 0.001) {
+        throw (
+            'High-DPI compact Boost control is internally resampled at ' +
+            "$($boostSurfaceMatrix.M11)x$($boostSurfaceMatrix.M22).")
+    }
 }
 finally {
     if ($productionWindow) {
@@ -120,6 +158,62 @@ function Invoke-MonitorPlacement {
             $CurrentLeft,
             $CurrentTop,
             $Center))
+}
+
+foreach ($desktopCase in @(
+    @{ Dpi = [uint32]96; Width = 460; Height = 552; Compact = 0 },
+    @{ Dpi = [uint32]120; Width = 575; Height = 690; Compact = 0 },
+    @{ Dpi = [uint32]144; Width = 690; Height = 828; Compact = 0 },
+    @{ Dpi = [uint32]192; Width = 920; Height = 984; Compact = 1 }
+)) {
+    $placement = Invoke-MonitorPlacement `
+        -WorkLeft 0 `
+        -WorkTop 0 `
+        -WorkRight 1920 `
+        -WorkBottom 1080 `
+        -DpiX $desktopCase.Dpi `
+        -DpiY $desktopCase.Dpi `
+        -CurrentLeft 0 `
+        -CurrentTop 0 `
+        -Center $true
+    if ($placement[2] -ne $desktopCase.Width -or
+        $placement[3] -ne $desktopCase.Height -or
+        $placement[4] -ne $desktopCase.Compact) {
+        throw (
+            "1920x1080 placement at $($desktopCase.Dpi) DPI was " +
+            "$($placement -join ', ').")
+    }
+    $widthDip = $placement[2] * 96.0 / $desktopCase.Dpi
+    $heightDip = $placement[3] * 96.0 / $desktopCase.Dpi
+    if ([Math]::Abs($widthDip - 460.0) -gt 0.001 -or
+        [Math]::Abs(
+            $heightDip - $(if ($desktopCase.Compact) { 492.0 } else { 552.0 })) -gt 0.001) {
+        throw "1920x1080 placement introduced fractional DIP scaling at $($desktopCase.Dpi) DPI."
+    }
+}
+
+foreach ($workBottom in @(1040, 1032)) {
+    $placement = Invoke-MonitorPlacement `
+        -WorkLeft 0 `
+        -WorkTop 0 `
+        -WorkRight 1920 `
+        -WorkBottom $workBottom `
+        -DpiX 192 `
+        -DpiY 192 `
+        -CurrentLeft 0 `
+        -CurrentTop 0 `
+        -Center $true
+    if ($placement[2] -ne 920 -or
+        $placement[3] -ne 984 -or
+        $placement[4] -ne 1) {
+        throw (
+            "1920x$workBottom work area at 200% did not preserve the " +
+            "460x492 DIP compact surface: $($placement -join ', ').")
+    }
+    if ([Math]::Abs(($placement[2] * 0.5) - 460.0) -gt 0.001 -or
+        [Math]::Abs(($placement[3] * 0.5) - 492.0) -gt 0.001) {
+        throw "1920x$workBottom work area introduced fractional compact scaling."
+    }
 }
 
 $mixedDpi = Invoke-MonitorPlacement `
@@ -183,10 +277,11 @@ $constrainedDpi = Invoke-MonitorPlacement `
     -CurrentLeft 5000 `
     -CurrentTop -100 `
     -Center $false
-if ($constrainedDpi[0] -ne 1945 -or
+if ($constrainedDpi[0] -ne 1932 -or
     $constrainedDpi[1] -ne 12 -or
-    $constrainedDpi[2] -ne 563 -or
-    $constrainedDpi[3] -ne 676) {
+    $constrainedDpi[2] -ne 576 -or
+    $constrainedDpi[3] -ne 616 -or
+    $constrainedDpi[4] -ne 1) {
     throw "Constrained 150% monitor placement was incorrect: $($constrainedDpi -join ', ')."
 }
 
@@ -200,10 +295,11 @@ $tinyWorkArea = Invoke-MonitorPlacement `
     -CurrentLeft 9999 `
     -CurrentTop -999 `
     -Center $false
-if ($tinyWorkArea[0] -ne -156 -or
+if ($tinyWorkArea[0] -ne -173 -or
     $tinyWorkArea[1] -ne 116 -or
-    $tinyWorkArea[2] -ne 140 -or
-    $tinyWorkArea[3] -ne 168) {
+    $tinyWorkArea[2] -ne 157 -or
+    $tinyWorkArea[3] -ne 168 -or
+    $tinyWorkArea[4] -ne 1) {
     throw "Tiny 200% work-area clamping was incorrect: $($tinyWorkArea -join ', ')."
 }
 
@@ -539,6 +635,31 @@ try {
     if ($compactSteamBounds.BottomInset -lt 12) {
         throw 'Compact layout clipped the final preference switch.'
     }
+    $compactWatermark = Find-ById `
+        $compactWindow `
+        'Boostix.Watermark' `
+        10000 `
+        -AllowDisabled
+    $compactWatermarkBounds = Get-NormalizedBounds `
+        $compactWatermark `
+        $compactWindow
+    if ($compactWatermarkBounds.RightInset -lt 24 -or
+        $compactWatermarkBounds.BottomInset -lt 24) {
+        throw 'Compact layout moved the watermark outside its 24 DIP footer safe area.'
+    }
+    $compactHorizontalOverlap =
+        $compactSteamBounds.Left -lt
+            ($compactWatermarkBounds.Left + $compactWatermarkBounds.Width) -and
+        ($compactSteamBounds.Left + $compactSteamBounds.Width) -gt
+            $compactWatermarkBounds.Left
+    $compactVerticalOverlap =
+        $compactSteamBounds.Top -lt
+            ($compactWatermarkBounds.Top + $compactWatermarkBounds.Height) -and
+        ($compactSteamBounds.Top + $compactSteamBounds.Height) -gt
+            $compactWatermarkBounds.Top
+    if ($compactHorizontalOverlap -and $compactVerticalOverlap) {
+        throw 'Compact layout overlaps the final preference switch and watermark.'
+    }
 }
 finally {
     if ($compactProcess -and -not $compactProcess.HasExited) {
@@ -612,6 +733,8 @@ if ($programSource -notmatch 'BuildKeyboardFocusVisualStyle' -or
     $programSource -notmatch 'TransformFromDevice' -or
     $programSource -notmatch 'CalculateMonitorPlacement\(' -or
     $programSource -notmatch 'compactMainLayout' -or
+    $programSource -notmatch 'SetCompactMainLayout' -or
+    $programSource -notmatch 'CompactWindowHeight' -or
     $programSource -notmatch 'scaleMainLayoutToWorkArea') {
     throw 'Per-monitor DPI/work-area layout or the Boostix keyboard focus visual is missing.'
 }
@@ -635,4 +758,17 @@ foreach ($sourceText in @(
     }
 }
 
-"Responsive layout test passed: $($results -join ', '); per-monitor mixed-DPI placement, compact/ultra-compact demo layout, keyboard focus, gutters, overlay and $transitionMilliseconds ms motion verified."
+foreach ($motionSourcePath in @(
+    (Join-Path $projectRoot 'Boostix\OptimizationFlow.cs'),
+    (Join-Path $projectRoot 'Boostix\UpdateFlow.cs')
+)) {
+    $motionSource = Get-Content -Raw -Encoding UTF8 $motionSourcePath
+    $motionChecks = [regex]::Matches(
+        $motionSource,
+        'SystemParameters\.ClientAreaAnimation').Count
+    if ($motionChecks -lt 3) {
+        throw "Reduced-motion handling is incomplete in $motionSourcePath."
+    }
+}
+
+"Responsive layout test passed: $($results -join ', '); crisp 1920x1080 100/125/150/200% placement, per-monitor mixed-DPI compact reflow, reduced motion, keyboard focus, gutters, overlay and $transitionMilliseconds ms motion verified."

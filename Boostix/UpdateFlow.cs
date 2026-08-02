@@ -619,22 +619,15 @@ namespace Boostix
 
         private static void Log(string message)
         {
-            try
-            {
-                string directory = Path.Combine(
-                    Environment.GetFolderPath(
-                        Environment.SpecialFolder.LocalApplicationData),
-                    ProductBrand.DataDirectoryName);
-                Directory.CreateDirectory(directory);
-                File.AppendAllText(
-                    Path.Combine(directory, "update.log"),
-                    DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture) +
-                        "  " + message + Environment.NewLine,
-                    new UTF8Encoding(false));
-            }
-            catch
-            {
-            }
+            // The installer launches this one-shot probe elevated. Never append
+            // through a predictable user-writable LocalAppData path from that
+            // elevated process. The parent installer already records the probe
+            // outcome in its protected diagnostic log.
+            Trace.WriteLine(
+                DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture) +
+                "  " + (message ?? string.Empty)
+                    .Replace('\r', ' ')
+                    .Replace('\n', ' '));
         }
     }
 
@@ -702,6 +695,21 @@ namespace Boostix
                 : base(message, innerException)
             {
             }
+        }
+
+        private sealed class InstallerNetworkException : WebException
+        {
+            public InstallerNetworkException(
+                string message,
+                Exception innerException,
+                WebExceptionStatus status,
+                int httpStatusCode)
+                : base(message, innerException, status, null)
+            {
+                HttpStatusCode = httpStatusCode;
+            }
+
+            public int HttpStatusCode { get; private set; }
         }
 
         private struct SemanticVersion : IComparable<SemanticVersion>
@@ -1416,6 +1424,20 @@ namespace Boostix
                         totalTimer,
                         ManifestRetryDelayMilliseconds * attempt,
                         ex);
+                }
+                catch (InvalidDataException ex)
+                {
+                    if (!repositoryHeadResolved)
+                    {
+                        repositoryRefFailure = ex;
+                        useSignedMainFallback = true;
+                        Log(
+                            "GitHub repository ref returned malformed data; " +
+                            "attempting the RSA-verified signed-main manifest: " +
+                            DescribeException(ex));
+                        break;
+                    }
+                    throw;
                 }
             }
             if (useSignedMainFallback)
@@ -2322,15 +2344,31 @@ namespace Boostix
                     ShowRetry("Не удалось запустить установщик. Проверьте доступ к системе и повторите попытку.");
                 }
             }
+            catch (UpdateStorageException ex)
+            {
+                ShowUpdateStorageRetry(ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                ShowUpdateStorageRetry(ex);
+            }
+            catch (SecurityException ex)
+            {
+                ShowUpdateStorageRetry(ex);
+            }
             catch (InvalidDataException ex)
             {
                 Log("Downloaded update validation failed: " + DescribeException(ex));
                 ShowRetry("Скачанный файл обновления не прошёл проверку безопасности. Повторите попытку; если ошибка сохранится, скачайте актуальный установщик с официального репозитория.");
             }
+            catch (IOException ex)
+            {
+                ShowUpdateStorageRetry(ex);
+            }
             catch (WebException ex)
             {
                 Log("Update download failed: " + DescribeException(ex));
-                ShowRetry("Не удалось скачать обновление. Проверьте подключение к интернету и повторите попытку.");
+                ShowUpdateNetworkRetry(ex);
             }
             catch (Exception ex)
             {
@@ -2460,8 +2498,61 @@ namespace Boostix
             updateCheckRetryRecommended = true;
             Log("Update storage access failed: " + DescribeException(exception));
             ShowRetry(
-                "Windows не разрешила подготовить папку обновления. " +
-                "Проверьте доступ к профилю пользователя и повторите попытку.");
+                "Не удалось записать файл обновления. Проверьте свободное место, " +
+                "доступ к папке TEMP и не блокирует ли файл антивирус, затем " +
+                "повторите попытку.");
+        }
+
+        private void ShowUpdateNetworkRetry(WebException exception)
+        {
+            updateCheckDiagnostic =
+                "Update network access failed: " +
+                DescribeException(exception);
+            updateCheckRetryRecommended = true;
+            ShowRetry(GetUpdateNetworkFailureMessage(exception));
+        }
+
+        private static string GetUpdateNetworkFailureMessage(
+            WebException exception)
+        {
+            int httpStatusCode = GetWebExceptionHttpStatusCode(exception);
+            if (httpStatusCode == 407)
+            {
+                return "Прокси-сервер Windows отклонил учётные данные. " +
+                    "Войдите в корпоративную сеть или исправьте настройки прокси и повторите попытку.";
+            }
+            if (exception != null &&
+                (exception.Status == WebExceptionStatus.TrustFailure ||
+                 exception.Status == WebExceptionStatus.SecureChannelFailure))
+            {
+                return "Не удалось установить защищённое соединение с GitHub. " +
+                    "Проверьте дату и время Windows, сертификаты и HTTPS-фильтрацию антивируса или прокси.";
+            }
+            if (httpStatusCode == 401 || httpStatusCode == 403)
+            {
+                return "Сеть или защитное ПО запретили доступ к файлу обновления на GitHub. " +
+                    "Разрешите github.com и raw.githubusercontent.com либо скачайте актуальный установщик вручную.";
+            }
+            if (httpStatusCode == 404)
+            {
+                return "Файл обновления временно недоступен на GitHub. " +
+                    "Повторите попытку позже или скачайте актуальный установщик вручную.";
+            }
+            if (exception != null &&
+                (exception.Status == WebExceptionStatus.NameResolutionFailure ||
+                 exception.Status == WebExceptionStatus.ProxyNameResolutionFailure))
+            {
+                return "Не удалось найти сервер обновлений. " +
+                    "Проверьте DNS, системный прокси и подключение к интернету, затем повторите попытку.";
+            }
+            if (exception != null &&
+                exception.Status == WebExceptionStatus.Timeout)
+            {
+                return "Сервер обновлений не ответил вовремя. " +
+                    "Проверьте скорость подключения, VPN или прокси и повторите попытку.";
+            }
+            return "Не удалось скачать обновление. Проверьте подключение к интернету, " +
+                "системный прокси и блокировку GitHub защитным ПО, затем повторите попытку.";
         }
 
         private async Task RunDemoUpdateProgressAsync(UpdateManifest update)
@@ -2501,6 +2592,7 @@ namespace Boostix
             UpdateManifest update,
             IProgress<UpdateProgressInfo> progress)
         {
+            EnsureSufficientUpdateDownloadSpace(update.Size);
             string directory = CreateUniqueDownloadDirectory();
             string fileName = "Boostix-Setup-" + update.Version + ".exe";
             string installerPath = Path.Combine(directory, fileName);
@@ -2608,7 +2700,8 @@ namespace Boostix
                 }
             }
 
-            var failures = new List<Exception>();
+            var networkFailures = new List<Exception>();
+            var integrityFailures = new List<Exception>();
             Stopwatch totalTimer = Stopwatch.StartNew();
             for (int sourceIndex = 0; sourceIndex < addresses.Count; sourceIndex++)
             {
@@ -2619,15 +2712,15 @@ namespace Boostix
                 {
                     if (totalTimer.ElapsedMilliseconds >= DownloadTotalTimeoutMilliseconds)
                     {
-                        failures.Add(new WebException(
+                        networkFailures.Add(new WebException(
                             "Installer download exceeded its total time budget.",
                             WebExceptionStatus.Timeout));
                         break;
                     }
-                    destination.Position = 0;
-                    destination.SetLength(0);
                     try
                     {
+                        destination.Position = 0;
+                        destination.SetLength(0);
                         DownloadInstallerFromAddress(
                             update,
                             address,
@@ -2645,28 +2738,174 @@ namespace Boostix
                     }
                     catch (Exception exception)
                     {
-                        failures.Add(new IOException(
-                            "Installer source " +
+                        string context = "Installer source " +
                             (sourceIndex + 1).ToString(CultureInfo.InvariantCulture) +
                             " attempt " + attempt.ToString(CultureInfo.InvariantCulture) +
-                            " failed.",
-                            exception));
-                        Log(
-                            "Installer download source failed; trying another trusted " +
-                            "source or retry: " + DescribeException(exception));
-                        if (attempt < InstallerDownloadAttemptsPerSource)
+                            " failed.";
+                        WebException networkFailure =
+                            FindInstallerNetworkFailure(exception);
+                        if (networkFailure != null)
                         {
-                            Thread.Sleep(500 * attempt);
+                            networkFailures.Add(new WebException(
+                                context,
+                                networkFailure,
+                                networkFailure.Status,
+                                networkFailure.Response));
+                            Log(
+                                "Installer download network source failed: " +
+                                DescribeException(networkFailure));
+                            if (attempt < InstallerDownloadAttemptsPerSource &&
+                                IsTransientInstallerDownloadFailure(networkFailure))
+                            {
+                                Thread.Sleep(500 * attempt);
+                                continue;
+                            }
+                            break;
                         }
+                        if (exception is InvalidDataException)
+                        {
+                            integrityFailures.Add(new InvalidDataException(
+                                context,
+                                exception));
+                            Log(
+                                "Installer download source failed integrity validation: " +
+                                DescribeException(exception));
+                            // Re-downloading the same immutable source cannot repair a
+                            // deterministic size/hash/PE mismatch. Try the next signed
+                            // fallback, then surface a security error if none succeeds.
+                            break;
+                        }
+                        if (exception is UpdateStorageException)
+                        {
+                            throw;
+                        }
+                        if (exception is IOException ||
+                            exception is UnauthorizedAccessException ||
+                            exception is SecurityException)
+                        {
+                            throw new UpdateStorageException(
+                                "The update installer could not be written to local storage.",
+                                exception);
+                        }
+                        throw;
                     }
                 }
             }
 
-            throw new WebException(
+            if (integrityFailures.Count != 0)
+            {
+                throw new InvalidDataException(
+                    "Installer content failed validation from every available trusted source.",
+                    new AggregateException(integrityFailures));
+            }
+            WebException representativeFailure =
+                SelectRepresentativeInstallerNetworkFailure(networkFailures);
+            throw new InstallerNetworkException(
                 "Installer download failed from every trusted source.",
-                new AggregateException(failures),
-                WebExceptionStatus.ConnectFailure,
-                null);
+                new AggregateException(networkFailures),
+                representativeFailure == null
+                    ? WebExceptionStatus.ConnectFailure
+                    : representativeFailure.Status,
+                GetWebExceptionHttpStatusCode(representativeFailure));
+        }
+
+        private static WebException SelectRepresentativeInstallerNetworkFailure(
+            IList<Exception> failures)
+        {
+            WebException selected = null;
+            int selectedPriority = int.MinValue;
+            if (failures == null)
+            {
+                return null;
+            }
+            foreach (Exception failure in failures)
+            {
+                WebException candidate = FindInstallerNetworkFailure(failure);
+                int priority = GetInstallerNetworkFailurePriority(candidate);
+                if (candidate != null && priority > selectedPriority)
+                {
+                    selected = candidate;
+                    selectedPriority = priority;
+                }
+            }
+            return selected;
+        }
+
+        private static int GetInstallerNetworkFailurePriority(
+            WebException exception)
+        {
+            if (exception == null)
+            {
+                return int.MinValue;
+            }
+            int httpStatusCode = GetWebExceptionHttpStatusCode(exception);
+            if (httpStatusCode == 407)
+            {
+                return 1000;
+            }
+            if (exception.Status == WebExceptionStatus.TrustFailure ||
+                exception.Status == WebExceptionStatus.SecureChannelFailure)
+            {
+                return 900;
+            }
+            if (httpStatusCode == 401 || httpStatusCode == 403)
+            {
+                return 800;
+            }
+            if (httpStatusCode == 404)
+            {
+                return 700;
+            }
+            if (exception.Status == WebExceptionStatus.NameResolutionFailure ||
+                exception.Status == WebExceptionStatus.ProxyNameResolutionFailure)
+            {
+                return 600;
+            }
+            if (exception.Status == WebExceptionStatus.Timeout)
+            {
+                return 500;
+            }
+            return 100;
+        }
+
+        private static int GetWebExceptionHttpStatusCode(
+            WebException exception)
+        {
+            var installerFailure = exception as InstallerNetworkException;
+            if (installerFailure != null)
+            {
+                return installerFailure.HttpStatusCode;
+            }
+            var response = exception == null
+                ? null
+                : exception.Response as HttpWebResponse;
+            return response == null ? 0 : (int)response.StatusCode;
+        }
+
+        private static WebException FindInstallerNetworkFailure(
+            Exception exception)
+        {
+            Exception current = exception;
+            for (int depth = 0; current != null && depth < 8; depth++)
+            {
+                var webException = current as WebException;
+                if (webException != null)
+                {
+                    return webException;
+                }
+                if (ReferenceEquals(current, current.InnerException))
+                {
+                    break;
+                }
+                current = current.InnerException;
+            }
+            return null;
+        }
+
+        private static bool IsTransientInstallerDownloadFailure(
+            WebException exception)
+        {
+            return IsTransientManifestFailure(exception);
         }
 
         private static void ValidateDownloadedInstallerContent(
@@ -3025,6 +3264,64 @@ namespace Boostix
                 Path.GetFullPath(Path.GetTempPath()));
         }
 
+        private static void EnsureSufficientUpdateDownloadSpace(
+            long installerSize)
+        {
+            if (installerSize <= 0 || installerSize > InstallerMaximumBytes)
+            {
+                throw new InvalidDataException(
+                    "The signed installer size is outside the allowed range.");
+            }
+            try
+            {
+                string tempRoot = Path.GetFullPath(Path.GetTempPath());
+                string volumeRoot = Path.GetPathRoot(tempRoot);
+                if (string.IsNullOrWhiteSpace(volumeRoot))
+                {
+                    throw new UpdateStorageException(
+                        "The TEMP volume could not be determined.");
+                }
+                var drive = new DriveInfo(volumeRoot);
+                long required = installerSize + (64L * 1024L * 1024L);
+                if (!drive.IsReady || drive.AvailableFreeSpace < required)
+                {
+                    throw new UpdateStorageException(
+                        "The TEMP volume does not have enough free space for a verified update. " +
+                        "Required=" + required.ToString(CultureInfo.InvariantCulture) +
+                        "; Available=" +
+                        (drive.IsReady
+                            ? drive.AvailableFreeSpace.ToString(CultureInfo.InvariantCulture)
+                            : "unavailable") + ".");
+                }
+                Log(
+                    "Update storage preflight passed. Free=" +
+                    drive.AvailableFreeSpace.ToString(CultureInfo.InvariantCulture) +
+                    "; Required=" + required.ToString(CultureInfo.InvariantCulture) + ".");
+            }
+            catch (UpdateStorageException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                if (!(exception is IOException) &&
+                    !(exception is UnauthorizedAccessException) &&
+                    !(exception is SecurityException) &&
+                    !(exception is ArgumentException) &&
+                    !(exception is NotSupportedException))
+                {
+                    throw;
+                }
+                // Quota-backed, redirected, or network TEMP folders do not always
+                // expose DriveInfo. The protected directory creation and held-file
+                // write still provide the authoritative storage check.
+                Log(
+                    "Update storage preflight was unavailable; continuing with " +
+                    "the protected held-file check: " +
+                    DescribeException(exception));
+            }
+        }
+
         private static string CreateSecureUpdateDownloadDirectoryAtRoot(string root)
         {
             if (string.IsNullOrWhiteSpace(root))
@@ -3209,17 +3506,26 @@ namespace Boostix
             AutomationProperties.SetName(statusText, status);
             body.Children.Add(statusText);
 
-            var movement = new DoubleAnimation
+            var progressTranslation =
+                (TranslateTransform)indicator.RenderTransform;
+            if (SystemParameters.ClientAreaAnimation)
             {
-                From = -82,
-                To = 300,
-                Duration = TimeSpan.FromMilliseconds(1250),
-                RepeatBehavior = RepeatBehavior.Forever,
-                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-            };
-            ((TranslateTransform)indicator.RenderTransform).BeginAnimation(
-                TranslateTransform.XProperty,
-                movement);
+                var movement = new DoubleAnimation
+                {
+                    From = -82,
+                    To = 300,
+                    Duration = TimeSpan.FromMilliseconds(1250),
+                    RepeatBehavior = RepeatBehavior.Forever,
+                    EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+                };
+                progressTranslation.BeginAnimation(
+                    TranslateTransform.XProperty,
+                    movement);
+            }
+            else
+            {
+                progressTranslation.X = 109;
+            }
 
             Grid.SetRow(body, 1);
             cardContent.Children.Add(body);
@@ -3630,6 +3936,12 @@ namespace Boostix
 
         private static void AnimateBrush(SolidColorBrush brush, Color target, int milliseconds)
         {
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+                brush.Color = target;
+                return;
+            }
             var animation = new ColorAnimation
             {
                 To = target,
@@ -3641,6 +3953,12 @@ namespace Boostix
 
         private static void AnimateLift(TranslateTransform transform, double target, int milliseconds)
         {
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                transform.BeginAnimation(TranslateTransform.YProperty, null);
+                transform.Y = target;
+                return;
+            }
             var animation = new DoubleAnimation
             {
                 To = target,

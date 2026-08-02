@@ -148,6 +148,17 @@ namespace Boostix
             get { return Visibility == Visibility.Visible; }
         }
 
+        internal bool IsInitializedForUpdateHealth()
+        {
+            // This check is intentionally in-memory only. The installer health
+            // probe can run elevated and must not traverse profile marker paths.
+            return owner != null &&
+                regularFont != null &&
+                semiboldFont != null &&
+                card != null &&
+                cardContent != null;
+        }
+
         internal string GetOptimizationStatus()
         {
             GlobalTransactionInfo transaction;
@@ -1036,17 +1047,26 @@ namespace Boostix
             AutomationProperties.SetName(statusText, statusText.Text);
             body.Children.Add(statusText);
 
-            var movement = new DoubleAnimation
+            var progressTranslation =
+                (TranslateTransform)progressIndicator.RenderTransform;
+            if (SystemParameters.ClientAreaAnimation)
             {
-                From = -82,
-                To = 300,
-                Duration = TimeSpan.FromMilliseconds(1250),
-                RepeatBehavior = RepeatBehavior.Forever,
-                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-            };
-            ((TranslateTransform)progressIndicator.RenderTransform).BeginAnimation(
-                TranslateTransform.XProperty,
-                movement);
+                var movement = new DoubleAnimation
+                {
+                    From = -82,
+                    To = 300,
+                    Duration = TimeSpan.FromMilliseconds(1250),
+                    RepeatBehavior = RepeatBehavior.Forever,
+                    EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+                };
+                progressTranslation.BeginAnimation(
+                    TranslateTransform.XProperty,
+                    movement);
+            }
+            else
+            {
+                progressTranslation.X = 109;
+            }
 
             Grid.SetRow(body, 1);
             cardContent.Children.Add(body);
@@ -1271,6 +1291,12 @@ namespace Boostix
 
         private static void AnimateBrush(SolidColorBrush brush, Color target, int milliseconds)
         {
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+                brush.Color = target;
+                return;
+            }
             var animation = new ColorAnimation
             {
                 To = target,
@@ -1282,6 +1308,12 @@ namespace Boostix
 
         private static void AnimateLift(TranslateTransform transform, double target, int milliseconds)
         {
+            if (!SystemParameters.ClientAreaAnimation)
+            {
+                transform.BeginAnimation(TranslateTransform.YProperty, null);
+                transform.Y = target;
+                return;
+            }
             var animation = new DoubleAnimation
             {
                 To = target,

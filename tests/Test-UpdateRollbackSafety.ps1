@@ -408,10 +408,12 @@ try {
         'UpdateRollbackStatus.RollingBack',
         'ValidateDirectoryTreeWithoutReparse',
         'RecoverInterruptedUpdateTransactions(false)',
+        'An unrelated directory in the protected rollback root',
         'StartUpdateRecoveryWatchdog(transaction)',
         'RestorePostInstallRegistration(registration)',
         'string.Equals(argument, "/updateui"',
-        'if (File.Exists(InstalledExe))'
+        'bool boostixInstalled = File.Exists(InstalledExe);',
+        '!boostixInstalled && File.Exists(LegacyInstalledExe)'
     )) {
         if (-not $installerText.Contains($required)) {
             throw "Installer rollback contract is missing: $required"
@@ -463,7 +465,7 @@ try {
         $readinessStart,
         $readinessEnd - $readinessStart)
     foreach ($required in @(
-        'optimizationOverlay.GetOptimizationStatus()',
+        'optimizationOverlay.IsInitializedForUpdateHealth()',
         'boostCenterOverlay.SetSettings(centerSettings)',
         'DispatcherPriority.ApplicationIdle',
         'Dispatcher.HasShutdownStarted',
@@ -480,6 +482,7 @@ try {
         'BoostPreflightService.Run(',
         'DiagnosticSnapshotProvider.Capture()',
         '!IsVisible',
+        'optimizationOverlay.GetOptimizationStatus()',
         'ActualWidth <= 0',
         'ActualHeight <= 0'
     )) {
@@ -489,7 +492,7 @@ try {
     }
 
     $snapshotStart = $installerText.IndexOf(
-        'private static UpdateRollbackTransaction CreateUpdateRollbackTransaction()',
+        'private static UpdateRollbackTransaction CreateUpdateRollbackTransaction(',
         [StringComparison]::Ordinal)
     $preparingState = $installerText.IndexOf(
         'WriteUpdateState(transaction);',

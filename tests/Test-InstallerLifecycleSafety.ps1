@@ -105,14 +105,92 @@ try {
     $captureShortcut = $engineType.GetMethod(
         'CaptureShortcut',
         $flags)
+    $tryCaptureShortcut = $engineType.GetMethod(
+        'TryCaptureShortcut',
+        $flags)
+    $validateOptionalShortcutRoot = $engineType.GetMethod(
+        'TryValidateOptionalShortcutRoot',
+        $flags)
+    $validateRegistrationSnapshot = $engineType.GetMethod(
+        'ValidateRegistrationSnapshot',
+        $flags)
+    $restoreShortcut = $engineType.GetMethod(
+        'RestoreShortcut',
+        $flags)
     if (-not $acquireGuard -or -not $acquireGuards -or
         -not $validateUninstall -or -not $validateUninstallRoots -or
-        -not $captureShortcut) {
+        -not $captureShortcut -or -not $tryCaptureShortcut -or
+        -not $validateOptionalShortcutRoot -or
+        -not $validateRegistrationSnapshot -or -not $restoreShortcut) {
         throw 'Installer lifecycle safety helpers were not found in the compiled source.'
+    }
+
+    $optionalRootArguments = New-Object 'object[]' 3
+    $optionalRootArguments[0] = [string]''
+    $optionalRootArguments[1] = [string]'test'
+    $optionalRootArguments[2] = $null
+    if ([bool]$validateOptionalShortcutRoot.Invoke(
+            $null,
+            $optionalRootArguments) -or
+        $null -ne $optionalRootArguments[2]) {
+        throw 'An empty optional shortcut root was accepted.'
     }
 
     $shortcutBoundary = Join-Path $temporaryRoot 'CommonPrograms'
     [IO.Directory]::CreateDirectory($shortcutBoundary) | Out-Null
+    $optionalRootArguments[0] = [string]$shortcutBoundary
+    if (-not [bool]$validateOptionalShortcutRoot.Invoke(
+            $null,
+            $optionalRootArguments) -or
+        [string]$optionalRootArguments[2] -cne
+            [IO.Path]::GetFullPath($shortcutBoundary)) {
+        throw 'A safe absolute optional shortcut root was rejected.'
+    }
+
+    $occupiedRoot = Join-Path $temporaryRoot 'OccupiedShortcutRoot'
+    [IO.File]::WriteAllText($occupiedRoot, 'occupied', $utf8)
+    $optionalRootArguments[0] = [string]$occupiedRoot
+    $optionalRootArguments[2] = $null
+    if ([bool]$validateOptionalShortcutRoot.Invoke(
+            $null,
+            $optionalRootArguments) -or
+        $null -ne $optionalRootArguments[2]) {
+        throw 'A file occupying an optional shortcut root was accepted.'
+    }
+
+    $junctionTarget = Join-Path $temporaryRoot 'ShortcutRootTarget'
+    $junctionRoot = Join-Path $temporaryRoot 'RedirectedShortcutRoot'
+    [IO.Directory]::CreateDirectory($junctionTarget) | Out-Null
+    $junctionMarker = Join-Path $junctionTarget 'outside.txt'
+    [IO.File]::WriteAllText($junctionMarker, 'preserve', $utf8)
+    try {
+        New-Item `
+            -ItemType Junction `
+            -Path $junctionRoot `
+            -Target $junctionTarget `
+            -ErrorAction Stop | Out-Null
+        $optionalRootArguments[0] = [string]$junctionRoot
+        $optionalRootArguments[2] = $null
+        if ([bool]$validateOptionalShortcutRoot.Invoke(
+                $null,
+                $optionalRootArguments) -or
+            $null -ne $optionalRootArguments[2]) {
+            throw 'A redirected optional shortcut root was accepted.'
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $junctionRoot) {
+            [IO.Directory]::Delete($junctionRoot)
+        }
+    }
+    if (-not (Test-Path -LiteralPath $junctionMarker -PathType Leaf)) {
+        throw 'Optional shortcut validation followed a redirected root.'
+    }
+
+    $nullShortcutArguments = New-Object 'object[]' 1
+    $nullShortcutArguments[0] = $null
+    [void]$restoreShortcut.Invoke($null, $nullShortcutArguments)
+
     $newShortcutDirectory = Join-Path $shortcutBoundary 'Boostix'
     $newShortcutPath = Join-Path $newShortcutDirectory 'Boostix.lnk'
     $shortcutArguments = New-Object 'object[]' 1
@@ -137,6 +215,51 @@ try {
         -Arguments $occupiedArguments `
         -Scenario 'Shortcut snapshot with a file occupying the product directory' `
         -ExpectedType ([IO.IOException])
+    $optionalCaptureArguments = New-Object 'object[]' 2
+    $optionalCaptureArguments[0] = $occupiedArguments[0]
+    $optionalCaptureArguments[1] = [string]'test'
+    if ($null -ne $tryCaptureShortcut.Invoke(
+            $null,
+            $optionalCaptureArguments)) {
+        throw 'An unsafe optional shortcut was captured for later mutation.'
+    }
+
+    $registrationType = $assembly.GetType(
+        'BoostixSetup.InstallerEngine+PostInstallRegistrationSnapshot',
+        $true,
+        $false)
+    $registryType = $assembly.GetType(
+        'BoostixSetup.InstallerEngine+RegistryKeySnapshot',
+        $true,
+        $false)
+    $registration = [Activator]::CreateInstance($registrationType, $true)
+    $uninstallSnapshot = [Activator]::CreateInstance($registryType, $true)
+    $appPathsSnapshot = [Activator]::CreateInstance($registryType, $true)
+    $registryType.GetField('Name').SetValue(
+        $uninstallSnapshot,
+        'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Boostix')
+    $registryType.GetField('Name').SetValue(
+        $appPathsSnapshot,
+        'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Boostix.exe')
+    $registrationType.GetField('UninstallKey').SetValue(
+        $registration,
+        $uninstallSnapshot)
+    $registrationType.GetField('AppPathsKey').SetValue(
+        $registration,
+        $appPathsSnapshot)
+    $registrationArguments = New-Object 'object[]' 1
+    $registrationArguments[0] = $registration
+    [void]$validateRegistrationSnapshot.Invoke(
+        $null,
+        $registrationArguments)
+    $registrationType.GetField('StartMenuDirectoryExisted').SetValue(
+        $registration,
+        $true)
+    Assert-InvocationFails `
+        -Method $validateRegistrationSnapshot `
+        -Arguments $registrationArguments `
+        -Scenario 'A null Start Menu snapshot with non-null capture metadata' `
+        -ExpectedType ([IO.InvalidDataException])
 
     # This uses only unique temporary roots. It never opens a real ProgramData lock.
     $dualGuardArguments = New-Object 'object[]' 3
@@ -272,6 +395,10 @@ try {
         '"BoostixOptimization"',
         'AcquireSystemTransactionGuardsAtRoots',
         'EnsureUninstallStateAllowsRemovalAtRoots',
+        'registrationSnapshot.StartMenuShortcut.Path',
+        'registrationSnapshot.DesktopShortcut.Path',
+        'TryResolveOptionalShortcutRoot',
+        'TryDeleteOptionalShortcutDirectory',
         'if (quiet)',
         'throw;'
     )) {
