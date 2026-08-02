@@ -5,8 +5,8 @@ namespace Boostix.Branding
         public const string ProductName = "Boostix";
         public const string ProductFileName = "Boostix";
         public const string CompanyName = "Silas Suspect";
-        public const string ProductVersion = "1.9.3";
-        public const string AssemblyVersion = "1.9.3.0";
+        public const string ProductVersion = "1.9.4";
+        public const string AssemblyVersion = "1.9.4.0";
         public const string ReleaseLabel = "BETA";
 
         public const string DataDirectoryName = "Boostix";

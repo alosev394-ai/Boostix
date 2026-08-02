@@ -102,10 +102,41 @@ try {
     $validateUninstallRoots = $engineType.GetMethod(
         'EnsureUninstallStateAllowsRemovalAtRoots',
         $flags)
+    $captureShortcut = $engineType.GetMethod(
+        'CaptureShortcut',
+        $flags)
     if (-not $acquireGuard -or -not $acquireGuards -or
-        -not $validateUninstall -or -not $validateUninstallRoots) {
+        -not $validateUninstall -or -not $validateUninstallRoots -or
+        -not $captureShortcut) {
         throw 'Installer lifecycle safety helpers were not found in the compiled source.'
     }
+
+    $shortcutBoundary = Join-Path $temporaryRoot 'CommonPrograms'
+    [IO.Directory]::CreateDirectory($shortcutBoundary) | Out-Null
+    $newShortcutDirectory = Join-Path $shortcutBoundary 'Boostix'
+    $newShortcutPath = Join-Path $newShortcutDirectory 'Boostix.lnk'
+    $shortcutArguments = New-Object 'object[]' 1
+    $shortcutArguments[0] = [string]$newShortcutPath
+    $shortcutSnapshot = $captureShortcut.Invoke($null, $shortcutArguments)
+    if ($null -eq $shortcutSnapshot -or
+        [bool]$shortcutSnapshot.GetType().GetField('Existed').GetValue(
+            $shortcutSnapshot)) {
+        throw 'A clean missing Start Menu product directory was not snapshotted as absent.'
+    }
+    if (Test-Path -LiteralPath $newShortcutDirectory) {
+        throw 'Shortcut snapshot unexpectedly created the missing product directory.'
+    }
+
+    $occupiedShortcutDirectory = Join-Path $shortcutBoundary 'Occupied'
+    [IO.File]::WriteAllText($occupiedShortcutDirectory, 'occupied', $utf8)
+    $occupiedArguments = New-Object 'object[]' 1
+    $occupiedArguments[0] = [string](Join-Path `
+        $occupiedShortcutDirectory 'Boostix.lnk')
+    Assert-InvocationFails `
+        -Method $captureShortcut `
+        -Arguments $occupiedArguments `
+        -Scenario 'Shortcut snapshot with a file occupying the product directory' `
+        -ExpectedType ([IO.IOException])
 
     # This uses only unique temporary roots. It never opens a real ProgramData lock.
     $dualGuardArguments = New-Object 'object[]' 3

@@ -4265,18 +4265,43 @@ namespace BoostixSetup
 
         private static ShortcutSnapshot CaptureShortcut(string path)
         {
-            string directory = Path.GetDirectoryName(
-                Path.GetFullPath(path));
-            if (!Directory.Exists(directory) ||
-                !IsPathFreeOfReparsePoints(directory))
+            string fullPath = Path.GetFullPath(path);
+            string directory = Path.GetDirectoryName(fullPath);
+            if (string.IsNullOrWhiteSpace(directory))
             {
                 throw new IOException(
                     "A shortcut directory is missing or redirected.");
             }
+            if (Directory.Exists(directory))
+            {
+                if (!IsPathFreeOfReparsePoints(directory))
+                {
+                    throw new IOException(
+                        "A shortcut directory is missing or redirected.");
+                }
+            }
+            else
+            {
+                string parent = Path.GetDirectoryName(directory);
+                if (File.Exists(directory) ||
+                    string.IsNullOrWhiteSpace(parent) ||
+                    !Directory.Exists(parent) ||
+                    !IsDirectChildPath(parent, directory) ||
+                    !IsPathFreeOfReparsePoints(parent))
+                {
+                    throw new IOException(
+                        "A shortcut directory is missing or redirected.");
+                }
+            }
+            if (Directory.Exists(fullPath))
+            {
+                throw new IOException(
+                    "A directory occupies the shortcut path.");
+            }
             var snapshot = new ShortcutSnapshot
             {
-                Path = Path.GetFullPath(path),
-                Existed = File.Exists(path)
+                Path = fullPath,
+                Existed = File.Exists(fullPath)
             };
             if (snapshot.Existed)
             {
@@ -4286,9 +4311,9 @@ namespace BoostixSetup
                     throw new InvalidDataException(
                         "An existing shortcut is too large to snapshot safely.");
                 }
-                snapshot.Contents = File.ReadAllBytes(path);
-                snapshot.Attributes = File.GetAttributes(path);
-                snapshot.LastWriteTimeUtc = File.GetLastWriteTimeUtc(path);
+                snapshot.Contents = File.ReadAllBytes(fullPath);
+                snapshot.Attributes = File.GetAttributes(fullPath);
+                snapshot.LastWriteTimeUtc = File.GetLastWriteTimeUtc(fullPath);
             }
             return snapshot;
         }
