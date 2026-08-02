@@ -54,8 +54,34 @@ namespace BoostixSetup
         [STAThread]
         private static void Main(string[] args)
         {
+            InstallerDiagnostics.Initialize(args);
+            try
+            {
+                MainCore(args);
+            }
+            catch (Exception exception)
+            {
+                InstallerDiagnostics.Write("Unhandled setup failure.", exception);
+                Environment.ExitCode = 1;
+                if (!IsSilentInvocation(args))
+                {
+                    MessageBox.Show(
+                        "Boostix Setup не смог завершить операцию.\r\n\r\n" +
+                        exception.Message + "\r\n\r\nЖурнал: " +
+                        InstallerDiagnostics.LogPath,
+                        "Boostix Setup",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private static void MainCore(string[] args)
+        {
             if (!HardenNativeDllSearch())
             {
+                InstallerDiagnostics.Write(
+                    "Native DLL search hardening is unavailable on this Windows build.");
                 MessageBox.Show(
                     "Boostix Setup не смог безопасно подготовить запуск. " +
                     "Установите актуальные обновления Windows и повторите попытку.",
@@ -120,6 +146,19 @@ namespace BoostixSetup
                     InstallerEngine.ScheduleUpdateSourceCleanupIfNeeded();
                 }
             }
+        }
+
+        private static bool IsSilentInvocation(string[] args)
+        {
+            foreach (string argument in args ?? new string[0])
+            {
+                if (string.Equals(argument, "/quiet", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(argument, "/silent", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static bool HardenNativeDllSearch()
@@ -209,8 +248,9 @@ namespace BoostixSetup
                     }
                     Environment.ExitCode = 0;
                 }
-                catch
+                catch (Exception exception)
                 {
+                    InstallerDiagnostics.Write("Silent installation failed.", exception);
                     Environment.ExitCode = 1;
                 }
                 return;
@@ -220,12 +260,207 @@ namespace BoostixSetup
         }
     }
 
+    internal static class InstallerDiagnostics
+    {
+        private const long MaximumLogBytes = 2L * 1024L * 1024L;
+        private static readonly object Sync = new object();
+        private static readonly string CorrelationId =
+            Guid.NewGuid().ToString("N");
+        private static string logPath;
+
+        public static string LogPath
+        {
+            get
+            {
+                EnsureLogPath();
+                return logPath;
+            }
+        }
+
+        public static void Initialize(string[] args)
+        {
+            EnsureLogPath();
+            string sid = "unknown";
+            try
+            {
+                SecurityIdentifier identity = WindowsIdentity.GetCurrent().User;
+                if (identity != null)
+                {
+                    sid = identity.Value;
+                }
+            }
+            catch
+            {
+            }
+            Write(
+                "Setup started. Version=" + ProductBrand.ProductVersion +
+                "; OS=" + Environment.OSVersion.VersionString +
+                "; CLR=" + Environment.Version +
+                "; OS64=" + Environment.Is64BitOperatingSystem +
+                "; Process64=" + Environment.Is64BitProcess +
+                "; SID=" + sid +
+                "; Args=" + string.Join(" ", args ?? new string[0]));
+        }
+
+        public static void Write(string message)
+        {
+            Write(message, null);
+        }
+
+        public static void Write(string message, Exception exception)
+        {
+            try
+            {
+                EnsureLogPath();
+                var builder = new StringBuilder();
+                builder.Append(DateTime.UtcNow.ToString(
+                    "O",
+                    CultureInfo.InvariantCulture));
+                builder.Append(" [").Append(CorrelationId).Append("] ");
+                builder.Append(message ?? string.Empty);
+                Exception current = exception;
+                int depth = 0;
+                while (current != null && depth < 8)
+                {
+                    builder.Append(" | ")
+                        .Append(current.GetType().FullName)
+                        .Append(" HRESULT=0x")
+                        .Append(current.HResult.ToString("X8", CultureInfo.InvariantCulture))
+                        .Append(": ")
+                        .Append(current.Message);
+                    current = current.InnerException;
+                    depth++;
+                }
+                lock (Sync)
+                {
+                    RotateIfNeeded();
+                    File.AppendAllText(
+                        logPath,
+                        builder.AppendLine().ToString(),
+                        new UTF8Encoding(false));
+                }
+                Trace.WriteLine(builder.ToString());
+            }
+            catch
+            {
+                // Logging must never become another reason for setup to fail.
+            }
+        }
+
+        private static void EnsureLogPath()
+        {
+            if (!string.IsNullOrWhiteSpace(logPath))
+            {
+                return;
+            }
+            lock (Sync)
+            {
+                if (!string.IsNullOrWhiteSpace(logPath))
+                {
+                    return;
+                }
+                try
+                {
+                    string directory = Path.Combine(
+                        Environment.GetFolderPath(
+                            Environment.SpecialFolder.CommonApplicationData),
+                        ProductBrand.DataDirectoryName,
+                        "Logs");
+                    Directory.CreateDirectory(directory);
+                    logPath = Path.Combine(directory, "setup.log");
+                }
+                catch
+                {
+                    logPath = Path.Combine(
+                        Path.GetFullPath(Path.GetTempPath()),
+                        "Boostix-Setup.log");
+                }
+            }
+        }
+
+        private static void RotateIfNeeded()
+        {
+            if (!File.Exists(logPath) ||
+                new FileInfo(logPath).Length < MaximumLogBytes)
+            {
+                return;
+            }
+            string previous = logPath + ".previous";
+            try
+            {
+                File.Copy(logPath, previous, true);
+                File.Delete(logPath);
+            }
+            catch
+            {
+                // If rotation is temporarily blocked, retain the current log.
+            }
+        }
+    }
+
     internal static class InstallerEngine
     {
         public const string ProductName = ProductBrand.ProductName;
         public const string ProductVersion = ProductBrand.ProductVersion;
+
+        private static RegistryView MachineRegistryView
+        {
+            get
+            {
+                return Environment.Is64BitOperatingSystem
+                    ? RegistryView.Registry64
+                    : RegistryView.Registry32;
+            }
+        }
+
+        private static string GetMachineProgramFilesDirectory()
+        {
+            try
+            {
+                using (RegistryKey baseKey = RegistryKey.OpenBaseKey(
+                    RegistryHive.LocalMachine,
+                    MachineRegistryView))
+                using (RegistryKey currentVersion = baseKey.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion",
+                    false))
+                {
+                    string configured = currentVersion == null
+                        ? null
+                        : currentVersion.GetValue(
+                            "ProgramFilesDir",
+                            null,
+                            RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+                    if (!string.IsNullOrWhiteSpace(configured) &&
+                        Path.IsPathRooted(configured))
+                    {
+                        return Path.GetFullPath(configured);
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                InstallerDiagnostics.Write(
+                    "Could not read the machine Program Files directory; using the Windows fallback.",
+                    exception);
+            }
+            return Path.GetFullPath(Environment.GetFolderPath(
+                Environment.SpecialFolder.ProgramFiles));
+        }
+
+        private static string GetMachineDesktopDirectory()
+        {
+            string directory = Environment.GetFolderPath(
+                Environment.SpecialFolder.CommonDesktopDirectory);
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                throw new DirectoryNotFoundException(
+                    "Windows did not provide the common desktop directory.");
+            }
+            return Path.GetFullPath(directory);
+        }
+
         public static readonly string InstallDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            GetMachineProgramFilesDirectory(),
             ProductBrand.InstallDirectoryName);
         public static readonly string InstalledExe = Path.Combine(InstallDirectory, "Boostix.exe");
         public static readonly string InstalledBoostSessionScript = Path.Combine(InstallDirectory, "Boost-Session.ps1");
@@ -246,7 +481,7 @@ namespace BoostixSetup
         private const string LegacyAppPathsRegistryPath =
             @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\MajesticBoost.exe";
         private static readonly string LegacyInstallDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            GetMachineProgramFilesDirectory(),
             ProductBrand.LegacyInstallDirectoryName);
         private static readonly string LegacyInstalledExe = Path.Combine(
             LegacyInstallDirectory,
@@ -260,6 +495,10 @@ namespace BoostixSetup
         private const string UpdateRollbackDirectoryName = "UpdateRollback";
         private const string UpdateStateFileName = "state.dat";
         private const string UpdateFileManifestName = "files.manifest";
+#if LEGACY_UPDATE_BRIDGE
+        private const string CanonicalSetupResourceName =
+            "Boostix.CanonicalSetup.exe";
+#endif
         private const string UpdateRegistrationSnapshotName = "registration.snapshot";
         private const string UpdateHealthRequestName = "health.request";
         private const string UpdateReadySignalName = "ready.signal";
@@ -267,7 +506,7 @@ namespace BoostixSetup
         private const int UpdateControlFileMaximumBytes = 4096;
         private const int UpdateSnapshotMaximumFiles = 512;
         private const long UpdateSnapshotMaximumBytes = 536870912L;
-        private const int UpdateHealthTimeoutMilliseconds = 30000;
+        private const int UpdateHealthTimeoutMilliseconds = 120000;
         private const int UpdateHealthPollMilliseconds = 100;
         private const int UpdateRecoveryParentWaitMilliseconds = 1800000;
         private const string UpdateHealthProbeArgument = "--update-health-probe";
@@ -324,6 +563,55 @@ namespace BoostixSetup
             public string Path;
             public bool IsDirectory;
             public int Depth;
+        }
+
+        [ComImport]
+        [Guid("00021401-0000-0000-C000-000000000046")]
+        [ClassInterface(ClassInterfaceType.None)]
+        private sealed class ShellLink
+        {
+        }
+
+        [ComImport]
+        [Guid("000214F9-0000-0000-C000-000000000046")]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IShellLinkW
+        {
+            void GetPath(
+                [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder file,
+                int maximumPath,
+                IntPtr findData,
+                uint flags);
+            void GetIDList(out IntPtr itemIdList);
+            void SetIDList(IntPtr itemIdList);
+            void GetDescription(
+                [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder description,
+                int maximumName);
+            void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string description);
+            void GetWorkingDirectory(
+                [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder directory,
+                int maximumPath);
+            void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string directory);
+            void GetArguments(
+                [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder arguments,
+                int maximumPath);
+            void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string arguments);
+            void GetHotkey(out short hotkey);
+            void SetHotkey(short hotkey);
+            void GetShowCmd(out int showCommand);
+            void SetShowCmd(int showCommand);
+            void GetIconLocation(
+                [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder iconPath,
+                int maximumPath,
+                out int iconIndex);
+            void SetIconLocation(
+                [MarshalAs(UnmanagedType.LPWStr)] string iconPath,
+                int iconIndex);
+            void SetRelativePath(
+                [MarshalAs(UnmanagedType.LPWStr)] string relativePath,
+                uint reserved);
+            void Resolve(IntPtr windowHandle, uint flags);
+            void SetPath([MarshalAs(UnmanagedType.LPWStr)] string file);
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -411,11 +699,12 @@ namespace BoostixSetup
 
         public static void Install(bool createDesktopShortcut, Action<int, string> progress = null)
         {
+            InstallerDiagnostics.Write(
+                "Install requested. DesktopShortcut=" + createDesktopShortcut + ".");
             using (IDisposable systemTransactionGuard =
                 AcquireSystemTransactionGuard("установку или обновление"))
             {
                 RecoverInterruptedUpdateTransactions(false);
-                PrepareLegacyInstallationForUpdate();
                 if (File.Exists(InstalledExe))
                 {
                     InstallUpdateWithHealthRollback(
@@ -428,108 +717,7 @@ namespace BoostixSetup
                 }
                 CleanupLegacyInstallationAfterSuccess();
             }
-        }
-
-        private static void PrepareLegacyInstallationForUpdate()
-        {
-            if (File.Exists(InstalledExe) || !File.Exists(LegacyInstalledExe))
-            {
-                return;
-            }
-            if (Directory.Exists(InstallDirectory) &&
-                Directory.GetFileSystemEntries(InstallDirectory).Length != 0)
-            {
-                throw new IOException(
-                    "Папка установки Boostix уже занята. Освободите её и повторите обновление.");
-            }
-
-            bool createdInstallDirectory = !Directory.Exists(InstallDirectory);
-            try
-            {
-                ValidateDirectoryTreeWithoutReparse(LegacyInstallDirectory);
-                Directory.CreateDirectory(InstallDirectory);
-                ValidateDirectoryTreeWithoutReparse(InstallDirectory);
-
-                CopyLegacyPayloadForMigration("MajesticBoost.exe", "Boostix.exe", true);
-                CopyLegacyPayloadForMigration("Game-Boost.ps1", "Game-Boost.ps1", false);
-                CopyLegacyPayloadForMigration("MaxFPS-Apply.ps1", "MaxFPS-Apply.ps1", false);
-                CopyLegacyPayloadForMigration("MaxFPS-Restore.ps1", "MaxFPS-Restore.ps1", false);
-                CopyLegacyPayloadForMigration("Uninstall.exe", "Uninstall.exe", false);
-                CopyLegacyPayloadForMigration(
-                    Path.Combine("Tools", "PresentMon", "PresentMon.exe"),
-                    Path.Combine("Tools", "PresentMon", "PresentMon.exe"),
-                    false);
-                CopyLegacyPayloadForMigration(
-                    Path.Combine("Tools", "PresentMon", "LICENSE.txt"),
-                    Path.Combine("Tools", "PresentMon", "LICENSE.txt"),
-                    false);
-                CopyLegacyPayloadForMigration(
-                    Path.Combine("Tools", "PresentMon", "THIRD_PARTY.txt"),
-                    Path.Combine("Tools", "PresentMon", "THIRD_PARTY.txt"),
-                    false);
-
-                string startMenuDirectory = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms),
-                    ProductName);
-                Directory.CreateDirectory(startMenuDirectory);
-                ValidateDirectoryNoReparse(startMenuDirectory, true);
-            }
-            catch
-            {
-                if (createdInstallDirectory)
-                {
-                    try
-                    {
-                        DeleteAllowlistedDirectoryTree(
-                            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                            InstallDirectory,
-                            UninstallProductDirectoryNames,
-                            null);
-                    }
-                    catch
-                    {
-                        // The legacy installation remains untouched. Any safe
-                        // partial staging directory can be removed manually.
-                    }
-                }
-                throw;
-            }
-        }
-
-        private static void CopyLegacyPayloadForMigration(
-            string sourceRelativePath,
-            string destinationRelativePath,
-            bool required)
-        {
-            string source = Path.GetFullPath(Path.Combine(
-                LegacyInstallDirectory,
-                sourceRelativePath));
-            string destination = Path.GetFullPath(Path.Combine(
-                InstallDirectory,
-                destinationRelativePath));
-            if (!IsStrictChildPath(LegacyInstallDirectory, source) ||
-                !IsStrictChildPath(InstallDirectory, destination))
-            {
-                throw new IOException(
-                    "Legacy migration escaped an approved product directory.");
-            }
-            if (!File.Exists(source))
-            {
-                if (required)
-                {
-                    throw new FileNotFoundException(
-                        "Не найден файл предыдущей версии Boostix.",
-                        source);
-                }
-                return;
-            }
-
-            ValidateFileNotReparse(source);
-            string destinationDirectory = Path.GetDirectoryName(destination);
-            Directory.CreateDirectory(destinationDirectory);
-            ValidateDirectoryTreeWithoutReparse(InstallDirectory);
-            File.Copy(source, destination, false);
-            ValidateFileNotReparse(destination);
+            InstallerDiagnostics.Write("Install completed successfully.");
         }
 
         private static void CleanupLegacyInstallationAfterSuccess()
@@ -537,7 +725,7 @@ namespace BoostixSetup
             TryLegacyCleanup(delegate
             {
                 DeleteIfExists(Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                    GetMachineDesktopDirectory(),
                     ProductBrand.LegacyInstallDirectoryName + ".lnk"));
             });
             DeleteIfExists(Path.Combine(InstallDirectory, "Game-Boost.ps1"));
@@ -557,7 +745,7 @@ namespace BoostixSetup
             {
                 using (RegistryKey baseKey = RegistryKey.OpenBaseKey(
                     RegistryHive.LocalMachine,
-                    RegistryView.Registry64))
+                    MachineRegistryView))
                 {
                     baseKey.DeleteSubKeyTree(LegacyUninstallRegistryPath, false);
                     baseKey.DeleteSubKeyTree(LegacyAppPathsRegistryPath, false);
@@ -569,7 +757,7 @@ namespace BoostixSetup
                 TryLegacyCleanup(delegate
                 {
                     DeleteAllowlistedDirectoryTree(
-                        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                        GetMachineProgramFilesDirectory(),
                         LegacyInstallDirectory,
                         UninstallProductDirectoryNames,
                         null);
@@ -688,6 +876,8 @@ namespace BoostixSetup
             ReportProgress(progress, 0, "Подготовка обновления");
             EnsureInstallIsNotDowngrade();
             Directory.CreateDirectory(InstallDirectory);
+            ValidateDirectoryTreeWithoutReparse(InstallDirectory);
+            EnsureSufficientDiskSpace();
             ReportProgress(progress, 5, "Подготовка папки установки");
 
             InstallPayloadsAtomically(progress, delegate
@@ -701,8 +891,7 @@ namespace BoostixSetup
             string startMenuDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms),
                 ProductName);
-            Directory.CreateDirectory(startMenuDirectory);
-            CreateShortcut(
+            TryCreateShortcut(
                 Path.Combine(startMenuDirectory, ProductName + ".lnk"),
                 InstalledExe,
                 InstallDirectory,
@@ -711,21 +900,21 @@ namespace BoostixSetup
 
             if (createDesktopShortcut)
             {
-                CreateShortcut(
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), ProductName + ".lnk"),
+                TryCreateShortcut(
+                    Path.Combine(GetMachineDesktopDirectory(), ProductName + ".lnk"),
                     InstalledExe,
                     InstallDirectory,
                     "Boostix performance session utility.");
             }
             else
             {
-                DeleteIfExists(Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                TryDeleteShortcut(Path.Combine(
+                    GetMachineDesktopDirectory(),
                     ProductName + ".lnk"));
             }
             ReportProgress(progress, 87, "Сохранение параметров установки");
 
-            using (RegistryKey baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64))
+            using (RegistryKey baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, MachineRegistryView))
             using (RegistryKey uninstall = baseKey.CreateSubKey(UninstallRegistryPath))
             {
                 uninstall.SetValue("DisplayName", ProductName, RegistryValueKind.String);
@@ -742,7 +931,7 @@ namespace BoostixSetup
             }
             ReportProgress(progress, 94, "Регистрация новой версии");
 
-            using (RegistryKey baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64))
+            using (RegistryKey baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, MachineRegistryView))
             using (RegistryKey appPath = baseKey.CreateSubKey(AppPathsRegistryPath))
             {
                 appPath.SetValue(string.Empty, InstalledExe, RegistryValueKind.String);
@@ -779,7 +968,7 @@ namespace BoostixSetup
                 ? ProductName
                 : ProductBrand.LegacyInstallDirectoryName;
             string shortcutPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                GetMachineDesktopDirectory(),
                 shortcutName + ".lnk");
             return File.Exists(shortcutPath);
         }
@@ -790,13 +979,9 @@ namespace BoostixSetup
             {
                 string executablePath = Path.GetFullPath(Application.ExecutablePath);
                 string directoryPath = Path.GetFullPath(Path.GetDirectoryName(executablePath));
-                string tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar);
-                string parentPath = Path.GetFullPath(Path.GetDirectoryName(directoryPath))
-                    .TrimEnd(Path.DirectorySeparatorChar);
                 string directoryName = Path.GetFileName(directoryPath);
                 string executableName = Path.GetFileName(executablePath);
-                if (!string.Equals(parentPath, tempRoot, StringComparison.OrdinalIgnoreCase) ||
-                    !Regex.IsMatch(directoryName, @"^(?:Boostix|MajesticBoost)\.Update\.[0-9a-f]{32}$", RegexOptions.IgnoreCase) ||
+                if (!Regex.IsMatch(directoryName, @"^(?:Boostix|MajesticBoost)\.Update\.[0-9a-f]{32}$", RegexOptions.IgnoreCase) ||
                     !Regex.IsMatch(executableName, @"^(?:Boostix|MajesticBoost)-Setup-[0-9]+\.[0-9]+\.[0-9]+\.exe$", RegexOptions.IgnoreCase))
                 {
                     return;
@@ -817,9 +1002,7 @@ namespace BoostixSetup
                     " -ErrorAction SilentlyContinue;" +
                     "$e=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encodedExecutable + "'));" +
                     "$d=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encodedDirectory + "'));" +
-                    "$t=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar);" +
-                    "$p=[IO.Path]::GetFullPath([IO.Path]::GetDirectoryName($d)).TrimEnd([IO.Path]::DirectorySeparatorChar);" +
-                    "if($p -ieq $t -and [IO.Path]::GetFileName($d) -match '^(?:Boostix|MajesticBoost)\\.Update\\.[0-9a-f]{32}$'){" +
+                    "if([IO.Path]::GetFileName($d) -match '^(?:Boostix|MajesticBoost)\\.Update\\.[0-9a-f]{32}$'){" +
                     "$i=Get-Item -LiteralPath $d -Force -ErrorAction SilentlyContinue;" +
                     "if($i -and -not ($i.Attributes -band [IO.FileAttributes]::ReparsePoint)){" +
                     "[IO.File]::Delete($e);" +
@@ -1416,12 +1599,16 @@ namespace BoostixSetup
                 }
                 if (File.Exists(path))
                 {
-                    File.Replace(temporary, path, discarded, true);
+                    ExecuteFileMutationWithRetry(
+                        delegate { File.Replace(temporary, path, discarded, true); },
+                        "replace installer control file");
                     DeleteIfExists(discarded);
                 }
                 else
                 {
-                    File.Move(temporary, path);
+                    ExecuteFileMutationWithRetry(
+                        delegate { File.Move(temporary, path); },
+                        "publish installer control file");
                 }
             }
             finally
@@ -1942,7 +2129,9 @@ namespace BoostixSetup
                     writer.Flush();
                     output.Flush(true);
                 }
-                File.Move(temporary, path);
+                ExecuteFileMutationWithRetry(
+                    delegate { File.Move(temporary, path); },
+                    "publish registration snapshot");
             }
             finally
             {
@@ -2255,8 +2444,7 @@ namespace BoostixSetup
                 ProductName,
                 ProductName + ".lnk"));
             string expectedDesktop = Path.GetFullPath(Path.Combine(
-                Environment.GetFolderPath(
-                    Environment.SpecialFolder.DesktopDirectory),
+                GetMachineDesktopDirectory(),
                 ProductName + ".lnk"));
             if (snapshot == null ||
                 snapshot.StartMenuShortcut == null ||
@@ -2378,7 +2566,7 @@ namespace BoostixSetup
                 "ExpectedSid=" + transaction.State.ExpectedSid + "\n" +
                 "ExpectedVersion=" + transaction.State.ExpectedVersion + "\n" +
                 "ExpiresUtcTicks=" +
-                    DateTime.UtcNow.AddMinutes(2).Ticks.ToString(
+                    DateTime.UtcNow.AddMinutes(5).Ticks.ToString(
                         CultureInfo.InvariantCulture) + "\n";
             WriteTextAtomically(
                 Path.Combine(
@@ -2408,6 +2596,8 @@ namespace BoostixSetup
             Process probe = Process.Start(startInfo);
             if (probe == null)
             {
+                InstallerDiagnostics.Write(
+                    "Update health probe process was not created.");
                 return false;
             }
             try
@@ -2435,15 +2625,28 @@ namespace BoostixSetup
                             {
                             }
                         }
+                        InstallerDiagnostics.Write(
+                            "Update health probe succeeded after " +
+                            timer.ElapsedMilliseconds.ToString(
+                                CultureInfo.InvariantCulture) + " ms.");
                         return true;
                     }
                     if (invalidSignal || probe.HasExited)
                     {
+                        InstallerDiagnostics.Write(
+                            invalidSignal
+                                ? "Update health probe produced an invalid ready signal."
+                                : "Update health probe exited before signalling readiness. ExitCode=" +
+                                  probe.ExitCode.ToString(CultureInfo.InvariantCulture) + ".");
                         return false;
                     }
                     System.Threading.Thread.Sleep(
                         UpdateHealthPollMilliseconds);
                 }
+                InstallerDiagnostics.Write(
+                    "Update health probe timed out after " +
+                    UpdateHealthTimeoutMilliseconds.ToString(
+                        CultureInfo.InvariantCulture) + " ms.");
                 return false;
             }
             finally
@@ -3904,8 +4107,7 @@ namespace BoostixSetup
                 EnsureUninstallStateAllowsRemoval();
                 StopInstalledApplication();
 
-                string desktopDirectory = Environment.GetFolderPath(
-                    Environment.SpecialFolder.DesktopDirectory);
+                string desktopDirectory = GetMachineDesktopDirectory();
                 foreach (string directoryName in UninstallProductDirectoryNames)
                 {
                     DeleteIfExists(Path.Combine(
@@ -3924,7 +4126,7 @@ namespace BoostixSetup
                         null);
                 }
 
-                using (RegistryKey baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64))
+                using (RegistryKey baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, MachineRegistryView))
                 {
                     baseKey.DeleteSubKeyTree(UninstallRegistryPath, false);
                     baseKey.DeleteSubKeyTree(AppPathsRegistryPath, false);
@@ -3952,8 +4154,7 @@ namespace BoostixSetup
                     : null;
                 bool installDirectoryRemoved =
                     DeleteAllowlistedDirectoryTree(
-                        Environment.GetFolderPath(
-                            Environment.SpecialFolder.ProgramFiles),
+                        GetMachineProgramFilesDirectory(),
                         InstallDirectory,
                         UninstallProductDirectoryNames,
                         preservedExecutable);
@@ -3965,8 +4166,7 @@ namespace BoostixSetup
                 if (Directory.Exists(LegacyInstallDirectory))
                 {
                     DeleteAllowlistedDirectoryTree(
-                        Environment.GetFolderPath(
-                            Environment.SpecialFolder.ProgramFiles),
+                        GetMachineProgramFilesDirectory(),
                         LegacyInstallDirectory,
                         UninstallProductDirectoryNames,
                         null);
@@ -4042,7 +4242,7 @@ namespace BoostixSetup
                 Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms),
                 ProductName);
             string desktopShortcut = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                GetMachineDesktopDirectory(),
                 ProductName + ".lnk");
             var snapshot = new PostInstallRegistrationSnapshot
             {
@@ -4055,7 +4255,7 @@ namespace BoostixSetup
 
             using (RegistryKey baseKey = RegistryKey.OpenBaseKey(
                 RegistryHive.LocalMachine,
-                RegistryView.Registry64))
+                MachineRegistryView))
             {
                 snapshot.UninstallKey = CaptureRegistryKey(baseKey, UninstallRegistryPath);
                 snapshot.AppPathsKey = CaptureRegistryKey(baseKey, AppPathsRegistryPath);
@@ -4144,7 +4344,7 @@ namespace BoostixSetup
             var failures = new List<Exception>();
             using (RegistryKey baseKey = RegistryKey.OpenBaseKey(
                 RegistryHive.LocalMachine,
-                RegistryView.Registry64))
+                MachineRegistryView))
             {
                 TryCompensation(
                     delegate { RestoreRegistryKey(baseKey, snapshot.AppPathsKey); },
@@ -4296,10 +4496,18 @@ namespace BoostixSetup
                 CreatePayloadItem(token, "PresentMon-License", "Boostix.PresentMon.License.txt", InstalledPresentMonLicense, "лицензии измерителя FPS", false, false),
                 CreatePayloadItem(token, "PresentMon-ThirdParty", "Boostix.PresentMon.ThirdParty.txt", InstalledPresentMonThirdParty, "уведомлений сторонних компонентов", false, false),
                 CreatePayloadItem(token, "PresentMon", "Boostix.PresentMon.exe", InstalledPresentMon, "измерителя FPS", false, true),
+#if LEGACY_UPDATE_BRIDGE
+                CreatePayloadItem(token, "Uninstall", CanonicalSetupResourceName, UninstallerExe, "компонентов удаления", true, false),
+#else
                 CreatePayloadItem(token, "Uninstall", null, UninstallerExe, "компонентов удаления", true, false),
+#endif
                 CreatePayloadItem(token, "Boostix", "Boostix.Payload.exe", InstalledExe, "файлов программы", true, false)
             };
+#if !LEGACY_UPDATE_BRIDGE
             items[6].CopyInstaller = true;
+#else
+            items[6].CopyInstaller = false;
+#endif
             bool installationSucceeded = false;
             CaptureDirectoryTransaction captureDirectories = null;
 
@@ -4902,15 +5110,64 @@ namespace BoostixSetup
             }
         }
 
+        private static void ExecuteFileMutationWithRetry(
+            Action mutation,
+            string operation)
+        {
+            if (mutation == null)
+            {
+                throw new ArgumentNullException("mutation");
+            }
+            Exception lastFailure = null;
+            for (int attempt = 1; attempt <= 7; attempt++)
+            {
+                try
+                {
+                    mutation();
+                    if (attempt > 1)
+                    {
+                        InstallerDiagnostics.Write(
+                            "File operation succeeded after retry: " + operation + ".");
+                    }
+                    return;
+                }
+                catch (IOException exception)
+                {
+                    lastFailure = exception;
+                }
+                catch (UnauthorizedAccessException exception)
+                {
+                    lastFailure = exception;
+                }
+
+                if (attempt < 7)
+                {
+                    InstallerDiagnostics.Write(
+                        "Transient file operation failure; retrying " + operation + ".",
+                        lastFailure);
+                    System.Threading.Thread.Sleep(
+                        Math.Min(2000, 125 * (1 << (attempt - 1))));
+                }
+            }
+            throw new IOException(
+                "Windows не смогла завершить операцию с файлами после нескольких попыток: " +
+                operation + ".",
+                lastFailure);
+        }
+
         private static void CommitStagedFile(string stage, string destination, string backup, bool destinationExists)
         {
             if (destinationExists)
             {
-                File.Replace(stage, destination, backup, true);
+                ExecuteFileMutationWithRetry(
+                    delegate { File.Replace(stage, destination, backup, true); },
+                    "replace installed payload");
             }
             else
             {
-                File.Move(stage, destination);
+                ExecuteFileMutationWithRetry(
+                    delegate { File.Move(stage, destination); },
+                    "publish installed payload");
             }
         }
 
@@ -4919,7 +5176,9 @@ namespace BoostixSetup
             string discardBackup = destination + ".replace-backup-" + Guid.NewGuid().ToString("N");
             try
             {
-                File.Replace(source, destination, discardBackup, true);
+                ExecuteFileMutationWithRetry(
+                    delegate { File.Replace(source, destination, discardBackup, true); },
+                    "restore installed payload");
             }
             finally
             {
@@ -4947,7 +5206,9 @@ namespace BoostixSetup
                     }
                     else
                     {
-                        File.Move(backup, destination);
+                        ExecuteFileMutationWithRetry(
+                            delegate { File.Move(backup, destination); },
+                            "restore missing installed payload");
                     }
                 }
                 else if (!destinationExisted)
@@ -5032,40 +5293,75 @@ namespace BoostixSetup
             Process.Start(startInfo);
         }
 
-        private static void CreateShortcut(string shortcutPath, string targetPath, string workingDirectory, string description)
+        private static bool TryCreateShortcut(
+            string shortcutPath,
+            string targetPath,
+            string workingDirectory,
+            string description)
         {
-            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-            if (shellType == null)
-            {
-                throw new InvalidOperationException("Windows Script Host недоступен.");
-            }
-
-            object shell = Activator.CreateInstance(shellType);
-            object shortcut = null;
             try
             {
-                shortcut = shellType.InvokeMember(
-                    "CreateShortcut",
-                    BindingFlags.InvokeMethod,
-                    null,
-                    shell,
-                    new object[] { shortcutPath });
-                Type shortcutType = shortcut.GetType();
-                shortcutType.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { targetPath });
-                shortcutType.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { workingDirectory });
-                shortcutType.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut, new object[] { description });
-                shortcutType.InvokeMember("IconLocation", BindingFlags.SetProperty, null, shortcut, new object[] { targetPath + ",0" });
-                shortcutType.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
+                string directory = Path.GetDirectoryName(shortcutPath);
+                if (string.IsNullOrWhiteSpace(directory))
+                {
+                    throw new InvalidOperationException(
+                        "The shortcut directory is unavailable.");
+                }
+                Directory.CreateDirectory(directory);
+                ValidateDirectoryNoReparse(directory, true);
+                CreateShortcut(
+                    shortcutPath,
+                    targetPath,
+                    workingDirectory,
+                    description);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                InstallerDiagnostics.Write(
+                    "Optional shortcut could not be created: " + shortcutPath,
+                    exception);
+                return false;
+            }
+        }
+
+        private static void TryDeleteShortcut(string shortcutPath)
+        {
+            try
+            {
+                DeleteIfExists(shortcutPath);
+            }
+            catch (Exception exception)
+            {
+                InstallerDiagnostics.Write(
+                    "Optional shortcut could not be removed: " + shortcutPath,
+                    exception);
+            }
+        }
+
+        private static void CreateShortcut(
+            string shortcutPath,
+            string targetPath,
+            string workingDirectory,
+            string description)
+        {
+            object shellLinkObject = new ShellLink();
+            try
+            {
+                IShellLinkW shellLink = (IShellLinkW)shellLinkObject;
+                shellLink.SetPath(targetPath);
+                shellLink.SetWorkingDirectory(workingDirectory);
+                shellLink.SetDescription(description);
+                shellLink.SetIconLocation(targetPath, 0);
+                var persistFile = (System.Runtime.InteropServices.ComTypes.IPersistFile)
+                    shellLinkObject;
+                persistFile.Save(shortcutPath, true);
             }
             finally
             {
-                if (shortcut != null && Marshal.IsComObject(shortcut))
+                if (shellLinkObject != null && Marshal.IsComObject(shellLinkObject))
                 {
-                    Marshal.FinalReleaseComObject(shortcut);
-                }
-                if (shell != null && Marshal.IsComObject(shell))
-                {
-                    Marshal.FinalReleaseComObject(shell);
+                    Marshal.FinalReleaseComObject(shellLinkObject);
                 }
             }
         }
@@ -5093,8 +5389,42 @@ namespace BoostixSetup
             return (int)Math.Max(1, total / 1024);
         }
 
+        private static void EnsureSufficientDiskSpace()
+        {
+            string root = Path.GetPathRoot(InstallDirectory);
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                throw new IOException(
+                    "Не удалось определить диск для установки Boostix.");
+            }
+            var drive = new DriveInfo(root);
+            const long safetyReserve = 128L * 1024L * 1024L;
+            long existingBytes = Math.Max(
+                0L,
+                (long)CalculateEstimatedSizeKb() * 1024L);
+            long required = Math.Max(
+                safetyReserve,
+                existingBytes * 3L + (32L * 1024L * 1024L));
+            if (!drive.IsReady || drive.AvailableFreeSpace < required)
+            {
+                throw new IOException(
+                    "Недостаточно свободного места для безопасной установки и отката. " +
+                    "Освободите не менее " +
+                    ((required + 1048575L) / 1048576L).ToString(
+                        CultureInfo.InvariantCulture) +
+                    " МБ и повторите попытку.");
+            }
+            InstallerDiagnostics.Write(
+                "Disk preflight passed. Free=" +
+                drive.AvailableFreeSpace.ToString(CultureInfo.InvariantCulture) +
+                "; Required=" + required.ToString(CultureInfo.InvariantCulture) + ".");
+        }
+
         private static void ReportProgress(Action<int, string> progress, int percent, string stage)
         {
+            InstallerDiagnostics.Write(
+                "Stage " + Math.Max(0, Math.Min(100, percent)).ToString(
+                    CultureInfo.InvariantCulture) + "%: " + (stage ?? string.Empty));
             if (progress == null)
             {
                 return;
@@ -6047,6 +6377,7 @@ namespace BoostixSetup
 
         private void InstallationFailed(Exception exception)
         {
+            InstallerDiagnostics.Write("Update installation failed.", exception);
             installing = false;
             successPending = false;
             demoTimer.Stop();
@@ -6055,7 +6386,8 @@ namespace BoostixSetup
             descriptionLabel.Text = "Повторите установку обновления.";
             phaseLabel.Text = "Ошибка установки";
             phaseLabel.ForeColor = Color.FromArgb(255, 102, 122);
-            detailLabel.Text = FriendlyError(exception);
+            detailLabel.Text = FriendlyError(exception) +
+                "\r\nЖурнал: " + InstallerDiagnostics.LogPath;
             detailLabel.ForeColor = Color.FromArgb(205, 205, 205);
             actionButton.Text = "ПОВТОРИТЬ";
             actionButton.AccessibleName = "Повторить обновление Boostix";
@@ -6456,6 +6788,7 @@ namespace BoostixSetup
 
         private void InstallationFailed(Exception exception)
         {
+            InstallerDiagnostics.Write("Interactive installation failed.", exception);
             installOperationRunning = false;
             statusLabel.Text = "ОШИБКА УСТАНОВКИ";
             statusLabel.ForeColor = Color.FromArgb(255, 102, 122);
@@ -6466,7 +6799,8 @@ namespace BoostixSetup
             closeButton.Enabled = true;
             desktopShortcut.Enabled = true;
             MessageBox.Show(
-                "Не удалось установить Boostix:\r\n" + exception.Message,
+                "Не удалось установить Boostix:\r\n" + exception.Message +
+                "\r\n\r\nЖурнал: " + InstallerDiagnostics.LogPath,
                 "Ошибка установки",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);

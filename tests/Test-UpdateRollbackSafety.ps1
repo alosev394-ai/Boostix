@@ -13,6 +13,15 @@ $installerSource = Join-Path $projectRoot 'BoostixInstaller\Program.cs'
 $updateSource = Join-Path $projectRoot 'Boostix\UpdateFlow.cs'
 $applicationSource = Join-Path $projectRoot 'Boostix\Program.cs'
 $brandSource = Join-Path $projectRoot 'ProductBrand.cs'
+$brandText = [IO.File]::ReadAllText($brandSource)
+$assemblyVersionMatch = [regex]::Match(
+    $brandText,
+    '(?m)^\s*public\s+const\s+string\s+AssemblyVersion\s*=\s*"' +
+        '(?<version>[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)"\s*;')
+if (-not $assemblyVersionMatch.Success) {
+    throw 'The current AssemblyVersion was not found in ProductBrand.cs.'
+}
+$expectedVersion = $assemblyVersionMatch.Groups['version'].Value
 $frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $compiler = Join-Path $frameworkRoot 'csc.exe'
 $wpfRoot = Join-Path $frameworkRoot 'WPF'
@@ -133,6 +142,15 @@ try {
         'Boostix.UpdateHealthHandshake',
         $true,
         $false)
+    $staticFlags = [Reflection.BindingFlags]::NonPublic -bor
+        [Reflection.BindingFlags]::Static
+    $healthTimeoutField = $engineType.GetField(
+        'UpdateHealthTimeoutMilliseconds',
+        $staticFlags)
+    if (-not $healthTimeoutField -or
+        [int]$healthTimeoutField.GetRawConstantValue() -ne 120000) {
+        throw 'The compiled update health timeout is not the expected 120 seconds.'
+    }
 
     $createSnapshot = Get-StaticMethod `
         -Type $engineType `
@@ -177,8 +195,6 @@ try {
         throw 'The update health token is not a 256-bit lowercase random value.'
     }
     $ownerSid = 'S-1-5-21-1000-1001-1002-1003'
-    $expectedVersion = '1.9.0.0'
-
     $proofArguments = New-Object 'object[]' 4
     $proofArguments[0] = $transactionId
     $proofArguments[1] = $token
@@ -387,7 +403,6 @@ try {
     $updateText = [IO.File]::ReadAllText($updateSource)
     $applicationText = [IO.File]::ReadAllText($applicationSource)
     foreach ($required in @(
-        'UpdateHealthTimeoutMilliseconds = 30000',
         'RandomNumberGenerator.Create()',
         'FileOptions.WriteThrough',
         'UpdateRollbackStatus.RollingBack',
@@ -448,15 +463,28 @@ try {
         $readinessStart,
         $readinessEnd - $readinessStart)
     foreach ($required in @(
-        'BoostSessionReportStore.LoadLast()',
-        'DiagnosticSessionHistory.LoadRecent(',
-        'BoostPreflightService.Run(',
-        'DiagnosticSnapshotProvider.Capture()',
+        'optimizationOverlay.GetOptimizationStatus()',
+        'boostCenterOverlay.SetSettings(centerSettings)',
         'DispatcherPriority.ApplicationIdle',
+        'Dispatcher.HasShutdownStarted',
+        'Dispatcher.HasShutdownFinished',
         '!boostButton.IsEnabled'
     )) {
         if (-not $readinessText.Contains($required)) {
             throw "The local update-readiness contract is missing: $required"
+        }
+    }
+    foreach ($forbidden in @(
+        'BoostSessionReportStore.LoadLast()',
+        'DiagnosticSessionHistory.LoadRecent(',
+        'BoostPreflightService.Run(',
+        'DiagnosticSnapshotProvider.Capture()',
+        '!IsVisible',
+        'ActualWidth <= 0',
+        'ActualHeight <= 0'
+    )) {
+        if ($readinessText.Contains($forbidden)) {
+            throw "The update health probe still depends on a slow or interactive-only check: $forbidden"
         }
     }
 

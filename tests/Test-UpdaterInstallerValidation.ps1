@@ -99,11 +99,21 @@ public sealed class MajesticBoostSlowDripServer : IDisposable
 '@
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$brandSource = [IO.File]::ReadAllText(
+    (Join-Path $projectRoot 'ProductBrand.cs'))
+$versionMatch = [regex]::Match(
+    $brandSource,
+    'ProductVersion\s*=\s*"(?<version>[0-9]+\.[0-9]+\.[0-9]+)"')
+if (-not $versionMatch.Success) {
+    throw 'The release version was not found in ProductBrand.cs.'
+}
+$releaseVersion = $versionMatch.Groups['version'].Value
 if (-not $ApplicationPath) {
     $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
 }
 if (-not $InstallerPath) {
-    $InstallerPath = Join-Path $projectRoot 'dist\Boostix-Setup-1.9.0.exe'
+    $InstallerPath = Join-Path $projectRoot (
+        'dist\Boostix-Setup-' + $releaseVersion + '.exe')
 }
 $ApplicationPath = (Resolve-Path -LiteralPath $ApplicationPath).Path
 $InstallerPath = (Resolve-Path -LiteralPath $InstallerPath).Path
@@ -176,12 +186,16 @@ $parseHeadMethod = $overlayType.GetMethod('ParseRepositoryHeadCommit', $staticFl
 $buildImmutableAddressMethod = $overlayType.GetMethod('BuildImmutableManifestAddress', $staticFlags)
 $transientFailureMethod = $overlayType.GetMethod('IsTransientManifestFailure', $staticFlags)
 $waitForRetryMethod = $overlayType.GetMethod('WaitForManifestRetry', $staticFlags)
+$manifestTotalTimeoutField = $overlayType.GetField(
+    'ManifestTotalTimeoutMilliseconds',
+    $staticFlags)
 $downloadSmallFileMethod = $overlayType.GetMethod('DownloadSmallFile', $staticFlags)
 $createRequestMethod = $overlayType.GetMethod('CreateRequest', $staticFlags)
 $parseManifestMethod = $overlayType.GetMethod('ParseAndValidateManifest', $staticFlags)
 if (-not $openMethod -or -not $validateMethod -or -not $refreshMethod -or -not $lockMethod -or
     -not $buildHeadAddressMethod -or -not $parseHeadMethod -or -not $buildImmutableAddressMethod -or
-    -not $transientFailureMethod -or -not $waitForRetryMethod -or -not $downloadSmallFileMethod -or
+    -not $transientFailureMethod -or -not $waitForRetryMethod -or
+    -not $manifestTotalTimeoutField -or -not $downloadSmallFileMethod -or
     -not $createRequestMethod -or -not $parseManifestMethod) {
     throw 'Compiled updater validation helpers were not found.'
 }
@@ -239,8 +253,13 @@ foreach ($status in @(
 }
 
 $budgetArguments = New-Object 'object[]' 3
+$manifestTotalTimeoutMilliseconds =
+    [int]$manifestTotalTimeoutField.GetRawConstantValue()
+if ($manifestTotalTimeoutMilliseconds -ne 45000) {
+    throw "The compiled manifest total timeout is unexpected: $manifestTotalTimeoutMilliseconds"
+}
 $budgetArguments[0] = [Diagnostics.Stopwatch]::StartNew()
-$budgetArguments[1] = 20000
+$budgetArguments[1] = $manifestTotalTimeoutMilliseconds
 $budgetArguments[2] = [Net.WebException]::new(
     'temporary connection failure',
     [Net.WebExceptionStatus]::ConnectFailure)
@@ -314,25 +333,31 @@ if (-not $manifestType -or -not $semanticType) {
     throw 'Compiled updater manifest types were not found.'
 }
 
-$dualManifestJson = @'
+$legacyInstallerUrl =
+    'https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/dist/' +
+    'MajesticBoost-Setup-' + $releaseVersion + '.exe'
+$boostixInstallerUrl =
+    'https://raw.githubusercontent.com/alosev394-ai/Boostix/main/dist/' +
+    'Boostix-Setup-' + $releaseVersion + '.exe'
+$dualManifestJson = @"
 {
   "schemaVersion": 1,
-  "version": "1.9.0",
-  "installerUrl": "https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/dist/MajesticBoost-Setup-1.9.0.exe",
+  "version": "$releaseVersion",
+  "installerUrl": "$legacyInstallerUrl",
   "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   "size": 123,
-  "boostixInstallerUrl": "https://raw.githubusercontent.com/alosev394-ai/Boostix/main/dist/Boostix-Setup-1.9.0.exe",
+  "boostixInstallerUrl": "$boostixInstallerUrl",
   "boostixSha256": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
   "boostixSize": 456
 }
-'@
+"@
 $parseManifestArguments = New-Object 'object[]' 1
 $parseManifestArguments[0] = [Text.Encoding]::UTF8.GetBytes($dualManifestJson)
 $parsedDualManifest = $parseManifestMethod.Invoke($null, $parseManifestArguments)
 $selectedInstallerUrl = [string]$manifestType.GetField(
     'InstallerUrl').GetValue($parsedDualManifest)
 if ($selectedInstallerUrl -cne
-    'https://raw.githubusercontent.com/alosev394-ai/Boostix/main/dist/Boostix-Setup-1.9.0.exe') {
+    $boostixInstallerUrl) {
     throw 'The updater did not prefer the validated Boostix URL over the schema-v1 bridge.'
 }
 $selectedSha256 = [string]$manifestType.GetField(
@@ -343,8 +368,10 @@ if ($selectedSha256 -cne ('B' * 64) -or $selectedSize -ne 456L) {
     throw 'The updater mixed legacy and Boostix integrity metadata.'
 }
 
+$boostixTrustedPath =
+    '/Boostix/main/dist/Boostix-Setup-' + $releaseVersion + '.exe'
 $tamperedDualManifest = $dualManifestJson.Replace(
-    '/Boostix/main/dist/Boostix-Setup-1.9.0.exe',
+    $boostixTrustedPath,
     '/Boostix/main/dist/other.exe')
 $parseManifestArguments[0] = [Text.Encoding]::UTF8.GetBytes($tamperedDualManifest)
 try {
@@ -449,8 +476,8 @@ foreach ($requiredText in @(
     'state == UpdateState.Retry && !demoMode',
     'RefreshAvailableUpdateAsync()',
     'ManifestFetchAttempts = 3',
-    'ManifestRequestTimeoutMilliseconds = 5000',
-    'ManifestTotalTimeoutMilliseconds = 20000',
+    'ManifestRequestTimeoutMilliseconds = 12000',
+    'ManifestTotalTimeoutMilliseconds = 45000',
     'BuildRepositoryHeadRequestAddress(',
     'ParseRepositoryHeadCommit(',
     'BuildImmutableManifestAddress(',

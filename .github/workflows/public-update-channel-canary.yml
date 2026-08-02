@@ -1,0 +1,34 @@
+name: Boostix public update channel canary
+
+on:
+  schedule:
+    - cron: "37 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: boostix-public-update-channel-canary
+  cancel-in-progress: true
+
+jobs:
+  verify-public-update-channel:
+    name: Verify signed manifests and public installer mirrors
+    runs-on: windows-2022
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out trusted canary
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Verify public update channel without executing installers
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\tools\Test-PublicUpdateChannel.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Public update channel canary failed with exit code $LASTEXITCODE."
+          }

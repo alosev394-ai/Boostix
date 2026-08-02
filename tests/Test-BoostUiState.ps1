@@ -91,7 +91,8 @@ function Wait-ForPathState {
 
 $process = $null
 try {
-    $process = Start-Process -FilePath $ApplicationPath -ArgumentList '--skip-setup', '--demo' -PassThru
+    $testInstance = '--test-instance=' + [Guid]::NewGuid().ToString('N')
+    $process = Start-Process -FilePath $ApplicationPath -ArgumentList '--skip-setup', '--demo', $testInstance -PassThru
     $window = Wait-ForMainWindow -Process $process -TimeoutMilliseconds 8000
     $activateButton = Wait-ForButtonState `
         -Root $window `

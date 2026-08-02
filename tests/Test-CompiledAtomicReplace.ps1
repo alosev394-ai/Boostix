@@ -11,11 +11,21 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$brandSource = [IO.File]::ReadAllText(
+    (Join-Path $projectRoot 'ProductBrand.cs'))
+$versionMatch = [regex]::Match(
+    $brandSource,
+    'ProductVersion\s*=\s*"(?<version>[0-9]+\.[0-9]+\.[0-9]+)"')
+if (-not $versionMatch.Success) {
+    throw 'The release version was not found in ProductBrand.cs.'
+}
+$releaseVersion = $versionMatch.Groups['version'].Value
 if (-not $ApplicationPath) {
     $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
 }
 if (-not $InstallerPath) {
-    $InstallerPath = Join-Path $projectRoot 'dist\Boostix-Setup-1.9.0.exe'
+    $InstallerPath = Join-Path $projectRoot (
+        'dist\Boostix-Setup-' + $releaseVersion + '.exe')
 }
 
 $testRoot = Join-Path $env:TEMP ('MajesticBoost-CompiledReplace-Test-' + [Guid]::NewGuid().ToString('N'))

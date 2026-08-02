@@ -1,7 +1,12 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
-    [switch]$PrepareSignedUpdate
+    [switch]$PrepareSignedUpdate,
+    [string]$AuthenticodeCertificateThumbprint =
+        $env:BOOSTIX_AUTHENTICODE_THUMBPRINT,
+    [string]$AuthenticodeTimestampServer =
+        'http://timestamp.digicert.com',
+    [switch]$RequireAuthenticode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,8 +39,83 @@ $presentMonPath = Join-Path $projectRoot 'third_party\PresentMon\PresentMon.exe'
 $presentMonLicensePath = Join-Path $projectRoot 'third_party\PresentMon\LICENSE.txt'
 $presentMonThirdPartyPath = Join-Path $projectRoot 'third_party\PresentMon\THIRD_PARTY.txt'
 
+function Get-BoostixSignTool {
+    $roots = @(
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86),
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $candidates = foreach ($root in $roots) {
+        $kitBin = Join-Path $root 'Windows Kits\10\bin'
+        if (Test-Path -LiteralPath $kitBin -PathType Container) {
+            Get-ChildItem -LiteralPath $kitBin -Recurse -Filter 'signtool.exe' -File `
+                -ErrorAction SilentlyContinue |
+                Where-Object { $_.Directory.Name -ieq 'x64' }
+        }
+    }
+    $selected = @($candidates | Sort-Object FullName -Descending | Select-Object -First 1)
+    if ($selected.Count -ne 1) {
+        throw 'Windows SDK signtool.exe (x64) was not found.'
+    }
+    return $selected[0].FullName
+}
+
+$authenticodeEnabled = -not [string]::IsNullOrWhiteSpace(
+    $AuthenticodeCertificateThumbprint)
+$signTool = $null
+if ($authenticodeEnabled) {
+    $AuthenticodeCertificateThumbprint =
+        ($AuthenticodeCertificateThumbprint -replace '\s', '').ToUpperInvariant()
+    if ($AuthenticodeCertificateThumbprint -notmatch '^[0-9A-F]{40}$') {
+        throw 'Authenticode certificate thumbprint must be exactly 40 hexadecimal characters.'
+    }
+    [Uri]$timestampUri = $null
+    if (-not [Uri]::TryCreate(
+            $AuthenticodeTimestampServer,
+            [UriKind]::Absolute,
+            [ref]$timestampUri) -or
+        $timestampUri.Scheme -notin @('http', 'https') -or
+        -not [string]::IsNullOrEmpty($timestampUri.UserInfo)) {
+        throw 'Authenticode timestamp server must be an absolute HTTP(S) URL without user information.'
+    }
+    $signTool = Get-BoostixSignTool
+}
+elseif ($RequireAuthenticode) {
+    throw 'A trusted Authenticode certificate is required for this build.'
+}
+else {
+    Write-Warning (
+        'Building unsigned EXE files. Supply -AuthenticodeCertificateThumbprint ' +
+        'for a distributable release; unsigned binaries remain subject to SmartScreen/WDAC policy.')
+}
+
+function Invoke-BoostixAuthenticodeSigning {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not $authenticodeEnabled) {
+        return
+    }
+    & $signTool sign `
+        /sha1 $AuthenticodeCertificateThumbprint `
+        /fd SHA256 `
+        /td SHA256 `
+        /tr $AuthenticodeTimestampServer `
+        /v `
+        $Path
+    if ($LASTEXITCODE -ne 0) {
+        throw "Authenticode signing failed for $Path with exit code $LASTEXITCODE."
+    }
+    & $signTool verify /pa /all /v $Path
+    if ($LASTEXITCODE -ne 0) {
+        throw "Authenticode verification failed for $Path with exit code $LASTEXITCODE."
+    }
+}
+$systemPowerShell = Join-Path ([Environment]::SystemDirectory) `
+    'WindowsPowerShell\v1.0\powershell.exe'
+
 if (-not (Test-Path -LiteralPath $compiler)) {
     throw ".NET Framework C# compiler not found: $compiler"
+}
+if (-not (Test-Path -LiteralPath $systemPowerShell -PathType Leaf)) {
+    throw "System Windows PowerShell not found: $systemPowerShell"
 }
 
 $presentMon = Get-Item -LiteralPath $presentMonPath -ErrorAction Stop
@@ -94,6 +174,7 @@ $appArguments = @(
 if ($LASTEXITCODE -ne 0) {
     throw "Boostix compilation failed with exit code $LASTEXITCODE."
 }
+Invoke-BoostixAuthenticodeSigning -Path $appOutput
 
 $setupArguments = @(
     '/nologo',
@@ -121,9 +202,11 @@ $setupArguments = @(
 if ($LASTEXITCODE -ne 0) {
     throw "Boostix installer compilation failed with exit code $LASTEXITCODE."
 }
+Invoke-BoostixAuthenticodeSigning -Path $setupOutput
 
 $legacySetupArguments = @(
     '/define:LEGACY_UPDATE_BRIDGE',
+    "/resource:$setupOutput,Boostix.CanonicalSetup.exe",
     "/out:$legacySetupOutput"
 ) + @(
     $setupArguments | Where-Object {
@@ -133,6 +216,7 @@ $legacySetupArguments = @(
 if ($LASTEXITCODE -ne 0) {
     throw "Boostix compatibility bridge compilation failed with exit code $LASTEXITCODE."
 }
+Invoke-BoostixAuthenticodeSigning -Path $legacySetupOutput
 
 Copy-Item -LiteralPath $appOutput -Destination (Join-Path $distDirectory 'Boostix.exe') -Force
 Copy-Item -LiteralPath $setupOutput -Destination $versionedSetupOutput -Force
@@ -166,9 +250,28 @@ if ($PrepareSignedUpdate) {
     $legacyInstallerHash = (
         Get-FileHash -Algorithm SHA256 -LiteralPath $legacyCompatibilitySetupOutput
     ).Hash
-    $manifestPath = Join-Path $projectRoot 'update-v2.json'
-    $signaturePath = Join-Path $projectRoot 'update-v2.json.sig'
-    $manifest = [string]::Join(
+    $legacyManifestPath = Join-Path $projectRoot 'update.json'
+    $legacySignaturePath = Join-Path $projectRoot 'update.json.sig'
+    $legacyManifest = [string]::Join(
+        "`n",
+        @(
+            '{',
+            '  "schemaVersion": 1,',
+            ('  "version": "' + $releaseVersion + '",'),
+            ('  "installerUrl": "https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/dist/MajesticBoost-Setup-' + $releaseVersion + '.exe",'),
+            ('  "sha256": "' + $legacyInstallerHash + '",'),
+            ('  "size": ' + $legacyInstaller.Length),
+            '}',
+            ''
+        ))
+    [IO.File]::WriteAllText(
+        $legacyManifestPath,
+        $legacyManifest,
+        (New-Object Text.UTF8Encoding($false)))
+
+    $v2ManifestPath = Join-Path $projectRoot 'update-v2.json'
+    $v2SignaturePath = Join-Path $projectRoot 'update-v2.json.sig'
+    $v2Manifest = [string]::Join(
         "`n",
         @(
             '{',
@@ -184,17 +287,27 @@ if ($PrepareSignedUpdate) {
             ''
         ))
     [IO.File]::WriteAllText(
-        $manifestPath,
-        $manifest,
+        $v2ManifestPath,
+        $v2Manifest,
         (New-Object Text.UTF8Encoding($false)))
 
     $signScript = Join-Path $projectRoot 'tools\Sign-UpdateManifest.ps1'
-    & powershell.exe `
+    & $systemPowerShell `
         -NoProfile `
         -ExecutionPolicy Bypass `
         -File $signScript `
-        -ManifestPath $manifestPath `
-        -SignaturePath $signaturePath
+        -ManifestPath $legacyManifestPath `
+        -SignaturePath $legacySignaturePath `
+        -AllowLegacyChannel
+    if ($LASTEXITCODE -ne 0) {
+        throw "Legacy signed update preparation failed with exit code $LASTEXITCODE."
+    }
+    & $systemPowerShell `
+        -NoProfile `
+        -ExecutionPolicy Bypass `
+        -File $signScript `
+        -ManifestPath $v2ManifestPath `
+        -SignaturePath $v2SignaturePath
     if ($LASTEXITCODE -ne 0) {
         throw "Signed update preparation failed with exit code $LASTEXITCODE."
     }

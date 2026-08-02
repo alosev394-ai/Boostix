@@ -64,7 +64,9 @@ namespace Boostix
                 return;
             }
 
-            using (var applicationMutex = new Mutex(false, ApplicationMutexName))
+            using (var applicationMutex = new Mutex(
+                false,
+                GetApplicationMutexName(args)))
             {
                 bool ownsMutex = false;
                 try
@@ -140,6 +142,52 @@ namespace Boostix
                     }
                 }
             }
+        }
+
+        private static string GetApplicationMutexName(string[] arguments)
+        {
+            const string prefix = "--test-instance=";
+            bool demo = false;
+            foreach (string argument in arguments ?? new string[0])
+            {
+                if (string.Equals(argument, "--demo", StringComparison.OrdinalIgnoreCase))
+                {
+                    demo = true;
+                    break;
+                }
+            }
+            if (!demo)
+            {
+                return ApplicationMutexName;
+            }
+            foreach (string argument in arguments ?? new string[0])
+            {
+                if (argument == null ||
+                    !argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                string token = argument.Substring(prefix.Length);
+                if (token.Length != 32)
+                {
+                    continue;
+                }
+                bool valid = true;
+                foreach (char character in token)
+                {
+                    if (!((character >= '0' && character <= '9') ||
+                          (character >= 'a' && character <= 'f')))
+                    {
+                        valid = false;
+                        break;
+                    }
+                }
+                if (valid)
+                {
+                    return ApplicationMutexName + ".Test." + token;
+                }
+            }
+            return ApplicationMutexName;
         }
 
         private static bool HardenNativeDllSearch()
@@ -3527,44 +3575,25 @@ namespace Boostix
                     "The main window did not initialize its local UI services.");
             }
 
-            BoostSessionReport probedLastSession = null;
-            List<BoostSessionReport> probedHistory = null;
-            BoostPreflightReport probedPreflight = null;
-            DiagnosticSnapshot probedDiagnostic = null;
-            string optimizationStatus =
-                optimizationOverlay.GetOptimizationStatus();
-
-            await Task.Run(delegate
+            // The installer probe deliberately avoids WMI, performance counters,
+            // session-history parsing and visibility checks. Those dependencies can
+            // be slow or unavailable in RDP/session-0 and used to roll back healthy
+            // updates. Normal startup performs the full diagnostics afterwards.
+            string optimizationStatus = optimizationOverlay.GetOptimizationStatus();
+            if (optimizationStatus == null)
             {
-                probedLastSession = BoostSessionReportStore.LoadLast();
-                probedHistory = DiagnosticSessionHistory.LoadRecent(
-                    DiagnosticSessionHistory.MaximumSessionCount);
-                probedPreflight = BoostPreflightService.Run(
-                    AppDomain.CurrentDomain.BaseDirectory,
-                    optimizationStatus);
-                probedDiagnostic = DiagnosticSnapshotProvider.Capture();
-            });
-
-            lastSession = probedLastSession;
-            sessionHistory = probedHistory ?? new List<BoostSessionReport>();
-            latestPreflight = probedPreflight;
-            latestDiagnosticSnapshot = probedDiagnostic;
+                throw new InvalidOperationException(
+                    "The optimization service did not initialize.");
+            }
             boostCenterOverlay.SetSettings(centerSettings);
-            boostCenterOverlay.SetPreflight(probedPreflight);
-            boostCenterOverlay.SetSessionReport(probedLastSession);
-            boostCenterOverlay.SetSessionHistory(sessionHistory);
-            boostCenterOverlay.SetDiagnosticSnapshot(probedDiagnostic);
-            boostCenterOverlay.OpenReadiness(false);
             boostButton.IsEnabled = true;
             UpdateLayout();
 
             await Dispatcher.InvokeAsync(
                 delegate { },
                 DispatcherPriority.ApplicationIdle);
-            if (!IsLoaded ||
-                !IsVisible ||
-                ActualWidth <= 0 ||
-                ActualHeight <= 0 ||
+            if (Dispatcher.HasShutdownStarted ||
+                Dispatcher.HasShutdownFinished ||
                 !boostButton.IsEnabled)
             {
                 throw new InvalidOperationException(

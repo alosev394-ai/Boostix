@@ -19,6 +19,7 @@ $requiredTests = @(
     'Test-BoostUiState.ps1',
     'Test-BrandIdentity.ps1',
     'Test-CompiledAtomicReplace.ps1',
+    'Test-CrossMachineReliability.ps1',
     'Test-DiagnosticsFeatures.ps1',
     'Test-DllSearchHardening.ps1',
     'Test-GenericOptimizationProfile.ps1',
@@ -30,11 +31,18 @@ $requiredTests = @(
     'Test-PowerPlanProcessTimeout.ps1',
     'Test-ReleaseUpdateChannel.ps1',
     'Test-ResponsiveLayout.ps1',
+    'Test-SigningAndCiContracts.ps1',
     'Test-SessionInsights.ps1',
     'Test-UninstallCleanupSafety.ps1',
     'Test-UpdaterFailureRecovery.ps1',
     'Test-UpdaterInstallerValidation.ps1',
     'Test-UpdateRollbackSafety.ps1'
+)
+
+# This test performs a real machine-wide install/update/uninstall lifecycle and
+# must run only in its dedicated elevated GitHub-hosted runner step.
+$standaloneMachineTests = @(
+    'Test-InstallerLifecycleE2E.ps1'
 )
 
 function Resolve-WindowsPowerShell {
@@ -103,6 +111,14 @@ function Invoke-IsolatedTest {
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
 
+    # A clean build is intentionally non-deterministic, so only the signed
+    # release-channel contract may inspect the immutable pre-build snapshot.
+    # Every other regression test must exercise the binaries in dist.
+    if ($TestFile.Name -cne 'Test-ReleaseUpdateChannel.ps1') {
+        [void]$startInfo.EnvironmentVariables.Remove(
+            'BOOSTIX_RELEASE_SNAPSHOT_DIRECTORY')
+    }
+
     $process = New-Object Diagnostics.Process
     $process.StartInfo = $startInfo
     $stopwatch = [Diagnostics.Stopwatch]::StartNew()
@@ -166,6 +182,7 @@ if ($LASTEXITCODE -ne 0 -or $hostIdentity -notmatch '^Desktop\|5\.1(\.|$).*\|8$'
 
 $tests = @(
     Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'Test-*.ps1' -File |
+        Where-Object { $standaloneMachineTests -notcontains $_.Name } |
         Sort-Object Name
 )
 if ($tests.Count -eq 0) {

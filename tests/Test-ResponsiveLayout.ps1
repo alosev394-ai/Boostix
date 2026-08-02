@@ -15,6 +15,7 @@ if (-not $ApplicationPath) {
     $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
 }
 $ApplicationPath = (Resolve-Path -LiteralPath $ApplicationPath).Path
+$testInstanceArgument = '--test-instance=' + [Guid]::NewGuid().ToString('N')
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName UIAutomationClient
@@ -351,7 +352,7 @@ foreach ($scale in $scales) {
             $scale.ToString([Globalization.CultureInfo]::InvariantCulture)
         $process = Start-Process `
             -FilePath $ApplicationPath `
-            -ArgumentList '--skip-setup', '--demo', $scaleArgument `
+            -ArgumentList '--skip-setup', '--demo', $scaleArgument, $testInstanceArgument `
             -PassThru
         $window = Wait-ForWindow -Process $process -TimeoutMilliseconds 15000
 
@@ -518,14 +519,15 @@ $compactProcess = $null
 try {
     $compactProcess = Start-Process `
         -FilePath $ApplicationPath `
-        -ArgumentList '--skip-setup', '--demo', '--demo-compact' `
+        -ArgumentList '--skip-setup', '--demo', '--demo-compact', $testInstanceArgument `
         -PassThru
     $compactWindow = Wait-ForWindow `
         -Process $compactProcess `
         -TimeoutMilliseconds 15000
     $compactBounds = $compactWindow.Current.BoundingRectangle
-    if ($compactBounds.Height -gt 500) {
-        throw "Compact layout height was $($compactBounds.Height); expected at most 500 DIP."
+    $compactHeightDip = $compactBounds.Height * (460.0 / $compactBounds.Width)
+    if ($compactHeightDip -gt 500) {
+        throw "Compact layout height was $compactHeightDip; expected at most 500 DIP."
     }
     $compactSteam = Find-ById `
         $compactWindow `
@@ -554,14 +556,15 @@ $ultraProcess = $null
 try {
     $ultraProcess = Start-Process `
         -FilePath $ApplicationPath `
-        -ArgumentList '--skip-setup', '--demo', '--demo-ultra-compact' `
+        -ArgumentList '--skip-setup', '--demo', '--demo-ultra-compact', $testInstanceArgument `
         -PassThru
     $ultraWindow = Wait-ForWindow `
         -Process $ultraProcess `
         -TimeoutMilliseconds 15000
     $ultraBounds = $ultraWindow.Current.BoundingRectangle
-    if ($ultraBounds.Height -gt 368) {
-        throw "Ultra-compact layout height was $($ultraBounds.Height); expected at most 368 DIP."
+    $ultraHeightDip = $ultraBounds.Height * (460.0 / $ultraBounds.Width)
+    if ($ultraHeightDip -gt 368) {
+        throw "Ultra-compact layout height was $ultraHeightDip; expected at most 368 DIP."
     }
     foreach ($automationId in @(
         'Boostix.OpenCenter',

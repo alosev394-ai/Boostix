@@ -12,6 +12,7 @@ using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -685,6 +686,7 @@ namespace Boostix
         {
             public SemanticVersion Version;
             public string InstallerUrl;
+            public string[] FallbackInstallerUrls;
             public string Sha256;
             public long Size;
         }
@@ -1059,6 +1061,14 @@ namespace Boostix
             "https://raw.githubusercontent.com/alosev394-ai/Boostix/";
         private const string InstallerUrlPrefix =
             "https://raw.githubusercontent.com/alosev394-ai/Boostix/main/dist/Boostix-Setup-";
+        private const string ReleaseInstallerUrlPrefix =
+            "https://github.com/alosev394-ai/Boostix/releases/download/v";
+        private const string JsDelivrInstallerUrlPrefix =
+            "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@v";
+        private const string MirrorManifestUrl =
+            "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@main/update-v2.json";
+        private const string MirrorManifestSignatureUrl =
+            "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@main/update-v2.json.sig";
         // Schema v1 keeps this signed transport field for installed 1.8.x
         // clients. New clients prefer boostixInstallerUrl and never display the
         // compatibility name.
@@ -1072,14 +1082,16 @@ namespace Boostix
         private const int RepositoryHeadMaximumBytes = 4096;
         private const int Rsa3072SignatureBytes = 384;
         private const long InstallerMaximumBytes = 268435456L;
-        private const int ManifestRequestTimeoutMilliseconds = 5000;
-        private const int ManifestTotalTimeoutMilliseconds = 20000;
+        private const int ManifestRequestTimeoutMilliseconds = 12000;
+        private const int ManifestTotalTimeoutMilliseconds = 45000;
         private const int ManifestFallbackTotalTimeoutMilliseconds =
-            (2 * ManifestRequestTimeoutMilliseconds) + 2000;
+            (2 * ManifestRequestTimeoutMilliseconds) + 6000;
         private const int ManifestFetchAttempts = 3;
         private const int ManifestRetryDelayMilliseconds = 700;
-        private const int DownloadReadTimeoutMilliseconds = 20000;
-        private const int DownloadTotalTimeoutMilliseconds = 120000;
+        private const int DownloadReadTimeoutMilliseconds = 60000;
+        private const int DownloadTotalTimeoutMilliseconds = 600000;
+        private const int InstallerDownloadAttemptsPerSource = 2;
+        private const int MaximumInstallerRedirects = 5;
 
         private static readonly Color BackgroundColor = Color.FromRgb(22, 22, 22);
         private static readonly Color TextColor = Color.FromRgb(244, 244, 244);
@@ -1264,6 +1276,7 @@ namespace Boostix
                     InstallerUrl = InstallerUrlPrefix +
                         (currentDemoVersion.Major + 1).ToString(CultureInfo.InvariantCulture) +
                         ".0.0.exe",
+                    FallbackInstallerUrls = new string[0],
                     Sha256 = new string('0', 64),
                     Size = 24L * 1024L * 1024L
                 };
@@ -1323,6 +1336,7 @@ namespace Boostix
             Exception lastTransientFailure = null;
             Exception repositoryRefFailure = null;
             bool useSignedMainFallback = false;
+            bool usedMirrorFallback = false;
             Stopwatch totalTimer = Stopwatch.StartNew();
             for (int attempt = 1; attempt <= ManifestFetchAttempts; attempt++)
             {
@@ -1380,10 +1394,17 @@ namespace Boostix
                             DescribeException(ex));
                         break;
                     }
-                    if (!IsTransientManifestFailure(ex) ||
-                        attempt >= ManifestFetchAttempts)
+                    if (!IsTransientManifestFailure(ex))
                     {
-                        throw;
+                        repositoryRefFailure = ex;
+                        useSignedMainFallback = true;
+                        break;
+                    }
+                    if (attempt >= ManifestFetchAttempts)
+                    {
+                        repositoryRefFailure = ex;
+                        useSignedMainFallback = true;
+                        break;
                     }
                     lastTransientFailure = ex;
                     Log(
@@ -1423,17 +1444,44 @@ namespace Boostix
                 }
                 catch (Exception ex)
                 {
-                    updateCheckDiagnostic =
-                        "GitHub repository ref and the signed-main fallback are unavailable: " +
-                        DescribeException(ex);
-                    updateCheckRetryRecommended = true;
-                    throw new WebException(
-                        "The signed-main manifest fallback could not be downloaded.",
-                        ex,
-                        ex is WebException
-                            ? ((WebException)ex).Status
-                            : WebExceptionStatus.UnknownError,
-                        null);
+                    Log(
+                        "GitHub signed-main manifest is unavailable; trying the " +
+                        "allowlisted jsDelivr mirror: " + DescribeException(ex));
+                    try
+                    {
+                        Stopwatch mirrorTimer = Stopwatch.StartNew();
+                        payload = DownloadSmallFile(
+                            MirrorManifestUrl,
+                            ManifestMaximumBytes,
+                            GetManifestRequestTimeout(
+                                mirrorTimer,
+                                ManifestFallbackTotalTimeoutMilliseconds),
+                            mirrorTimer,
+                            ManifestFallbackTotalTimeoutMilliseconds);
+                        signaturePayload = DownloadSmallFile(
+                            MirrorManifestSignatureUrl,
+                            SignatureMaximumBytes,
+                            GetManifestRequestTimeout(
+                                mirrorTimer,
+                                ManifestFallbackTotalTimeoutMilliseconds),
+                            mirrorTimer,
+                            ManifestFallbackTotalTimeoutMilliseconds);
+                        usedMirrorFallback = true;
+                    }
+                    catch (Exception mirrorException)
+                    {
+                        updateCheckDiagnostic =
+                            "All signed update manifest sources are unavailable: " +
+                            DescribeException(mirrorException);
+                        updateCheckRetryRecommended = true;
+                        throw new WebException(
+                            "The signed update manifest could not be downloaded from GitHub or its mirror.",
+                            new AggregateException(ex, mirrorException),
+                            mirrorException is WebException
+                                ? ((WebException)mirrorException).Status
+                                : WebExceptionStatus.UnknownError,
+                            null);
+                    }
                 }
             }
             if (payload == null || signaturePayload == null)
@@ -1447,13 +1495,16 @@ namespace Boostix
                 signaturePayload);
             if (useSignedMainFallback)
             {
-                updateCheckDiagnostic =
-                    "GitHub repository ref was unavailable, but the signed main-branch " +
-                    "manifest passed RSA, URL, version, size, and SHA-256 validation. " +
-                    "An immutable-source retry is recommended.";
+                updateCheckDiagnostic = usedMirrorFallback
+                    ? "The allowlisted mirror supplied a manifest that passed RSA, URL, " +
+                      "version, size, and SHA-256 validation."
+                    : "GitHub repository ref was unavailable, but the signed main-branch " +
+                      "manifest passed RSA, URL, version, size, and SHA-256 validation.";
                 updateCheckRetryRecommended = true;
                 Log(
-                    "Signed-main fallback validated successfully after repository-ref failure: " +
+                    (usedMirrorFallback
+                        ? "Signed mirror fallback validated successfully after GitHub failures: "
+                        : "Signed-main fallback validated successfully after repository-ref failure: ") +
                     DescribeException(repositoryRefFailure));
             }
             else
@@ -1607,9 +1658,28 @@ namespace Boostix
             {
                 Version = version,
                 InstallerUrl = selectedInstallerUrl,
+                FallbackInstallerUrls = new[]
+                {
+                    BuildReleaseInstallerAddress(version),
+                    BuildJsDelivrInstallerAddress(version)
+                },
                 Sha256 = selectedSha256.ToUpperInvariant(),
                 Size = selectedSize
             };
+        }
+
+        private static string BuildReleaseInstallerAddress(SemanticVersion version)
+        {
+            string text = version.ToString();
+            return ReleaseInstallerUrlPrefix + text +
+                "/Boostix-Setup-" + text + ".exe";
+        }
+
+        private static string BuildJsDelivrInstallerAddress(SemanticVersion version)
+        {
+            string text = version.ToString();
+            return JsDelivrInstallerUrlPrefix + text +
+                "/dist/Boostix-Setup-" + text + ".exe";
         }
 
         private static void ValidateInstallerAddress(
@@ -2529,23 +2599,140 @@ namespace Boostix
             FileStream destination,
             IProgress<UpdateProgressInfo> progress)
         {
-            HttpWebRequest request = CreateRequest(update.InstallerUrl, DownloadReadTimeoutMilliseconds);
-            var stopwatch = Stopwatch.StartNew();
+            if (update == null || destination == null)
+            {
+                throw new ArgumentNullException(update == null ? "update" : "destination");
+            }
+
+            var addresses = new List<string>();
+            addresses.Add(update.InstallerUrl);
+            if (update.FallbackInstallerUrls != null)
+            {
+                foreach (string fallback in update.FallbackInstallerUrls)
+                {
+                    if (!string.IsNullOrWhiteSpace(fallback) &&
+                        !addresses.Contains(fallback))
+                    {
+                        addresses.Add(fallback);
+                    }
+                }
+            }
+
+            var failures = new List<Exception>();
+            Stopwatch totalTimer = Stopwatch.StartNew();
+            for (int sourceIndex = 0; sourceIndex < addresses.Count; sourceIndex++)
+            {
+                string address = addresses[sourceIndex];
+                for (int attempt = 1;
+                     attempt <= InstallerDownloadAttemptsPerSource;
+                     attempt++)
+                {
+                    if (totalTimer.ElapsedMilliseconds >= DownloadTotalTimeoutMilliseconds)
+                    {
+                        failures.Add(new WebException(
+                            "Installer download exceeded its total time budget.",
+                            WebExceptionStatus.Timeout));
+                        break;
+                    }
+                    destination.Position = 0;
+                    destination.SetLength(0);
+                    try
+                    {
+                        DownloadInstallerFromAddress(
+                            update,
+                            address,
+                            destination,
+                            progress,
+                            totalTimer);
+                        destination.Flush(true);
+                        ValidateDownloadedInstallerContent(update, destination);
+                        ReportUpdateProgress(
+                            progress,
+                            UpdateProgressStage.Downloading,
+                            update.Size,
+                            update.Size);
+                        return;
+                    }
+                    catch (Exception exception)
+                    {
+                        failures.Add(new IOException(
+                            "Installer source " +
+                            (sourceIndex + 1).ToString(CultureInfo.InvariantCulture) +
+                            " attempt " + attempt.ToString(CultureInfo.InvariantCulture) +
+                            " failed.",
+                            exception));
+                        Log(
+                            "Installer download source failed; trying another trusted " +
+                            "source or retry: " + DescribeException(exception));
+                        if (attempt < InstallerDownloadAttemptsPerSource)
+                        {
+                            Thread.Sleep(500 * attempt);
+                        }
+                    }
+                }
+            }
+
+            throw new WebException(
+                "Installer download failed from every trusted source.",
+                new AggregateException(failures),
+                WebExceptionStatus.ConnectFailure,
+                null);
+        }
+
+        private static void ValidateDownloadedInstallerContent(
+            UpdateManifest update,
+            FileStream installer)
+        {
+            if (installer.Length != update.Size)
+            {
+                throw new InvalidDataException(
+                    "Downloaded installer length does not match the signed manifest.");
+            }
+            ValidatePortableExecutableHeader(installer);
+            installer.Position = 0;
+            string actualHash;
+            using (SHA256 hasher = SHA256.Create())
+            {
+                actualHash = BytesToHex(hasher.ComputeHash(installer));
+            }
+            if (!string.Equals(
+                    actualHash,
+                    update.Sha256,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    "Downloaded installer SHA-256 does not match the signed manifest.");
+            }
+            installer.Position = installer.Length;
+        }
+
+        private static void DownloadInstallerFromAddress(
+            UpdateManifest update,
+            string address,
+            FileStream destination,
+            IProgress<UpdateProgressInfo> progress,
+            Stopwatch totalTimer)
+        {
             int lastReportedPercent = -1;
             ReportUpdateProgress(progress, UpdateProgressStage.Downloading, 0, update.Size);
-            using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+            using (HttpWebResponse response = OpenTrustedInstallerResponse(address))
             {
-                ValidateResponse(response, InstallerMaximumBytes, update.Size, update.InstallerUrl);
+                ValidateResponse(
+                    response,
+                    InstallerMaximumBytes,
+                    update.Size,
+                    response.ResponseUri.AbsoluteUri);
                 using (Stream source = response.GetResponseStream())
                 {
                     byte[] buffer = new byte[65536];
                     long total = 0;
                     while (true)
                     {
-                        if (stopwatch.ElapsedMilliseconds > DownloadTotalTimeoutMilliseconds)
+                        if (totalTimer.ElapsedMilliseconds > DownloadTotalTimeoutMilliseconds)
                         {
-                            request.Abort();
-                            throw new WebException("Installer download timed out.", WebExceptionStatus.Timeout);
+                            throw new WebException(
+                                "Installer download timed out.",
+                                WebExceptionStatus.Timeout);
                         }
                         int read = source.Read(buffer, 0, buffer.Length);
                         if (read <= 0)
@@ -2555,7 +2742,8 @@ namespace Boostix
                         total += read;
                         if (total > update.Size || total > InstallerMaximumBytes)
                         {
-                            throw new InvalidDataException("Installer exceeds the declared size.");
+                            throw new InvalidDataException(
+                                "Installer exceeds the declared size.");
                         }
                         destination.Write(buffer, 0, read);
                         int percent = (int)(total * 100L / update.Size);
@@ -2571,16 +2759,105 @@ namespace Boostix
                     }
                     if (total != update.Size)
                     {
-                        throw new InvalidDataException("Installer size does not match the manifest.");
+                        throw new InvalidDataException(
+                            "Installer size does not match the manifest.");
                     }
                 }
             }
-            destination.Flush(true);
-            ReportUpdateProgress(
-                progress,
-                UpdateProgressStage.Downloading,
-                update.Size,
-                update.Size);
+        }
+
+        private static HttpWebResponse OpenTrustedInstallerResponse(string address)
+        {
+            string currentAddress = address;
+            bool releaseSource = IsTrustedReleaseInstallerAddress(address);
+            for (int redirect = 0; redirect <= MaximumInstallerRedirects; redirect++)
+            {
+                HttpWebRequest request = CreateRequest(
+                    currentAddress,
+                    DownloadReadTimeoutMilliseconds);
+                HttpWebResponse response = (HttpWebResponse)request.GetResponse();
+                if (!IsRedirectStatus(response.StatusCode))
+                {
+                    if (response.ResponseUri == null ||
+                        !string.Equals(
+                            response.ResponseUri.AbsoluteUri,
+                            currentAddress,
+                            StringComparison.Ordinal))
+                    {
+                        response.Dispose();
+                        throw new InvalidDataException(
+                            "Installer response URL changed unexpectedly.");
+                    }
+                    return response;
+                }
+
+                string location = response.Headers[HttpResponseHeader.Location];
+                Uri responseUri = response.ResponseUri;
+                response.Dispose();
+                if (!releaseSource || redirect >= MaximumInstallerRedirects ||
+                    responseUri == null || string.IsNullOrWhiteSpace(location))
+                {
+                    throw new InvalidDataException(
+                        "Installer redirect is not permitted.");
+                }
+
+                Uri redirected;
+                if (!Uri.TryCreate(responseUri, location, out redirected) ||
+                    !IsTrustedReleaseRedirect(redirected))
+                {
+                    throw new InvalidDataException(
+                        "Installer redirect target is not trusted.");
+                }
+                currentAddress = redirected.AbsoluteUri;
+            }
+            throw new InvalidDataException("Too many installer redirects.");
+        }
+
+        private static bool IsRedirectStatus(HttpStatusCode status)
+        {
+            return status == HttpStatusCode.MovedPermanently ||
+                status == HttpStatusCode.Redirect ||
+                status == HttpStatusCode.RedirectMethod ||
+                status == HttpStatusCode.TemporaryRedirect ||
+                (int)status == 308;
+        }
+
+        private static bool IsTrustedReleaseInstallerAddress(string address)
+        {
+            Uri uri;
+            return !string.IsNullOrWhiteSpace(address) &&
+                Uri.TryCreate(address, UriKind.Absolute, out uri) &&
+                string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) &&
+                string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) &&
+                uri.Port == 443 && string.IsNullOrEmpty(uri.UserInfo) &&
+                string.IsNullOrEmpty(uri.Query) && string.IsNullOrEmpty(uri.Fragment) &&
+                Regex.IsMatch(
+                    uri.AbsolutePath,
+                    @"^/alosev394-ai/Boostix/releases/download/v[0-9]+\.[0-9]+\.[0-9]+/Boostix-Setup-[0-9]+\.[0-9]+\.[0-9]+\.exe$",
+                    RegexOptions.CultureInvariant);
+        }
+
+        private static bool IsTrustedReleaseRedirect(Uri uri)
+        {
+            if (uri == null || !uri.IsAbsoluteUri ||
+                !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) ||
+                uri.Port != 443 || !string.IsNullOrEmpty(uri.UserInfo) ||
+                !string.IsNullOrEmpty(uri.Fragment))
+            {
+                return false;
+            }
+            return string.Equals(
+                       uri.Host,
+                       "release-assets.githubusercontent.com",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(
+                       uri.Host,
+                       "objects.githubusercontent.com",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(
+                       uri.Host,
+                       "github.com",
+                       StringComparison.OrdinalIgnoreCase);
         }
 
         private static void ReportUpdateProgress(
@@ -2698,21 +2975,26 @@ namespace Boostix
 
         private static HttpWebRequest CreateRequest(string address, int timeoutMilliseconds)
         {
-            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             var request = (HttpWebRequest)WebRequest.Create(address);
             request.Method = "GET";
             request.AllowAutoRedirect = false;
-            request.AutomaticDecompression = DecompressionMethods.None;
+            request.AutomaticDecompression =
+                DecompressionMethods.GZip | DecompressionMethods.Deflate;
             request.Timeout = timeoutMilliseconds;
             request.ReadWriteTimeout = timeoutMilliseconds;
             request.CachePolicy = new HttpRequestCachePolicy(
                 HttpRequestCacheLevel.NoCacheNoStore);
             request.UserAgent = "Boostix-Updater/" + GetCurrentVersion();
             request.Accept = "application/json, application/octet-stream;q=0.9, */*;q=0.1";
-            request.Headers[HttpRequestHeader.AcceptEncoding] = "identity";
             request.Headers[HttpRequestHeader.CacheControl] = "no-cache";
             request.Headers[HttpRequestHeader.Pragma] = "no-cache";
             request.KeepAlive = false;
+            IWebProxy proxy = request.Proxy;
+            if (proxy != null)
+            {
+                proxy.Credentials = CredentialCache.DefaultNetworkCredentials;
+            }
             return request;
         }
 
@@ -2731,16 +3013,16 @@ namespace Boostix
             {
                 throw new InvalidDataException("Unexpected final response URL.");
             }
-            if (!string.IsNullOrEmpty(response.ContentEncoding) &&
-                !string.Equals(response.ContentEncoding, "identity", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException("Compressed update responses are not accepted.");
-            }
             if (response.ContentLength > maximumBytes)
             {
                 throw new InvalidDataException("Response is too large.");
             }
-            if (expectedBytes.HasValue && response.ContentLength >= 0 &&
+            bool encoded = !string.IsNullOrWhiteSpace(response.ContentEncoding) &&
+                !string.Equals(
+                    response.ContentEncoding.Trim(),
+                    "identity",
+                    StringComparison.OrdinalIgnoreCase);
+            if (expectedBytes.HasValue && !encoded && response.ContentLength >= 0 &&
                 response.ContentLength != expectedBytes.Value)
             {
                 throw new InvalidDataException("HTTP content length does not match the manifest.");
@@ -2749,7 +3031,35 @@ namespace Boostix
 
         private static string CreateUniqueDownloadDirectory()
         {
-            string root = Path.GetFullPath(Path.GetTempPath());
+            return CreateSecureUpdateDownloadDirectoryAtRoot(
+                Path.GetFullPath(Path.GetTempPath()));
+        }
+
+        private static string CreateSecureUpdateDownloadDirectoryAtRoot(string root)
+        {
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                throw new ArgumentException("A staging root is required.", "root");
+            }
+            root = Path.GetFullPath(root);
+            if (!Directory.Exists(root))
+            {
+                throw new DirectoryNotFoundException(
+                    "The update staging root does not exist.");
+            }
+
+            SecurityIdentifier currentUser = WindowsIdentity.GetCurrent().User;
+            if (currentUser == null)
+            {
+                throw new SecurityException(
+                    "The current Windows identity does not have a SID.");
+            }
+            var administrators = new SecurityIdentifier(
+                WellKnownSidType.BuiltinAdministratorsSid,
+                null);
+            var localSystem = new SecurityIdentifier(
+                WellKnownSidType.LocalSystemSid,
+                null);
             for (int attempt = 0; attempt < 8; attempt++)
             {
                 string candidate = Path.Combine(
@@ -2759,11 +3069,44 @@ namespace Boostix
                 {
                     continue;
                 }
-                DirectoryInfo created = Directory.CreateDirectory(candidate);
+
+                var security = new DirectorySecurity();
+                security.SetAccessRuleProtection(true, false);
+                security.SetOwner(currentUser);
+                foreach (SecurityIdentifier identity in new[]
+                {
+                    currentUser,
+                    administrators,
+                    localSystem
+                })
+                {
+                    security.AddAccessRule(new FileSystemAccessRule(
+                        identity,
+                        FileSystemRights.FullControl,
+                        InheritanceFlags.ContainerInherit |
+                            InheritanceFlags.ObjectInherit,
+                        PropagationFlags.None,
+                        AccessControlType.Allow));
+                }
+
+                DirectoryInfo created = Directory.CreateDirectory(
+                    candidate,
+                    security);
                 if ((created.Attributes & FileAttributes.ReparsePoint) != 0 ||
                     !IsDirectChild(root, created.FullName))
                 {
                     throw new IOException("Unsafe update download directory.");
+                }
+                DirectorySecurity actual = created.GetAccessControl(
+                    AccessControlSections.Access | AccessControlSections.Owner);
+                SecurityIdentifier actualOwner = actual.GetOwner(
+                    typeof(SecurityIdentifier)) as SecurityIdentifier;
+                if (actualOwner == null ||
+                    !actualOwner.Equals(currentUser) ||
+                    !actual.AreAccessRulesProtected)
+                {
+                    throw new SecurityException(
+                        "The update directory ACL was not applied securely.");
                 }
                 return created.FullName;
             }

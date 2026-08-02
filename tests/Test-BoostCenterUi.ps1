@@ -96,9 +96,10 @@ function Invoke-Element {
 
 $process = $null
 try {
+    $testInstance = '--test-instance=' + [Guid]::NewGuid().ToString('N')
     $process = Start-Process `
         -FilePath $ApplicationPath `
-        -ArgumentList '--skip-setup', '--demo', '--demo-center' `
+        -ArgumentList '--skip-setup', '--demo', '--demo-center', $testInstance `
         -PassThru
 
     $window = Wait-ForCenterWindow -Process $process -TimeoutMilliseconds 20000

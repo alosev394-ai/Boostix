@@ -46,17 +46,35 @@ if (-not (Test-Path -LiteralPath $PrivateKeyPath -PathType Leaf)) {
     throw "Encrypted signing key not found: $PrivateKeyPath"
 }
 
-$encryptedKey = [IO.File]::ReadAllBytes($PrivateKeyPath)
-$entropy = [Text.Encoding]::UTF8.GetBytes('MajesticBoost manifest signing key v1')
-$privateKeyBytes = [Security.Cryptography.ProtectedData]::Unprotect(
-    $encryptedKey,
-    $entropy,
-    [Security.Cryptography.DataProtectionScope]::CurrentUser)
-
-$rsa = New-Object Security.Cryptography.RSACryptoServiceProvider
+$encryptedKey = $null
+$entropy = $null
+$privateKeyBytes = $null
+$privateKeyXml = $null
+$manifestBytes = $null
+$signature = $null
+$rsa = $null
 try {
+    $encryptedKey = [IO.File]::ReadAllBytes($PrivateKeyPath)
+    $entropy = [Text.Encoding]::UTF8.GetBytes(
+        'MajesticBoost manifest signing key v1')
+    $privateKeyBytes = [Security.Cryptography.ProtectedData]::Unprotect(
+        $encryptedKey,
+        $entropy,
+        [Security.Cryptography.DataProtectionScope]::CurrentUser)
+    [Array]::Clear($encryptedKey, 0, $encryptedKey.Length)
+    $encryptedKey = $null
+    [Array]::Clear($entropy, 0, $entropy.Length)
+    $entropy = $null
+
+    $rsa = New-Object Security.Cryptography.RSACryptoServiceProvider
+    # FromXmlString otherwise imports the private material into a persistent
+    # CSP key container owned by the release operator.
+    $rsa.PersistKeyInCsp = $false
     $privateKeyXml = [Text.Encoding]::UTF8.GetString($privateKeyBytes)
     $rsa.FromXmlString($privateKeyXml)
+    $privateKeyXml = $null
+    [Array]::Clear($privateKeyBytes, 0, $privateKeyBytes.Length)
+    $privateKeyBytes = $null
     if ($rsa.KeySize -lt 3072) {
         throw "Signing key is too small: $($rsa.KeySize) bits."
     }
@@ -74,11 +92,28 @@ try {
     Write-Host "Signature: $SignaturePath"
 }
 finally {
-    if ($privateKeyBytes) {
+    $privateKeyXml = $null
+    if ($null -ne $signature) {
+        [Array]::Clear($signature, 0, $signature.Length)
+    }
+    if ($null -ne $manifestBytes) {
+        [Array]::Clear($manifestBytes, 0, $manifestBytes.Length)
+    }
+    if ($null -ne $privateKeyBytes) {
         [Array]::Clear($privateKeyBytes, 0, $privateKeyBytes.Length)
     }
-    if ($rsa) {
-        $rsa.PersistKeyInCsp = $false
-        $rsa.Clear()
+    if ($null -ne $entropy) {
+        [Array]::Clear($entropy, 0, $entropy.Length)
+    }
+    if ($null -ne $encryptedKey) {
+        [Array]::Clear($encryptedKey, 0, $encryptedKey.Length)
+    }
+    if ($null -ne $rsa) {
+        try {
+            $rsa.PersistKeyInCsp = $false
+        }
+        finally {
+            $rsa.Dispose()
+        }
     }
 }

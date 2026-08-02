@@ -11,8 +11,32 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$brandSource = [IO.File]::ReadAllText(
+    (Join-Path $projectRoot 'ProductBrand.cs'))
+$productVersionMatch = [regex]::Match(
+    $brandSource,
+    'ProductVersion\s*=\s*"(?<version>[0-9]+\.[0-9]+\.[0-9]+)"')
+$assemblyVersionMatch = [regex]::Match(
+    $brandSource,
+    'AssemblyVersion\s*=\s*"(?<version>[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)"')
+if (-not $productVersionMatch.Success -or
+    -not $assemblyVersionMatch.Success) {
+    throw 'The current product versions were not found in ProductBrand.cs.'
+}
+$releaseVersion = $productVersionMatch.Groups['version'].Value
+$assemblyVersion = $assemblyVersionMatch.Groups['version'].Value
+if ($assemblyVersion -cne ($releaseVersion + '.0')) {
+    throw 'ProductVersion and AssemblyVersion are inconsistent in ProductBrand.cs.'
+}
+$parsedCurrentVersion = [Version]$assemblyVersion
+$futurePatchVersion = '{0}.{1}.{2}.0' -f
+    $parsedCurrentVersion.Major,
+    $parsedCurrentVersion.Minor,
+    ($parsedCurrentVersion.Build + 1)
+$futureMajorVersion = '{0}.0.0.0' -f ($parsedCurrentVersion.Major + 1)
 if (-not $InstallerPath) {
-    $InstallerPath = Join-Path $projectRoot 'dist\Boostix-Setup-1.9.0.exe'
+    $InstallerPath = Join-Path $projectRoot (
+        'dist\Boostix-Setup-' + $releaseVersion + '.exe')
 }
 if (-not $LatestInstallerPath) {
     $LatestInstallerPath = Join-Path $projectRoot 'dist\Boostix-Setup-Latest.exe'
@@ -28,9 +52,9 @@ if ($installerHash -cne $latestHash) {
 
 $versionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($InstallerPath)
 if ($versionInfo.ProductName -cne 'Boostix' -or
-    $versionInfo.FileVersion -cne '1.9.0.0' -or
+    $versionInfo.FileVersion -cne $assemblyVersion -or
     $versionInfo.CompanyName -cne 'Silas Suspect') {
-    throw 'Installer product metadata does not match release 1.9.0.'
+    throw "Installer product metadata does not match release $releaseVersion."
 }
 
 $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($InstallerPath))
@@ -70,13 +94,14 @@ function Test-DowngradeDecision {
     }
 }
 
-Test-DowngradeDecision -Installed '1.5.1.0' -Setup '1.9.0.0' -Expected $false
-Test-DowngradeDecision -Installed '1.8.1.0' -Setup '1.9.0.0' -Expected $false
-Test-DowngradeDecision -Installed '1.8.9.0' -Setup '1.9.0.0' -Expected $false
-Test-DowngradeDecision -Installed '1.9.0.0' -Setup '1.9.0.0' -Expected $false
-Test-DowngradeDecision -Installed '1.9.1.0' -Setup '1.9.0.0' -Expected $true
-Test-DowngradeDecision -Installed '2.0.0.0' -Setup '1.9.0.0' -Expected $true
-Test-DowngradeDecision -Installed 'invalid' -Setup '1.9.0.0' -Expected $false
+Test-DowngradeDecision -Installed '1.5.1.0' -Setup $assemblyVersion -Expected $false
+Test-DowngradeDecision -Installed '1.8.1.0' -Setup $assemblyVersion -Expected $false
+Test-DowngradeDecision -Installed '1.8.9.0' -Setup $assemblyVersion -Expected $false
+Test-DowngradeDecision -Installed '1.9.0.0' -Setup $assemblyVersion -Expected $false
+Test-DowngradeDecision -Installed $assemblyVersion -Setup $assemblyVersion -Expected $false
+Test-DowngradeDecision -Installed $futurePatchVersion -Setup $assemblyVersion -Expected $true
+Test-DowngradeDecision -Installed $futureMajorVersion -Setup $assemblyVersion -Expected $true
+Test-DowngradeDecision -Installed 'invalid' -Setup $assemblyVersion -Expected $false
 
 $payloadStream = $assembly.GetManifestResourceStream('Boostix.Payload.exe')
 if (-not $payloadStream) {
@@ -87,8 +112,8 @@ try {
     try {
         $payloadStream.CopyTo($memory)
         $payloadAssembly = [Reflection.Assembly]::Load($memory.ToArray())
-        if ($payloadAssembly.GetName().Version.ToString() -cne '1.9.0.0') {
-            throw 'Embedded application version does not match installer version 1.9.0.'
+        if ($payloadAssembly.GetName().Version.ToString() -cne $assemblyVersion) {
+            throw "Embedded application version does not match installer version $releaseVersion."
         }
         $payloadCompany = @(
             $payloadAssembly.GetCustomAttributes(
@@ -188,7 +213,9 @@ foreach ($requiredText in @(
     'items.Count - 1; index >= 0; index--',
     'GetDesktopShortcutPreference()',
     'ScheduleUpdateSourceCleanupIfNeeded()',
-    'PrepareLegacyInstallationForUpdate()',
+    'CanonicalSetupResourceName =',
+    '"Boostix.CanonicalSetup.exe"',
+    'CreatePayloadItem(token, "Uninstall", CanonicalSetupResourceName, UninstallerExe',
     'CleanupLegacyInstallationAfterSuccess()',
     'CaptureRegistryTree(child, childName)',
     'RestoreRegistryKey(baseKey, snapshot.AppPathsKey)',

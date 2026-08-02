@@ -12,6 +12,8 @@ $updatePath = Join-Path $projectRoot 'Boostix\UpdateFlow.cs'
 $sessionScriptPath = Join-Path $projectRoot 'outputs\Boost-Session.ps1'
 $applyScriptPath = Join-Path $projectRoot 'outputs\MaxFPS-Apply.ps1'
 $buildPath = Join-Path $projectRoot 'build.ps1'
+$applicationManifestPath = Join-Path $projectRoot 'Boostix\app.manifest'
+$installerManifestPath = Join-Path $projectRoot 'BoostixInstaller\app.manifest'
 
 foreach ($requiredPath in @(
     $brandPath,
@@ -20,7 +22,9 @@ foreach ($requiredPath in @(
     $updatePath,
     $sessionScriptPath,
     $applyScriptPath,
-    $buildPath
+    $buildPath,
+    $applicationManifestPath,
+    $installerManifestPath
 )) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required Boostix source is missing: $requiredPath"
@@ -33,12 +37,36 @@ if (Test-Path -LiteralPath (Join-Path $projectRoot 'MajesticBoostInstaller')) {
     throw 'The installer source directory still uses the legacy product name.'
 }
 
+function Get-BrandStringConstant {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $matches = [regex]::Matches(
+        $Source,
+        '(?m)^\s*public\s+const\s+string\s+' +
+            [regex]::Escape($Name) +
+            '\s*=\s*"(?<value>[^"]+)"\s*;')
+    if ($matches.Count -ne 1) {
+        throw "ProductBrand.cs must define exactly one $Name string constant."
+    }
+    return $matches[0].Groups['value'].Value
+}
+
 $brand = [IO.File]::ReadAllText($brandPath)
+$productName = Get-BrandStringConstant -Source $brand -Name 'ProductName'
+$companyName = Get-BrandStringConstant -Source $brand -Name 'CompanyName'
+$releaseVersion = Get-BrandStringConstant -Source $brand -Name 'ProductVersion'
+$assemblyVersion = Get-BrandStringConstant -Source $brand -Name 'AssemblyVersion'
+if ($releaseVersion -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+$' -or
+    $assemblyVersion -cne ($releaseVersion + '.0')) {
+    throw 'ProductVersion and AssemblyVersion are inconsistent in ProductBrand.cs.'
+}
 foreach ($identityContract in @(
     'ProductName = "Boostix"',
     'ProductFileName = "Boostix"',
     'CompanyName = "Silas Suspect"',
-    'ProductVersion = "1.9.0"',
     'ReleaseLabel = "BETA"',
     'AccentHex = "#FF7C3AED"',
     'AccentVisualHex = "#FF8B5CF6"',
@@ -46,6 +74,29 @@ foreach ($identityContract in @(
 )) {
     if (-not $brand.Contains($identityContract)) {
         throw "The central brand contract is missing: $identityContract"
+    }
+}
+
+foreach ($manifestContract in @(
+    @{
+        Path = $applicationManifestPath
+        Name = 'SilasSuspect.Boostix'
+    },
+    @{
+        Path = $installerManifestPath
+        Name = 'SilasSuspect.Boostix.Setup'
+    }
+)) {
+    [xml]$manifest = [IO.File]::ReadAllText($manifestContract.Path)
+    $namespaceManager = New-Object Xml.XmlNamespaceManager($manifest.NameTable)
+    $namespaceManager.AddNamespace('asm', 'urn:schemas-microsoft-com:asm.v1')
+    $identity = $manifest.SelectSingleNode(
+        '/asm:assembly/asm:assemblyIdentity',
+        $namespaceManager)
+    if (-not $identity -or
+        $identity.GetAttribute('version') -cne $assemblyVersion -or
+        $identity.GetAttribute('name') -cne $manifestContract.Name) {
+        throw "Manifest identity is inconsistent with ProductBrand.cs: $($manifestContract.Path)"
     }
 }
 
@@ -142,9 +193,10 @@ foreach ($requiredBuildContract in @(
 
 $dist = Join-Path $projectRoot 'dist'
 $appPath = Join-Path $dist 'Boostix.exe'
-$setupPath = Join-Path $dist 'Boostix-Setup-1.9.0.exe'
+$setupPath = Join-Path $dist ('Boostix-Setup-' + $releaseVersion + '.exe')
 $latestPath = Join-Path $dist 'Boostix-Setup-Latest.exe'
-$bridgePath = Join-Path $dist 'MajesticBoost-Setup-1.9.0.exe'
+$bridgePath = Join-Path $dist (
+    'MajesticBoost-Setup-' + $releaseVersion + '.exe')
 foreach ($artifactPath in @($appPath, $setupPath, $latestPath, $bridgePath)) {
     if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) {
         throw "Required release artifact is missing: $artifactPath"
@@ -153,16 +205,16 @@ foreach ($artifactPath in @($appPath, $setupPath, $latestPath, $bridgePath)) {
 
 foreach ($artifactPath in @($appPath, $setupPath, $latestPath)) {
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($artifactPath)
-    if ($version.ProductName -cne 'Boostix' -or
-        $version.CompanyName -cne 'Silas Suspect' -or
-        $version.ProductVersion -cne '1.9.0.0') {
+    if ($version.ProductName -cne $productName -or
+        $version.CompanyName -cne $companyName -or
+        $version.ProductVersion -cne $assemblyVersion) {
         throw "Incorrect Boostix metadata in $artifactPath"
     }
 }
 $bridgeVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($bridgePath)
 if ($bridgeVersion.ProductName -cne 'Majestic Boost' -or
-    $bridgeVersion.CompanyName -cne 'Silas Suspect' -or
-    $bridgeVersion.ProductVersion -cne '1.9.0.0') {
+    $bridgeVersion.CompanyName -cne $companyName -or
+    $bridgeVersion.ProductVersion -cne $assemblyVersion) {
     throw 'The isolated 1.8.x compatibility bridge metadata is incorrect.'
 }
 
