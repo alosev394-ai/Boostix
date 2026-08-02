@@ -13,6 +13,8 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $brandPath = Join-Path $projectRoot 'ProductBrand.cs'
 $signingPath = Join-Path $projectRoot 'tools\Sign-UpdateManifest.ps1'
 $workflowPath = Join-Path $projectRoot '.github\workflows\ci.yml'
+$canaryWorkflowPath = Join-Path $projectRoot (
+    '.github\workflows\public-update-channel-canary.yml')
 $dependabotPath = Join-Path $projectRoot '.github\dependabot.yml'
 $runAllPath = Join-Path $PSScriptRoot 'Run-All.ps1'
 $releaseChannelTestPath = Join-Path $PSScriptRoot 'Test-ReleaseUpdateChannel.ps1'
@@ -20,6 +22,7 @@ foreach ($requiredPath in @(
     $brandPath,
     $signingPath,
     $workflowPath,
+    $canaryWorkflowPath,
     $dependabotPath,
     $runAllPath,
     $releaseChannelTestPath
@@ -72,6 +75,7 @@ if (-not [regex]::IsMatch(
 }
 
 $workflow = [IO.File]::ReadAllText($workflowPath)
+$canaryWorkflow = [IO.File]::ReadAllText($canaryWorkflowPath)
 foreach ($requiredWorkflowContract in @(
     'ProductBrand.cs',
     'BOOSTIX_PRODUCT_VERSION',
@@ -110,7 +114,32 @@ if ($workflow.Contains('Boostix-Setup-' + $productVersion + '.exe') -or
     throw 'The current ProductVersion was copied into an artifact path in CI.'
 }
 
-$usesLines = [regex]::Matches($workflow, '(?m)^\s*uses:\s*.+$')
+$lifecycleStepIndex = $workflow.IndexOf(
+    '- name: Run installer lifecycle E2E on disposable runner',
+    [StringComparison]::Ordinal)
+$regressionStepIndex = $workflow.IndexOf(
+    '- name: Run every regression test',
+    [StringComparison]::Ordinal)
+if ($lifecycleStepIndex -lt 0 -or
+    $regressionStepIndex -lt 0 -or
+    $lifecycleStepIndex -ge $regressionStepIndex) {
+    throw (
+        'The machine lifecycle E2E must run before UI regressions can create ' +
+        'a per-user Boostix data directory on the disposable runner.')
+}
+if ($workflow.Contains(
+        'Installer lifecycle E2E failed with exit code $LASTEXITCODE') -or
+    $canaryWorkflow.Contains(
+        'Public update channel canary failed with exit code $LASTEXITCODE')) {
+    throw (
+        'A PowerShell script workflow must not treat an unset LASTEXITCODE as ' +
+        'a failure after the script returned successfully.')
+}
+
+$workflowSources = @($workflow, $canaryWorkflow)
+$usesLines = @($workflowSources | ForEach-Object {
+    [regex]::Matches($_, '(?m)^\s*uses:\s*.+$')
+})
 if ($usesLines.Count -eq 0) {
     throw 'The CI workflow does not reference any actions.'
 }
