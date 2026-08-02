@@ -525,6 +525,7 @@ $uninstallerCopyName =
 $uninstallerCopy = Join-Path $runnerTemp $uninstallerCopyName
 $installationAttempted = $false
 $testFailure = $null
+$setupLogSnapshot = New-Object 'System.Collections.Generic.List[string]'
 $cleanupFailures = New-Object 'System.Collections.Generic.List[string]'
 
 try {
@@ -625,6 +626,21 @@ try {
 }
 catch {
     $testFailure = $_.Exception
+    foreach ($logPath in $setupLogPaths) {
+        try {
+            if (Test-Path -LiteralPath $logPath -PathType Leaf) {
+                [void]$setupLogSnapshot.Add('--- ' + $logPath + ' ---')
+                foreach ($line in @(Get-Content -LiteralPath $logPath -Tail 80)) {
+                    [void]$setupLogSnapshot.Add([string]$line)
+                }
+            }
+        }
+        catch {
+            [void]$setupLogSnapshot.Add(
+                'Could not capture setup diagnostics from ' + $logPath +
+                ': ' + $_.Exception.Message)
+        }
+    }
 }
 finally {
     if ($installationAttempted) {
@@ -769,6 +785,14 @@ finally {
 
 if ($testFailure) {
     $message = 'Installer lifecycle E2E failed: ' + $testFailure.Message
+    if ($setupLogSnapshot.Count -ne 0) {
+        $message += [Environment]::NewLine +
+            'Setup diagnostics captured before cleanup:' +
+            [Environment]::NewLine +
+            [string]::Join(
+                [Environment]::NewLine,
+                $setupLogSnapshot.ToArray())
+    }
     if ($cleanupFailures.Count -ne 0) {
         $message += [Environment]::NewLine + 'Cleanup failures:' +
             [Environment]::NewLine +
