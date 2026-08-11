@@ -1,0 +1,51 @@
+name: Boostix CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '21 2 * * 4'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: boostix-codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: C# security analysis
+    runs-on: windows-2025
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@f52b05f4acaaa234e44466e66d29050e135ea9ef # v4.36.0
+        with:
+          languages: csharp
+          build-mode: manual
+          queries: security-extended
+
+      - name: Build application and installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\build.ps1 -Configuration Release
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release build failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@f52b05f4acaaa234e44466e66d29050e135ea9ef # v4.36.0
+        with:
+          category: /language:csharp

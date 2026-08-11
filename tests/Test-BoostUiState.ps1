@@ -17,6 +17,16 @@ $ApplicationPath = (Resolve-Path -LiteralPath $ApplicationPath).Path
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+namespace BoostixUiStateTest {
+    public static class NativeMethods {
+        [DllImport("user32.dll")]
+        public static extern uint GetDpiForWindow(IntPtr hwnd);
+    }
+}
+'@
 
 $activatePrefix = [Text.Encoding]::UTF8.GetString(
     [Convert]::FromBase64String('0JDQutGC0LjQstC40YDQvtCy0LDRgtGM'))
@@ -92,7 +102,7 @@ function Wait-ForPathState {
 $process = $null
 try {
     $testInstance = '--test-instance=' + [Guid]::NewGuid().ToString('N')
-    $process = Start-Process -FilePath $ApplicationPath -ArgumentList '--skip-setup', '--demo', $testInstance -PassThru
+    $process = Start-Process -FilePath $ApplicationPath -ArgumentList '--skip-setup', '--demo', '--demo-target', $testInstance -PassThru
     $window = Wait-ForMainWindow -Process $process -TimeoutMilliseconds 8000
     $activateButton = Wait-ForButtonState `
         -Root $window `
@@ -105,7 +115,12 @@ try {
     if ($aspectRatio -lt 1.18 -or $aspectRatio -gt 1.22) {
         throw "Unexpected main-window aspect ratio: $aspectRatio ($($bounds.Width)x$($bounds.Height))."
     }
-    if ($bounds.Width -lt 456 -or $bounds.Height -lt 548) {
+    $dpi = [BoostixUiStateTest.NativeMethods]::GetDpiForWindow(
+        $process.MainWindowHandle)
+    if ($dpi -lt 96) { $dpi = 96 }
+    $normalizedWidth = $bounds.Width * $dpi / 96.0
+    $normalizedHeight = $bounds.Height * $dpi / 96.0
+    if ($normalizedWidth -lt 456 -or $normalizedHeight -lt 548) {
         throw "Main window is too small for the responsive safe areas: $($bounds.Width)x$($bounds.Height)."
     }
 

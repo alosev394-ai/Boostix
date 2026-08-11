@@ -49,16 +49,16 @@ namespace Boostix
             public string Status;
         }
 
-        private static readonly Color BackgroundColor = Color.FromRgb(22, 22, 22);
-        private static readonly Color TextColor = Color.FromRgb(244, 244, 244);
-        private static readonly Color MutedColor = Color.FromRgb(142, 142, 142);
-        private static readonly Color AccentColor = Color.FromRgb(124, 58, 237);
-        private static readonly Color ErrorColor = Color.FromRgb(255, 102, 122);
+        private static readonly Color BackgroundColor = BoostixDesignTokens.Background;
+        private static readonly Color TextColor = BoostixDesignTokens.Text;
+        private static readonly Color MutedColor = BoostixDesignTokens.MutedText;
+        private static readonly Color AccentColor = BoostixDesignTokens.Accent;
+        private static readonly Color ErrorColor = BoostixDesignTokens.Error;
         private const int ElevatedScriptTimeoutMilliseconds = 10 * 60 * 1000;
         private const string ApplyScriptSha256 =
-            "21C78A3D7BCB8344B2E79D3C48007E2F657DB1CDCB4CB6BAAC7245DDBE300321";
+            "58A7E8E4C709CAADCB6D1B808DCDCBA18B85B6EB3201ECFCB2B37474391187BC";
         private const string RestoreScriptSha256 =
-            "187ECBD8B88C145BBC4F878ED1C773346CF2FFA99FD5F00F49C9734470D2B4DE";
+            "BFE02A3B3C4DBC58F215A62ABFA80EBD7B3CCC40C7A2C488A62ED06D0F1C0D76";
 
         private readonly Window owner;
         private readonly string[] arguments;
@@ -1020,7 +1020,7 @@ namespace Boostix
                 Width = 300,
                 Height = 4,
                 CornerRadius = new CornerRadius(2),
-                Background = new SolidColorBrush(Color.FromRgb(42, 42, 42)),
+                Background = new SolidColorBrush(BoostixDesignTokens.Divider),
                 ClipToBounds = true
             };
             var progressIndicator = new Border
@@ -1222,8 +1222,10 @@ namespace Boostix
 
         private Button MakeActionButton(string text, bool accentOnHover)
         {
-            var baseColor = Color.FromRgb(37, 37, 37);
-            var hoverColor = accentOnHover ? AccentColor : Color.FromRgb(49, 49, 49);
+            var baseColor = BoostixDesignTokens.SurfaceRaised;
+            var hoverColor = accentOnHover
+                ? AccentColor
+                : BoostixDesignTokens.Hover;
             var background = new SolidColorBrush(baseColor);
             var translate = new TranslateTransform();
 

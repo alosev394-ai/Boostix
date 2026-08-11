@@ -10,10 +10,14 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $utf8NoBom = New-Object Text.UTF8Encoding($false)
+$strictUtf8NoBom = New-Object Text.UTF8Encoding($false, $true)
 $systemDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
 $programDataRoot = [IO.Path]::GetFullPath([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData))
 $programFilesRoot = [IO.Path]::GetFullPath([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles))
 if (-not $systemDirectory -or -not $programDataRoot -or -not $programFilesRoot) { throw 'Trusted Windows security roots could not be resolved from the OS.' }
+$boostixProgramDataRoot = Join-Path $programDataRoot 'Boostix'
+$sessionPowerPlanRoot = Join-Path $boostixProgramDataRoot 'SessionPowerPlan'
+$trustedPowerPlanPath = Join-Path $sessionPowerPlanRoot 'trusted-plan.json'
 $boostixStateRoot = Join-Path $programDataRoot 'BoostixOptimization'
 $legacyStateRoot = Join-Path $programDataRoot 'CodexGamingOptimization'
 $stateRoot = $boostixStateRoot
@@ -328,6 +332,121 @@ function Write-ProtectedJsonAtomic {
     Write-ProtectedTextAtomic -Path $Path -Text ($Value | ConvertTo-Json -Depth $Depth)
 }
 
+function Assert-TrustedSessionPowerPlanDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    Assert-NoReparsePath -Path $Path -StopAt $programDataRoot
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw "Session power-plan directory is missing: $Path"
+    }
+    $security = [IO.Directory]::GetAccessControl($Path)
+    if (-not $security.AreAccessRulesProtected -or
+        -not (Test-TrustedOwner -Security $security) -or
+        (Test-HasUntrustedWriteAce -Security $security)) {
+        throw "Session power-plan directory has untrusted owner/write access: $Path"
+    }
+}
+
+function Get-CanonicalTrustedPowerPlanJson {
+    param([Parameter(Mandatory = $true)][string]$Guid)
+    if (-not (Test-GuidText -Value $Guid)) {
+        throw 'Trusted power-plan GUID is not canonical D format.'
+    }
+    return '{"version":1,"planName":"Boostix Performance","planGuid":"' +
+        ([Guid]$Guid).ToString('D').ToLowerInvariant() + '"}'
+}
+
+function Get-TrustedPowerPlanConfiguration {
+    foreach ($directory in @($boostixProgramDataRoot, $sessionPowerPlanRoot)) {
+        if (Test-Path -LiteralPath $directory) {
+            Assert-TrustedSessionPowerPlanDirectory -Path $directory
+        }
+    }
+    $trustedItem = Get-Item -LiteralPath $trustedPowerPlanPath -Force -ErrorAction SilentlyContinue
+    if (-not $trustedItem) { return $null }
+    Assert-NoReparsePath -Path $trustedPowerPlanPath -StopAt $programDataRoot
+    if (-not (Test-Path -LiteralPath $trustedPowerPlanPath -PathType Leaf)) {
+        throw 'Trusted power-plan state is not a regular file.'
+    }
+    $security = [IO.File]::GetAccessControl($trustedPowerPlanPath)
+    if (-not $security.AreAccessRulesProtected -or
+        -not (Test-TrustedOwner -Security $security) -or
+        (Test-HasUntrustedWriteAce -Security $security)) {
+        throw 'Trusted power-plan state has an untrusted owner or writable ACL.'
+    }
+    $bytes = [IO.File]::ReadAllBytes($trustedPowerPlanPath)
+    if ($bytes.Length -le 0 -or $bytes.Length -gt 512 -or
+        ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and
+         $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) {
+        throw 'Trusted power-plan state has an invalid size or UTF-8 BOM.'
+    }
+    $text = $strictUtf8NoBom.GetString($bytes)
+    $match = [regex]::Match(
+        $text,
+        '^\{"version":1,"planName":"Boostix Performance","planGuid":"([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})"\}$',
+        [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+    if (-not $match.Success -or -not (Test-GuidText -Value $match.Groups[1].Value) -or
+        $text -cne (Get-CanonicalTrustedPowerPlanJson -Guid $match.Groups[1].Value)) {
+        throw 'Trusted power-plan JSON is corrupt or non-canonical.'
+    }
+    return [pscustomobject]@{
+        Version = 1
+        PlanName = 'Boostix Performance'
+        PlanGuid = $match.Groups[1].Value
+        CanonicalJson = $text
+    }
+}
+
+function Remove-OwnedTrustedPowerPlanConfiguration {
+    param([Parameter(Mandatory = $true)][string]$ExpectedGuid)
+    $canonicalGuid = if (Test-GuidText -Value $ExpectedGuid) {
+        ([Guid]$ExpectedGuid).ToString('D').ToLowerInvariant()
+    }
+    else { throw 'Expected trusted power-plan GUID is invalid.' }
+    $configuration = Get-TrustedPowerPlanConfiguration
+    if (-not $configuration) { return $false }
+    if ([string]$configuration.PlanGuid -cne $canonicalGuid) {
+        throw 'Trusted power-plan state references another GUID and was preserved.'
+    }
+    # Validate provenance and exact content again immediately before deletion.
+    $expectedJson = Get-CanonicalTrustedPowerPlanJson -Guid $canonicalGuid
+    if ([string]$configuration.CanonicalJson -cne $expectedJson) {
+        throw 'Trusted power-plan state changed before deletion.'
+    }
+    $rechecked = Get-TrustedPowerPlanConfiguration
+    if (-not $rechecked -or [string]$rechecked.PlanGuid -cne $canonicalGuid -or
+        [string]$rechecked.CanonicalJson -cne $expectedJson) {
+        throw 'Trusted power-plan state changed during deletion preparation.'
+    }
+    Assert-NoReparsePath -Path $trustedPowerPlanPath -StopAt $programDataRoot
+    Remove-Item -LiteralPath $trustedPowerPlanPath -Force
+    if (Test-Path -LiteralPath $trustedPowerPlanPath) {
+        throw 'Trusted power-plan state deletion verification failed.'
+    }
+    return $true
+}
+
+function Test-TransactionOwnsTrustedPowerPlanConfiguration {
+    param(
+        [Parameter(Mandatory = $true)]$Power,
+        [Parameter(Mandatory = $true)][string]$MaxScheme
+    )
+    if (-not $Power -or -not (Test-GuidText -Value $MaxScheme) -or
+        -not ($Power.PSObject.Properties.Name -contains 'SchemeCreated') -or
+        -not [bool]$Power.SchemeCreated -or
+        -not ($Power.PSObject.Properties.Name -contains 'TrustedConfigGuid') -or
+        [string]$Power.TrustedConfigGuid -ine $MaxScheme) {
+        return $false
+    }
+    $created = ($Power.PSObject.Properties.Name -contains 'TrustedConfigCreatedByUs') -and
+        [bool]$Power.TrustedConfigCreatedByUs
+    $restored = ($Power.PSObject.Properties.Name -contains 'TrustedConfigRestored') -and
+        [bool]$Power.TrustedConfigRestored
+    # A pending marker proves intent, not file authorship.  If apply crashed
+    # around publication, only an explicit Apply -AdoptExistingState retry may
+    # reconcile it; Restore preserves a matching file until then.
+    return $created -and -not $restored
+}
+
 function Initialize-ProtectedStateStorage {
     if (-not (Test-Path -LiteralPath $stateRoot -PathType Container) -or -not (Test-Path -LiteralPath $backupRoot -PathType Container)) {
         throw 'Protected Boostix state storage does not exist.'
@@ -494,6 +613,8 @@ function Get-AllowedRegistryTarget {
         'hkcu:\software\microsoft\windows\currentversion\gamedvr|historicalcaptureenabled' = 0
         'hkcu:\system\gameconfigstore|gamedvr_enabled' = 0
         'hklm:\system\currentcontrolset\control\graphicsdrivers|hwschmode' = 2
+        # Restore-only compatibility for 1.x/v2 transactions.  Apply 2.0 no
+        # longer creates either global machine-wide mutation.
         'hklm:\system\currentcontrolset\control\power\powerthrottling|powerthrottlingoff' = 1
         'hklm:\software\microsoft\windows nt\currentversion\multimedia\systemprofile|systemresponsiveness' = 10
         'hkcu:\software\microsoft\windows\currentversion\explorer\visualeffects|visualfxsetting' = 2
@@ -597,7 +718,7 @@ function Assert-MutationStateSchema {
         return
     }
 
-    if ($phase -notin @('LegacyV2','PowerPlanCreated','ApplyingSettings','Active')) {
+    if ($phase -notin @('LegacyV2','PowerPlanCreated','ApplyingSettings','TrustedConfigPublicationPending','TrustedConfigPublished','Active')) {
         throw "Mutation state has an invalid phase: $phase"
     }
 
@@ -695,6 +816,24 @@ function Assert-MutationStateSchema {
         throw 'State power scheme creation flags do not match.'
     }
     if ([bool]$Candidate.Power.ChangedByUs -and -not [bool]$Candidate.Power.SchemeCreated) { throw 'A changed power plan must be marked as created by this transaction.' }
+    $trustedGuid = $null
+    if ($Candidate.Power.PSObject.Properties.Name -contains 'TrustedConfigGuid') {
+        $trustedGuid = [string]$Candidate.Power.TrustedConfigGuid
+        if (-not (Test-GuidText -Value $trustedGuid) -or $trustedGuid -ine [string]$Candidate.MaxPowerScheme) {
+            throw 'State trusted power-plan GUID is invalid or does not match the created plan.'
+        }
+    }
+    foreach ($flagName in @('TrustedConfigCreatedByUs','TrustedConfigWritePending','TrustedConfigRestored')) {
+        if (($Candidate.Power.PSObject.Properties.Name -contains $flagName) -and
+            $Candidate.Power.$flagName -isnot [bool]) {
+            throw "State Power $flagName must be Boolean."
+        }
+    }
+    $claimsTrustedConfig = (($Candidate.Power.PSObject.Properties.Name -contains 'TrustedConfigCreatedByUs') -and [bool]$Candidate.Power.TrustedConfigCreatedByUs) -or
+        (($Candidate.Power.PSObject.Properties.Name -contains 'TrustedConfigWritePending') -and [bool]$Candidate.Power.TrustedConfigWritePending)
+    if ($claimsTrustedConfig -and (-not [bool]$Candidate.Power.SchemeCreated -or -not $trustedGuid)) {
+        throw 'Trusted power-plan state ownership requires the transaction-created matching plan GUID.'
+    }
 }
 
 function Get-RegistrySnapshot {
@@ -1201,6 +1340,39 @@ try {
                 $originalScheme = [string]$state.OriginalPowerScheme
                 $maxScheme = [string]$state.MaxPowerScheme
                 $schemeCreated = [bool]$state.Power.SchemeCreated
+                $trustedConfigGuid = if ($state.Power.PSObject.Properties.Name -contains 'TrustedConfigGuid') {
+                    [string]$state.Power.TrustedConfigGuid
+                }
+                else { $null }
+                $ownsTrustedConfig = Test-TransactionOwnsTrustedPowerPlanConfiguration `
+                    -Power $state.Power `
+                    -MaxScheme $maxScheme
+                $preserveCreatedPlan = $false
+
+                $trustedConfiguration = Get-TrustedPowerPlanConfiguration
+                if ($trustedConfiguration -and [string]$trustedConfiguration.PlanGuid -ieq $maxScheme) {
+                    if ($ownsTrustedConfig) {
+                        [void](Remove-OwnedTrustedPowerPlanConfiguration -ExpectedGuid $maxScheme)
+                        Set-ObjectProperty -Object $state.Power -Name 'TrustedConfigRestored' -Value $true
+                        Set-ObjectProperty -Object $state.Power -Name 'TrustedConfigWritePending' -Value $false
+                        Save-State
+                    }
+                    else {
+                        $preserveCreatedPlan = $true
+                        Add-RestoreConflict -Message 'The matching trusted session power-plan configuration is not attributable to this transaction; both it and its referenced plan were preserved.'
+                    }
+                }
+                elseif ($trustedConfiguration) {
+                    Add-RestoreConflict -Message "An external trusted session power-plan configuration was preserved: $($trustedConfiguration.PlanGuid)"
+                }
+                elseif ($ownsTrustedConfig) {
+                    # Idempotent retry after the file was deleted but before the
+                    # transaction state could be committed.
+                    Set-ObjectProperty -Object $state.Power -Name 'TrustedConfigRestored' -Value $true
+                    Set-ObjectProperty -Object $state.Power -Name 'TrustedConfigWritePending' -Value $false
+                    Save-State
+                }
+
                 $maxExists = Test-PowerSchemeExists -Guid $maxScheme
                 if ($maxExists) {
                     $activeScheme = Get-ActivePowerScheme
@@ -1214,7 +1386,8 @@ try {
                     elseif ($activeScheme -ne $originalScheme) {
                         Add-RestoreConflict -Message "The active power plan is a user override and was preserved: $activeScheme"
                     }
-                    if ($schemeCreated -and (Get-ActivePowerScheme) -ne $maxScheme) {
+                    if ($schemeCreated -and -not $preserveCreatedPlan -and
+                        (Get-ActivePowerScheme) -ne $maxScheme) {
                         [void](Invoke-PowerCfg -Arguments @('/delete', $maxScheme))
                         if (Test-PowerSchemeExists -Guid $maxScheme) { throw 'Boostix power scheme deletion verification failed.' }
                     }

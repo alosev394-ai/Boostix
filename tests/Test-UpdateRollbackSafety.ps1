@@ -13,6 +13,7 @@ $installerSource = Join-Path $projectRoot 'BoostixInstaller\Program.cs'
 $updateSource = Join-Path $projectRoot 'Boostix\UpdateFlow.cs'
 $applicationSource = Join-Path $projectRoot 'Boostix\Program.cs'
 $brandSource = Join-Path $projectRoot 'ProductBrand.cs'
+$designTokensSource = Join-Path $projectRoot 'Boostix\DesignTokens.cs'
 $brandText = [IO.File]::ReadAllText($brandSource)
 $assemblyVersionMatch = [regex]::Match(
     $brandText,
@@ -125,6 +126,7 @@ try {
         "/reference:$wpfRoot\PresentationCore.dll" `
         "/reference:$wpfRoot\PresentationFramework.dll" `
         $brandSource `
+        $designTokensSource `
         $updateSource 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Application health-handshake harness did not compile:`r`n$($applicationCompilerOutput -join [Environment]::NewLine)"
@@ -413,7 +415,9 @@ try {
         'RestorePostInstallRegistration(registration)',
         'string.Equals(argument, "/updateui"',
         'bool boostixInstalled = File.Exists(InstalledExe);',
-        '!boostixInstalled && File.Exists(LegacyInstalledExe)'
+        'bool legacyInstalled = File.Exists(LegacyInstalledExe);',
+        'bool legacyRollbackEligible = !boostixRollbackEligible &&',
+        'bool rollbackEligible = boostixRollbackEligible ||'
     )) {
         if (-not $installerText.Contains($required)) {
             throw "Installer rollback contract is missing: $required"

@@ -1,0 +1,10 @@
+# Security-sensitive release and Windows mutation paths require an explicit
+# review from the repository owner.
+* @alosev394-ai
+
+/.github/ @alosev394-ai
+/Boostix/UpdateFlow.cs @alosev394-ai
+/BoostixInstaller/ @alosev394-ai
+/outputs/ @alosev394-ai
+/tools/Sign-UpdateManifest.ps1 @alosev394-ai
+/update*.json* @alosev394-ai

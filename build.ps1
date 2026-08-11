@@ -133,13 +133,21 @@ foreach ($licensePath in @($presentMonLicensePath, $presentMonThirdPartyPath)) {
 [void](New-Item -ItemType Directory -Path $workDirectory -Force)
 [void](New-Item -ItemType Directory -Path $distDirectory -Force)
 
-# A Boostix release must not leave a stale legacy "Latest" binary beside the
-# newly produced artifacts. Match only known product executable names directly
-# under dist; release history remains recoverable from Git.
+# A Boostix release must not leave stale versioned binaries beside the newly
+# produced artifacts. Match only known product executable names directly under
+# dist; published release history remains recoverable from immutable GitHub
+# releases and from Git itself.
 $resolvedDistDirectory = [IO.Path]::GetFullPath($distDirectory)
 foreach ($legacyArtifact in Get-ChildItem -LiteralPath $resolvedDistDirectory -File) {
+    $knownLegacyArtifact =
+        $legacyArtifact.Name -cmatch
+            '^MajesticBoost(?:-Setup-(?:Latest|[0-9]+\.[0-9]+\.[0-9]+))?\.exe$'
+    $staleCanonicalArtifact =
+        $legacyArtifact.Name -cmatch
+            '^Boostix-Setup-[0-9]+\.[0-9]+\.[0-9]+\.exe$' -and
+        $legacyArtifact.Name -cne "Boostix-Setup-$releaseVersion.exe"
     if ((Split-Path -Parent $legacyArtifact.FullName) -ceq $resolvedDistDirectory -and
-        $legacyArtifact.Name -cmatch '^MajesticBoost(?:-Setup-(?:Latest|[0-9]+\.[0-9]+\.[0-9]+))?\.exe$') {
+        ($knownLegacyArtifact -or $staleCanonicalArtifact)) {
         Remove-Item -LiteralPath $legacyArtifact.FullName -Force
     }
 }
@@ -158,8 +166,18 @@ $appArguments = @(
     "/reference:$wpfRoot\WindowsBase.dll",
     "/reference:$wpfRoot\PresentationCore.dll",
     "/reference:$wpfRoot\PresentationFramework.dll",
+    "/reference:$wpfRoot\UIAutomationProvider.dll",
+    "/reference:$wpfRoot\UIAutomationTypes.dll",
     "/out:$appOutput",
     "$projectRoot\ProductBrand.cs",
+    "$projectRoot\Boostix\DesignTokens.cs",
+    "$projectRoot\Boostix\BackgroundImpact.cs",
+    "$projectRoot\Boostix\GameTargetProfiles.cs",
+    "$projectRoot\Boostix\SessionGuard.cs",
+    "$projectRoot\Boostix\SessionPowerPlan.cs",
+    "$projectRoot\Boostix\PerformanceProof.cs",
+    "$projectRoot\Boostix\PerformanceProofCoordinator.cs",
+    "$projectRoot\Boostix\CrashCorrelation.cs",
     "$projectRoot\Boostix\Program.cs",
     "$projectRoot\Boostix\BoostFeatures.cs",
     "$projectRoot\Boostix\DiagnosticsFeatures.cs",

@@ -12,6 +12,8 @@ $program = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\Program.cs'))
 $center = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\BoostCenterOverlay.cs'))
 $features = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\BoostFeatures.cs'))
 $capture = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\PerformanceCapture.cs'))
+$profiles = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\GameTargetProfiles.cs'))
+$tokens = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\DesignTokens.cs'))
 $optimization = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\OptimizationFlow.cs'))
 $installer = [IO.File]::ReadAllText((Join-Path $projectRoot 'BoostixInstaller\Program.cs'))
 $build = [IO.File]::ReadAllText((Join-Path $projectRoot 'build.ps1'))
@@ -38,18 +40,90 @@ foreach ($required in @(
     'process.StartTime.ToUniversalTime() != item.StartTimeUtc',
     'current != ProcessPriorityClass.AboveNormal',
     'BoostActionOutcome.ExternalOverridePreserved',
-    'Interval = TimeSpan.FromSeconds(5)',
+    'activeBoostTimer.Interval = TimeSpan.FromSeconds(1)',
     'CheckBeforeBoost=" + centerSettings.CheckBeforeBoost',
     'Interlocked.Increment(ref preflightGeneration)',
     'generation != Interlocked.CompareExchange(ref preflightGeneration, 0, 0)',
     'lastSession.Complete(',
     '"Interrupted"',
     'BoostSessionReportStore.Save',
-    'PerformanceCaptureService.CaptureRunningTargetAsync'
+    'PerformanceCaptureService.CaptureTargetAsync',
+    'private const double BaseWindowWidth = 460',
+    'private const double CenterWindowWidth = 620',
+    'preferenceSection = BuildSessionSummaryPanel();',
+    '"Boostix.Target.Select"',
+    'gameTargetService.EnumerateCandidates()',
+    'gameTargetService.TryResolve(',
+    'TryMatchSavedAutoBoostProfile(',
+    'gameProfileStore.SetAutoBoost('
 )) {
     if (-not $program.Contains($required)) {
         throw "The Boost session contract is missing: $required"
     }
+}
+
+function Find-SubMinimumTextLiterals {
+    param(
+        [string]$Source,
+        [string]$SourceName
+    )
+
+    $violations = New-Object 'Collections.Generic.List[string]'
+    $lines = [regex]::Split($Source, '\r?\n')
+    for ($index = 0; $index -lt $lines.Length; $index++) {
+        if ($lines[$index] -match
+            'FontSize\s*=\s*(?<size>\d+(?:\.\d+)?)\s*,') {
+            $size = [double]::Parse(
+                $Matches.size,
+                [Globalization.CultureInfo]::InvariantCulture)
+            if ($size -lt 11) {
+                $violations.Add(
+                    "${SourceName}:$($index + 1) FontSize=$size")
+            }
+        }
+
+        if ($lines[$index] -notmatch 'MakeText\(') {
+            continue
+        }
+        if ($lines[$index] -match
+            'MakeText\([^\r\n]*?,\s*(?<size>\d+(?:\.\d+)?)\s*,') {
+            $size = [double]::Parse(
+                $Matches.size,
+                [Globalization.CultureInfo]::InvariantCulture)
+            if ($size -lt 11) {
+                $violations.Add(
+                    "${SourceName}:$($index + 1) MakeText=$size")
+            }
+            continue
+        }
+
+        $last = [Math]::Min($index + 10, $lines.Length - 1)
+        for ($probe = $index + 1; $probe -le $last; $probe++) {
+            if ($lines[$probe] -match
+                'BoostixDesignTokens\.(?:MetadataTextSize|BodyTextSize)') {
+                break
+            }
+            if ($lines[$probe] -match
+                'BoostixDesignTokens\.(?:BodyTextSize|MetadataTextSize|SectionTitleSize)\s*,') {
+                break
+            }
+            if ($lines[$probe] -match
+                '^\s*(?<size>\d+(?:\.\d+)?),\s*$') {
+                $size = [double]::Parse(
+                    $Matches.size,
+                    [Globalization.CultureInfo]::InvariantCulture)
+                if ($size -lt 11) {
+                    $violations.Add(
+                        "${SourceName}:$($probe + 1) MakeText=$size")
+                }
+                break
+            }
+            if ($lines[$probe] -match '^\s*\);?\s*$') {
+                break
+            }
+        }
+    }
+    return $violations.ToArray()
 }
 
 $windowControlsStart = $program.IndexOf(
@@ -196,18 +270,31 @@ foreach ($forbidden in @(
 
 foreach ($required in @(
     'CenterPage.Readiness',
+    'CenterPage.Impact',
     'CenterPage.Report',
-    'CenterPage.History',
+    'CenterPage.Profiles',
     'CenterPage.Settings',
     'OpenReadiness',
+    'OpenImpact',
     'OpenReport',
+    'OpenProfiles',
     'OpenSettings',
+    'BoostCenterTabButton',
+    'BoostCenterTabAutomationPeer',
+    'ISelectionItemProvider',
+    'AutomationControlType.TabItem',
+    'PatternInterface.SelectionItem',
+    'AddTab(tabs, CenterPage.Readiness',
+    'AddTab(tabs, CenterPage.Impact',
+    'AddTab(tabs, CenterPage.Report',
+    'AddTab(tabs, CenterPage.Profiles',
+    'AddTab(tabs, CenterPage.Settings',
     'AutomationProperties.SetName',
     'KeyboardNavigationMode.Cycle',
     'SystemParameters.ClientAreaAnimation',
     'using Boostix.Branding;',
-    'ProductBrand.AccentRed',
-    'ProductBrand.AccentTextRed',
+    'BoostixDesignTokens.Accent',
+    'BoostixDesignTokens.AccentText',
     'Color targetColor = selected ? AccentTextColor : MutedColor;',
     'MakeBoostixVerticalScrollBarStyle',
     'ProductBrand.AccentVisualHex',
@@ -236,6 +323,22 @@ foreach ($required in @(
         throw "The Boost Center UI contract is missing: $required"
     }
 }
+$addTabStart = $center.IndexOf(
+    'private void AddTab(',
+    [StringComparison]::Ordinal)
+$openCenterStart = $center.IndexOf(
+    'private void Open(',
+    $addTabStart,
+    [StringComparison]::Ordinal)
+if ($addTabStart -lt 0 -or $openCenterStart -le $addTabStart) {
+    throw 'The Boost Center tab construction section could not be isolated.'
+}
+$addTab = $center.Substring($addTabStart, $openCenterStart - $addTabStart)
+if (-not $addTab.Contains('Height = new GridLength(40)') -and
+    -not $addTab.Contains(
+        'Height = new GridLength(BoostixDesignTokens.MinimumActionHeight)')) {
+    throw 'Boost Center tab hit targets are not 40 DIP.'
+}
 foreach ($forbiddenPublicUi in @(
     '"Majestic',
     'GTA',
@@ -252,6 +355,10 @@ foreach ($forbiddenPublicUi in @(
 foreach ($requiredPublicUi in @(
     'BOOSTIX",',
     '"Boostix.Center"',
+    '"Boostix.Center.SelectTarget"',
+    '"Boostix.Center.ImpactScan"',
+    '"Boostix.Center.ProfileAdd"',
+    '"Boostix.Center.ProfileAuto."',
     '"Boostix.Center.Setting."',
     'settings.CheckBeforeBoost'
 )) {
@@ -265,46 +372,93 @@ if ($center -notmatch '(?s)AnimatePageVisual\(\s*pageScroller,.*?PageTransitionE
     throw 'The Boost Center page transition timing contract is missing.'
 }
 
-$mainToggleStart = $program.IndexOf(
-    'private CheckBox BuildPreferenceToggle',
-    [StringComparison]::Ordinal)
-$mainToggleEnd = $program.IndexOf(
-    'private void PreferenceToggleChanged',
-    $mainToggleStart,
-    [StringComparison]::Ordinal)
-$mainToggleTemplateStart = $program.IndexOf(
-    'private static ControlTemplate MakeTransparentCheckBoxTemplate',
-    [StringComparison]::Ordinal)
-$mainToggleTemplateEnd = $program.IndexOf(
-    'private static ControlTemplate MakeChromeButtonTemplate',
-    $mainToggleTemplateStart,
-    [StringComparison]::Ordinal)
-if ($mainToggleStart -lt 0 -or $mainToggleEnd -le $mainToggleStart -or
-    $mainToggleTemplateStart -lt 0 -or
-    $mainToggleTemplateEnd -le $mainToggleTemplateStart) {
-    throw 'The main toggle geometry sections could not be located.'
-}
-$mainToggle = $program.Substring($mainToggleStart, $mainToggleEnd - $mainToggleStart)
-$mainToggleTemplate = $program.Substring(
-    $mainToggleTemplateStart,
-    $mainToggleTemplateEnd - $mainToggleTemplateStart)
 foreach ($required in @(
-    'content.HorizontalAlignment = HorizontalAlignment.Stretch',
-    'Width = new GridLength(36 + ToggleSafeGutter)',
-    'track.Margin = new Thickness(0, 0, ToggleSafeGutter, 0)',
-    'knob.Margin = new Thickness(3, 0, 0, 0)',
-    'content.UseLayoutRounding = true',
-    'track.ClipToBounds = false'
+    'ProcessStartTimeUtc',
+    'current.StartTimeUtc != identity.ProcessStartTimeUtc',
+    'GameExecutablePath.AreEquivalent(',
+    'internal bool TryResolve(',
+    'internal bool TryMatchSavedAutoBoostProfile(',
+    'internal bool SetAutoBoost(string executablePath, bool enabled)',
+    'TryGetAutoBoostProfile(',
+    'StringComparison.OrdinalIgnoreCase',
+    'AtomicWriteUtf8(',
+    'TryQuarantineCorruptFile()',
+    'File.Replace(',
+    'File.Move('
 )) {
-    if (-not $mainToggle.Contains($required)) {
-        throw "The main toggle anti-clipping contract is missing: $required"
+    if (-not $profiles.Contains($required)) {
+        throw "The exact-target/profile safety contract is missing: $required"
     }
 }
-if ($mainToggle.Contains('content.Width = 300') -or
-    -not $mainToggleTemplate.Contains(
-        'BorderThicknessProperty, new Thickness(0)') -or
-    -not $program.Contains('double targetX = isChecked ? 14 : 0')) {
-    throw 'The main toggle template can still clip its rounded right edge.'
+
+foreach ($required in @(
+    'public const double BodyTextSize = 12',
+    'public const double MetadataTextSize = 11',
+    'public const double MinimumActionHeight = 40',
+    'public const double PreferredActionHeight = 44'
+)) {
+    if (-not $tokens.Contains($required)) {
+        throw "The Boostix 2.0 typography/hit-target token is missing: $required"
+    }
+}
+
+$mainCompositionStart = $program.IndexOf(
+    'private Grid BuildShell()',
+    [StringComparison]::Ordinal)
+$sessionPanelStart = $program.IndexOf(
+    'private Grid BuildSessionSummaryPanel()',
+    $mainCompositionStart,
+    [StringComparison]::Ordinal)
+if ($mainCompositionStart -lt 0 -or $sessionPanelStart -le $mainCompositionStart) {
+    throw 'The main Boostix 2.0 composition could not be located.'
+}
+$mainComposition = $program.Substring(
+    $mainCompositionStart,
+    $sessionPanelStart - $mainCompositionStart)
+if (-not $mainComposition.Contains(
+        'preferenceSection = BuildSessionSummaryPanel();')) {
+    throw 'The main window does not compose the exact-target session summary.'
+}
+if ($mainComposition.Contains('BuildPreferencePanel()') -or
+    $mainComposition.Contains('BuildPreferenceToggle(') -or
+    $mainComposition.Contains('Boostix.Keep.')) {
+    throw 'The main window still composes the obsolete keep-toggle panel.'
+}
+
+$sessionPanelEnd = $program.IndexOf(
+    'private TextBlock AddLiveMetric(',
+    $sessionPanelStart,
+    [StringComparison]::Ordinal)
+if ($sessionPanelEnd -le $sessionPanelStart) {
+    throw 'The exact-target session summary section could not be isolated.'
+}
+$sessionPanel = $program.Substring(
+    $sessionPanelStart,
+    $sessionPanelEnd - $sessionPanelStart)
+foreach ($required in @(
+    '"Boostix.Target.Select"',
+    'BoostixDesignTokens.BodyTextSize',
+    'BoostixDesignTokens.MetadataTextSize',
+    'KeyboardNavigation.SetTabIndex(targetSelectorButton, 11)'
+)) {
+    if (-not $sessionPanel.Contains($required)) {
+        throw "The exact-target selector layout contract is missing: $required"
+    }
+}
+if (-not $sessionPanel.Contains('Height = 44') -and
+    -not $sessionPanel.Contains(
+        'Height = BoostixDesignTokens.PreferredActionHeight')) {
+    throw 'The exact-target selector is not a 44 DIP preferred action.'
+}
+
+$minimumTextViolations = @(
+    Find-SubMinimumTextLiterals $mainComposition 'Program.cs/main'
+    Find-SubMinimumTextLiterals $center 'BoostCenterOverlay.cs'
+)
+if ($minimumTextViolations.Count -gt 0) {
+    $preview = ($minimumTextViolations | Select-Object -First 12) -join '; '
+    throw (
+        'Boostix 2.0 exposes text below the 11 DIP minimum: ' + $preview)
 }
 foreach ($required in @(
     'Width = new GridLength(36 + ToggleSafeGutter)',
@@ -335,12 +489,6 @@ if ($installer.Contains('float trackLeft = Width - trackWidth;')) {
 }
 
 foreach ($forbidden in @(
-    'GetPreference(values, "KeepDiscord")',
-    'GetPreference(values, "KeepEpic")',
-    'GetPreference(values, "KeepSteam")',
-    '"KeepDiscord="',
-    '"KeepEpic="',
-    '"KeepSteam="',
     'IsKeyboardFocusedProperty'
 )) {
     if ($program.Contains($forbidden) -or $center.Contains($forbidden)) {

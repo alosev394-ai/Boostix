@@ -53,9 +53,14 @@ function Stop-BoostBackgroundProcesses {
                     }
                 }
                 if (-not $process.HasExited) {
-                    "Graceful close timed out for $($process.Name); using the explicit force-close choice." |
+                    # Boostix 2.0 deliberately remains graceful-only here. A
+                    # process that ignores WM_CLOSE may contain unsaved user
+                    # data, so a normal Boost session must never kill it.
+                    "Graceful close did not finish for $($process.Name); leaving the process running." |
                         Add-Content -LiteralPath $logPath -Encoding UTF8
-                    $process | Stop-Process -Force -ErrorAction Stop
+                    $warnings.Add(
+                        "Graceful close timed out for $($process.Name) (PID $($process.Id)); process was not forced to exit.")
+                    continue
                 }
                 $stoppedProcesses.Add("$($process.Name)|$($process.Id)")
             }

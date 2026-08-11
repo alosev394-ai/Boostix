@@ -58,6 +58,9 @@ function Write-RollbackState {
 
     [IO.Directory]::CreateDirectory($Directory) | Out-Null
     $transaction = Split-Path -Leaf $Directory
+    # Keep this as a historical 1.9.4 interrupted transaction. Boostix 2.0 must
+    # still recover state written by already deployed updaters instead of only
+    # accepting checkpoints produced by the current build.
     $lines = @(
         "Format=$Format"
         "Transaction=$transaction"
@@ -180,8 +183,11 @@ try {
     }
 
     Assert-SourceContains `
-        -Fragment 'bool legacyMigration = !boostixInstalled && File.Exists(LegacyInstalledExe);' `
-        -Scenario 'legacy-only installations must enter the health-checked update path'
+        -Fragment 'bool legacyRollbackEligible = !boostixRollbackEligible && legacyInstalled && IsInstalledExecutableRollbackEligible( LegacyInstalledExe, true);' `
+        -Scenario 'a valid legacy installation must remain a rollback source after an interrupted Boostix migration'
+    Assert-SourceContains `
+        -Fragment 'bool legacyMigration = legacyRollbackEligible;' `
+        -Scenario 'the validated legacy source must select the migration transaction'
     Assert-SourceContains `
         -Fragment 'InstallUpdateWithHealthRollback( createDesktopShortcut, progress, legacyMigration);' `
         -Scenario 'the migration kind must reach the durable transaction'

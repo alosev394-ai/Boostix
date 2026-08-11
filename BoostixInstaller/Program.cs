@@ -969,16 +969,23 @@ namespace BoostixSetup
             {
                 RecoverInterruptedUpdateTransactions(false);
                 bool boostixInstalled = File.Exists(InstalledExe);
-                bool legacyMigration =
-                    !boostixInstalled && File.Exists(LegacyInstalledExe);
-                bool rollbackEligible = boostixInstalled
-                    ? IsInstalledExecutableRollbackEligible(
+                bool legacyInstalled = File.Exists(LegacyInstalledExe);
+                bool boostixRollbackEligible = boostixInstalled &&
+                    IsInstalledExecutableRollbackEligible(
                         InstalledExe,
-                        false)
-                    : legacyMigration &&
-                      IsInstalledExecutableRollbackEligible(
-                          LegacyInstalledExe,
-                          true);
+                        false);
+                // An interrupted older migration can leave a damaged Boostix.exe
+                // beside the still-working legacy installation. Prefer that valid
+                // legacy copy as the durable rollback source instead of discarding
+                // it through the non-health-checked repair path.
+                bool legacyRollbackEligible = !boostixRollbackEligible &&
+                    legacyInstalled &&
+                    IsInstalledExecutableRollbackEligible(
+                        LegacyInstalledExe,
+                        true);
+                bool legacyMigration = legacyRollbackEligible;
+                bool rollbackEligible = boostixRollbackEligible ||
+                    legacyRollbackEligible;
                 if (rollbackEligible)
                 {
                     InstallUpdateWithHealthRollback(
@@ -988,7 +995,7 @@ namespace BoostixSetup
                 }
                 else
                 {
-                    if (boostixInstalled || legacyMigration)
+                    if (boostixInstalled || legacyInstalled)
                     {
                         InstallerDiagnostics.Write(
                             "The previous executable is damaged or has an unexpected identity; " +
@@ -1013,7 +1020,10 @@ namespace BoostixSetup
                     desktopDirectory,
                     ProductBrand.LegacyInstallDirectoryName + ".lnk"));
             }
-            DeleteIfExists(Path.Combine(InstallDirectory, "Game-Boost.ps1"));
+            TryLegacyCleanup(delegate
+            {
+                DeleteIfExists(Path.Combine(InstallDirectory, "Game-Boost.ps1"));
+            });
 
             string commonPrograms;
             if (TryResolveOptionalShortcutRoot(
@@ -1348,6 +1358,8 @@ namespace BoostixSetup
         {
             string transactionId;
             int parentProcessId;
+            long parentStartTimeUtcTicks;
+            bool hasExactParentIdentity;
             bool recoveryRequested = false;
             foreach (string argument in arguments ?? new string[0])
             {
@@ -1363,28 +1375,20 @@ namespace BoostixSetup
             if (!TryParseRecoveryArguments(
                     arguments,
                     out transactionId,
-                    out parentProcessId))
+                    out parentProcessId,
+                    out parentStartTimeUtcTicks,
+                    out hasExactParentIdentity))
             {
                 return recoveryRequested;
             }
 
             try
             {
-                try
-                {
-                    using (Process parent = Process.GetProcessById(parentProcessId))
-                    {
-                        parent.WaitForExit(UpdateRecoveryParentWaitMilliseconds);
-                    }
-                }
-                catch (ArgumentException)
-                {
-                    // The parent already exited.
-                }
-                catch (InvalidOperationException)
-                {
-                    // The parent already exited.
-                }
+                WaitForExactRecoveryParent(
+                    parentProcessId,
+                    parentStartTimeUtcTicks,
+                    hasExactParentIdentity,
+                    UpdateRecoveryParentWaitMilliseconds);
 
                 IDisposable guard = null;
                 Stopwatch guardTimer = Stopwatch.StartNew();
@@ -1426,12 +1430,16 @@ namespace BoostixSetup
         private static bool TryParseRecoveryArguments(
             string[] arguments,
             out string transactionId,
-            out int parentProcessId)
+            out int parentProcessId,
+            out long parentStartTimeUtcTicks,
+            out bool hasExactParentIdentity)
         {
             transactionId = null;
             parentProcessId = 0;
+            parentStartTimeUtcTicks = 0L;
+            hasExactParentIdentity = false;
             string[] values = arguments ?? new string[0];
-            if (values.Length != 3 ||
+            if ((values.Length != 3 && values.Length != 4) ||
                 !string.Equals(
                     values[0],
                     "/update-recovery",
@@ -1446,8 +1454,115 @@ namespace BoostixSetup
             {
                 return false;
             }
+
+            if (values.Length == 4)
+            {
+                if (!long.TryParse(
+                        values[3],
+                        NumberStyles.None,
+                        CultureInfo.InvariantCulture,
+                        out parentStartTimeUtcTicks) ||
+                    parentStartTimeUtcTicks <= DateTime.MinValue.Ticks ||
+                    parentStartTimeUtcTicks > DateTime.MaxValue.Ticks ||
+                    !string.Equals(
+                        values[3],
+                        parentStartTimeUtcTicks.ToString(
+                            CultureInfo.InvariantCulture),
+                        StringComparison.Ordinal))
+                {
+                    parentStartTimeUtcTicks = 0L;
+                    return false;
+                }
+                hasExactParentIdentity = true;
+            }
+
             transactionId = values[1];
             return true;
+        }
+
+        /// <summary>
+        /// Waits only for the exact process instance that launched this
+        /// watchdog. Legacy three-argument invocations remain parseable, but
+        /// cannot prove identity and therefore skip the PID wait; the protected
+        /// system-transaction guard below remains the serialization boundary.
+        /// </summary>
+        private static bool WaitForExactRecoveryParent(
+            int parentProcessId,
+            long parentStartTimeUtcTicks,
+            bool hasExactParentIdentity,
+            int maximumWaitMilliseconds)
+        {
+            if (!hasExactParentIdentity ||
+                parentProcessId <= 0 ||
+                maximumWaitMilliseconds < 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                using (Process parent = Process.GetProcessById(parentProcessId))
+                {
+                    if (!IsExactRecoveryParent(
+                            parent,
+                            parentProcessId,
+                            parentStartTimeUtcTicks))
+                    {
+                        return false;
+                    }
+
+                    parent.WaitForExit(maximumWaitMilliseconds);
+                    return true;
+                }
+            }
+            catch (ArgumentException)
+            {
+                // The exact parent already exited; a reused PID is not awaited.
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                // Failure to inspect identity must never degrade to PID-only wait.
+                return false;
+            }
+        }
+
+        private static bool IsExactRecoveryParent(
+            Process parent,
+            int expectedProcessId,
+            long expectedStartTimeUtcTicks)
+        {
+            if (parent == null || expectedProcessId <= 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (parent.Id != expectedProcessId || parent.HasExited)
+                {
+                    return false;
+                }
+
+                long observedStartTimeUtcTicks =
+                    parent.StartTime.ToUniversalTime().Ticks;
+                parent.Refresh();
+                return !parent.HasExited &&
+                    parent.Id == expectedProcessId &&
+                    observedStartTimeUtcTicks == expectedStartTimeUtcTicks;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                return false;
+            }
         }
 
         private static UpdateRollbackTransaction CreateUpdateRollbackTransaction(
@@ -3002,12 +3117,20 @@ namespace BoostixSetup
                     "." + transaction.Id + "-" + UpdateRecoveryExecutableName);
             }
             ValidateFileNotReparse(recoveryPath);
+            int parentProcessId;
+            long parentStartTimeUtcTicks;
+            using (Process parent = Process.GetCurrentProcess())
+            {
+                parentProcessId = parent.Id;
+                parentStartTimeUtcTicks =
+                    parent.StartTime.ToUniversalTime().Ticks;
+            }
             var startInfo = new ProcessStartInfo
             {
                 FileName = recoveryPath,
                 Arguments = "/update-recovery " + transaction.Id + " " +
-                    Process.GetCurrentProcess().Id.ToString(
-                        CultureInfo.InvariantCulture),
+                    parentProcessId.ToString(CultureInfo.InvariantCulture) + " " +
+                    parentStartTimeUtcTicks.ToString(CultureInfo.InvariantCulture),
                 // Do not make the protected rollback root the process current
                 // directory. Windows otherwise keeps that directory busy briefly
                 // after a successful update and can obstruct immediate uninstall
@@ -5646,36 +5769,54 @@ namespace BoostixSetup
 
         private static void EnsureInstallIsNotDowngrade()
         {
-            if (!File.Exists(InstalledExe))
+            foreach (string candidate in new[]
             {
+                InstalledExe,
+                LegacyInstalledExe
+            })
+            {
+                if (!File.Exists(candidate))
+                {
+                    continue;
+                }
+
+                ValidateFileNotReparse(candidate);
+                FileVersionInfo installedInfo = FileVersionInfo.GetVersionInfo(
+                    candidate);
+                bool recognizedProduct =
+                    string.Equals(
+                        installedInfo.ProductName,
+                        ProductName,
+                        StringComparison.Ordinal) ||
+                    string.Equals(
+                        installedInfo.ProductName,
+                        ProductBrand.LegacyInstallDirectoryName,
+                        StringComparison.Ordinal);
+                if (!recognizedProduct)
+                {
+                    InstallerDiagnostics.Write(
+                        "An installed executable has no recognized Boostix identity; " +
+                        "checking the next compatible installation before repair.");
+                    continue;
+                }
+                if (IsDowngrade(
+                        installedInfo.FileVersion,
+                        ProductVersion + ".0"))
+                {
+                    Version installedVersion = Version.Parse(
+                        installedInfo.FileVersion.Trim());
+                    throw new InvalidOperationException(
+                        "На компьютере уже установлена более новая версия Boostix (" +
+                        installedVersion.ToString(3) + "). Установка более старой версии отменена.");
+                }
+                // Boostix is ordered first. Once a recognized active installation
+                // is found, a stale legacy directory must not override its version.
                 return;
             }
 
-            ValidateFileNotReparse(InstalledExe);
-            FileVersionInfo installedInfo = FileVersionInfo.GetVersionInfo(InstalledExe);
-            bool recognizedProduct =
-                string.Equals(
-                    installedInfo.ProductName,
-                    ProductName,
-                    StringComparison.Ordinal) ||
-                string.Equals(
-                    installedInfo.ProductName,
-                    ProductBrand.LegacyInstallDirectoryName,
-                    StringComparison.Ordinal);
-            if (!recognizedProduct)
-            {
-                InstallerDiagnostics.Write(
-                    "The installed executable has no recognized Boostix identity; " +
-                    "downgrade comparison is skipped for transactional repair.");
-                return;
-            }
-            if (IsDowngrade(installedInfo.FileVersion, ProductVersion + ".0"))
-            {
-                Version installedVersion = Version.Parse(installedInfo.FileVersion.Trim());
-                throw new InvalidOperationException(
-                    "На компьютере уже установлена более новая версия Boostix (" +
-                    installedVersion.ToString(3) + "). Установка более старой версии отменена.");
-            }
+            InstallerDiagnostics.Write(
+                "No installed executable has a recognized Boostix identity; " +
+                "downgrade comparison is skipped for transactional repair.");
         }
 
         private static bool IsDowngrade(string installedVersionText, string setupVersionText)

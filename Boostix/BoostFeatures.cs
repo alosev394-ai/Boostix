@@ -66,6 +66,9 @@ namespace Boostix
     {
         public bool AutoBoost;
         public bool CheckBeforeBoost;
+        public bool KeepDiscord;
+        public bool KeepEpic;
+        public bool KeepSteam;
         public bool KeepOneDrive;
         public bool KeepTeams;
         public bool KeepWallpaper;
@@ -77,6 +80,9 @@ namespace Boostix
             {
                 AutoBoost = AutoBoost,
                 CheckBeforeBoost = CheckBeforeBoost,
+                KeepDiscord = KeepDiscord,
+                KeepEpic = KeepEpic,
+                KeepSteam = KeepSteam,
                 KeepOneDrive = KeepOneDrive,
                 KeepTeams = KeepTeams,
                 KeepWallpaper = KeepWallpaper,
@@ -260,12 +266,17 @@ namespace Boostix
             if (BoostSystemMetrics.TryGetPerformanceSnapshot(out snapshot))
             {
                 AvailableMemoryEndBytes = snapshot.AvailablePhysicalBytes;
-                MinimumAvailableMemoryBytes = MinimumPositive(
-                    MinimumAvailableMemoryBytes,
-                    snapshot.AvailablePhysicalBytes);
-                MinimumCommitHeadroomBytes = MinimumPositive(
-                    MinimumCommitHeadroomBytes,
-                    snapshot.CommitHeadroomBytes);
+                bool firstMemorySample = MemorySamples == 0;
+                MinimumAvailableMemoryBytes = firstMemorySample
+                    ? snapshot.AvailablePhysicalBytes
+                    : Math.Min(
+                        MinimumAvailableMemoryBytes,
+                        snapshot.AvailablePhysicalBytes);
+                MinimumCommitHeadroomBytes = firstMemorySample
+                    ? snapshot.CommitHeadroomBytes
+                    : Math.Min(
+                        MinimumCommitHeadroomBytes,
+                        snapshot.CommitHeadroomBytes);
                 MemorySamples++;
             }
             else
@@ -284,18 +295,24 @@ namespace Boostix
             DiagnosticSamples++;
             if (snapshot.MemoryAvailable)
             {
+                bool firstMemorySample = MemorySamples == 0;
                 PhysicalMemoryTotalBytes = Math.Max(
                     PhysicalMemoryTotalBytes,
                     snapshot.PhysicalTotalBytes);
                 CommitLimitBytes = Math.Max(
                     CommitLimitBytes,
                     snapshot.CommitLimitBytes);
-                MinimumAvailableMemoryBytes = MinimumPositive(
-                    MinimumAvailableMemoryBytes,
-                    snapshot.PhysicalAvailableBytes);
-                MinimumCommitHeadroomBytes = MinimumPositive(
-                    MinimumCommitHeadroomBytes,
-                    snapshot.CommitHeadroomBytes);
+                MinimumAvailableMemoryBytes = firstMemorySample
+                    ? snapshot.PhysicalAvailableBytes
+                    : Math.Min(
+                        MinimumAvailableMemoryBytes,
+                        snapshot.PhysicalAvailableBytes);
+                MinimumCommitHeadroomBytes = firstMemorySample
+                    ? snapshot.CommitHeadroomBytes
+                    : Math.Min(
+                        MinimumCommitHeadroomBytes,
+                        snapshot.CommitHeadroomBytes);
+                MemorySamples++;
             }
 
             if (snapshot.PageFileAvailable)
@@ -412,15 +429,6 @@ namespace Boostix
             return total <= 0
                 ? 0
                 : (double)Math.Max(0, usage) / total;
-        }
-
-        private static long MinimumPositive(long current, long candidate)
-        {
-            if (candidate <= 0)
-            {
-                return current;
-            }
-            return current <= 0 ? candidate : Math.Min(current, candidate);
         }
 
         private static DiagnosticPressureLevel ParsePressure(string value)
@@ -902,13 +910,6 @@ namespace Boostix
         private static MemoryPressureReliefPolicyState defaultPolicyState =
             new MemoryPressureReliefPolicyState();
 
-        [DllImport("kernel32.dll")]
-        private static extern IntPtr GetCurrentProcess();
-
-        [DllImport("psapi.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool EmptyWorkingSet(IntPtr process);
-
         public static long GetNextDueTimestamp(long nowTimestamp)
         {
             long intervalTicks = Stopwatch.Frequency * (long)IntervalSeconds;
@@ -992,18 +993,13 @@ namespace Boostix
                 BoostSystemMetrics.TryGetPerformanceSnapshot(out result.Before);
             PopulateLegacySnapshotFields(result);
             result.ManagedHeapBeforeBytes = GC.GetTotalMemory(false);
-            GC.Collect(
-                GC.MaxGeneration,
-                GCCollectionMode.Forced,
-                true,
-                false);
             result.ManagedHeapAfterBytes = GC.GetTotalMemory(false);
             result.ReclaimedManagedHeapBytes = Math.Max(
                 0,
                 result.ManagedHeapBeforeBytes - result.ManagedHeapAfterBytes);
 
-            int errorCode;
-            bool nativeSucceeded = TryTrimCurrentProcessWorkingSet(out errorCode);
+            int errorCode = 0;
+            bool nativeSucceeded = false;
             result.NativeCallSucceeded = nativeSucceeded;
             result.NativeErrorCode = errorCode;
             bool afterAvailable =
@@ -1049,7 +1045,7 @@ namespace Boostix
             if (result.Status == MemoryPressureReliefStatus.Failed)
             {
                 result.Reason =
-                    "EmptyWorkingSet failed for the current process (Win32 " +
+                    "Legacy working-set maintenance is disabled (Win32 " +
                     result.NativeErrorCode.ToString(CultureInfo.InvariantCulture) +
                     "). Trigger: " + triggerReason;
             }
@@ -1101,25 +1097,6 @@ namespace Boostix
             lock (ReliefSync)
             {
                 defaultPolicyState = new MemoryPressureReliefPolicyState();
-            }
-        }
-
-        private static bool TryTrimCurrentProcessWorkingSet(out int errorCode)
-        {
-            errorCode = 0;
-            try
-            {
-                if (EmptyWorkingSet(GetCurrentProcess()))
-                {
-                    return true;
-                }
-                errorCode = Marshal.GetLastWin32Error();
-                return false;
-            }
-            catch
-            {
-                errorCode = Marshal.GetLastWin32Error();
-                return false;
             }
         }
 
@@ -1623,6 +1600,8 @@ namespace Boostix
 
                 string compact = (output ?? string.Empty).Trim();
                 bool maxFps = compact.IndexOf("MAX FPS", StringComparison.OrdinalIgnoreCase) >= 0;
+                bool boostixPerformance =
+                    compact.IndexOf("Boostix Performance", StringComparison.OrdinalIgnoreCase) >= 0;
                 bool highPerformance =
                     compact.IndexOf("High performance", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     compact.IndexOf("Высокая производительность", StringComparison.OrdinalIgnoreCase) >= 0;
@@ -1633,7 +1612,7 @@ namespace Boostix
                     Detail = string.IsNullOrWhiteSpace(compact)
                         ? "Активный план питания не удалось прочитать."
                         : compact,
-                    Severity = maxFps || highPerformance
+                    Severity = maxFps || boostixPerformance || highPerformance
                         ? BoostCheckSeverity.Pass
                         : BoostCheckSeverity.Info
                 });

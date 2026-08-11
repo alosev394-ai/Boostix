@@ -1099,16 +1099,13 @@ namespace Boostix
         private const int InstallerDownloadAttemptsPerSource = 2;
         private const int MaximumInstallerRedirects = 5;
 
-        private static readonly Color BackgroundColor = Color.FromRgb(22, 22, 22);
-        private static readonly Color TextColor = Color.FromRgb(244, 244, 244);
-        private static readonly Color MutedColor = Color.FromRgb(142, 142, 142);
-        private static readonly Color AccentColor = Color.FromRgb(
-            ProductBrand.AccentRed,
-            ProductBrand.AccentGreen,
-            ProductBrand.AccentBlue);
+        private static readonly Color BackgroundColor = BoostixDesignTokens.Background;
+        private static readonly Color TextColor = BoostixDesignTokens.Text;
+        private static readonly Color MutedColor = BoostixDesignTokens.MutedText;
+        private static readonly Color AccentColor = BoostixDesignTokens.Accent;
         // Light error text keeps WCAG AA contrast on the #161616 surface.
         // Destructive window controls retain the darker red fill separately.
-        private static readonly Color ErrorColor = Color.FromRgb(255, 102, 122);
+        private static readonly Color ErrorColor = BoostixDesignTokens.Error;
 
         private readonly Window owner;
         private readonly string[] arguments;
@@ -2746,16 +2743,16 @@ namespace Boostix
                             FindInstallerNetworkFailure(exception);
                         if (networkFailure != null)
                         {
-                            networkFailures.Add(new WebException(
-                                context,
-                                networkFailure,
-                                networkFailure.Status,
-                                networkFailure.Response));
+                            InstallerNetworkException capturedFailure =
+                                CaptureInstallerNetworkFailure(
+                                    context,
+                                    networkFailure);
+                            networkFailures.Add(capturedFailure);
                             Log(
                                 "Installer download network source failed: " +
-                                DescribeException(networkFailure));
+                                DescribeException(capturedFailure));
                             if (attempt < InstallerDownloadAttemptsPerSource &&
-                                IsTransientInstallerDownloadFailure(networkFailure))
+                                IsTransientInstallerDownloadFailure(capturedFailure))
                             {
                                 Thread.Sleep(500 * attempt);
                                 continue;
@@ -2905,7 +2902,45 @@ namespace Boostix
         private static bool IsTransientInstallerDownloadFailure(
             WebException exception)
         {
+            if (exception != null &&
+                exception.Status == WebExceptionStatus.ProtocolError)
+            {
+                int statusCode = GetWebExceptionHttpStatusCode(exception);
+                return statusCode == 408 ||
+                       statusCode == 429 ||
+                       (statusCode >= 500 && statusCode <= 599);
+            }
             return IsTransientManifestFailure(exception);
+        }
+
+        private static InstallerNetworkException CaptureInstallerNetworkFailure(
+            string context,
+            WebException exception)
+        {
+            if (exception == null)
+            {
+                throw new ArgumentNullException("exception");
+            }
+
+            int httpStatusCode = GetWebExceptionHttpStatusCode(exception);
+            WebResponse response = exception.Response;
+            if (response != null)
+            {
+                try
+                {
+                    response.Close();
+                }
+                catch
+                {
+                    // The status has already been captured. Releasing a failed
+                    // response is best-effort and must not hide the network error.
+                }
+            }
+            return new InstallerNetworkException(
+                context,
+                exception,
+                exception.Status,
+                httpStatusCode);
         }
 
         private static void ValidateDownloadedInstallerContent(
@@ -2944,58 +2979,104 @@ namespace Boostix
         {
             int lastReportedPercent = -1;
             ReportUpdateProgress(progress, UpdateProgressStage.Downloading, 0, update.Size);
-            using (HttpWebResponse response = OpenTrustedInstallerResponse(address))
+            using (HttpWebResponse response = OpenTrustedInstallerResponse(
+                address,
+                totalTimer))
             {
                 ValidateResponse(
                     response,
                     InstallerMaximumBytes,
                     update.Size,
                     response.ResponseUri.AbsoluteUri);
-                using (Stream source = response.GetResponseStream())
-                {
-                    byte[] buffer = new byte[65536];
-                    long total = 0;
-                    while (true)
+                int deadlineReached = 0;
+                int remainingMilliseconds =
+                    GetRemainingInstallerDownloadMilliseconds(totalTimer);
+                using (var deadlineTimer = new Timer(
+                    state =>
                     {
-                        if (totalTimer.ElapsedMilliseconds > DownloadTotalTimeoutMilliseconds)
+                        Interlocked.Exchange(ref deadlineReached, 1);
+                        try
                         {
-                            throw new WebException(
-                                "Installer download timed out.",
-                                WebExceptionStatus.Timeout);
+                            ((HttpWebResponse)state).Close();
                         }
-                        int read = source.Read(buffer, 0, buffer.Length);
-                        if (read <= 0)
+                        catch
                         {
-                            break;
                         }
-                        total += read;
-                        if (total > update.Size || total > InstallerMaximumBytes)
+                    },
+                    response,
+                    remainingMilliseconds,
+                    Timeout.Infinite))
+                {
+                    try
+                    {
+                        using (Stream source = response.GetResponseStream())
                         {
-                            throw new InvalidDataException(
-                                "Installer exceeds the declared size.");
-                        }
-                        destination.Write(buffer, 0, read);
-                        int percent = (int)(total * 100L / update.Size);
-                        if (percent != lastReportedPercent)
-                        {
-                            lastReportedPercent = percent;
-                            ReportUpdateProgress(
-                                progress,
-                                UpdateProgressStage.Downloading,
-                                total,
-                                update.Size);
+                            byte[] buffer = new byte[65536];
+                            long total = 0;
+                            while (true)
+                            {
+                                if (totalTimer.ElapsedMilliseconds >=
+                                    DownloadTotalTimeoutMilliseconds)
+                                {
+                                    throw new WebException(
+                                        "Installer download timed out.",
+                                        WebExceptionStatus.Timeout);
+                                }
+                                int read = source.Read(buffer, 0, buffer.Length);
+                                if (read <= 0)
+                                {
+                                    break;
+                                }
+                                total += read;
+                                if (total > update.Size ||
+                                    total > InstallerMaximumBytes)
+                                {
+                                    throw new InvalidDataException(
+                                        "Installer exceeds the declared size.");
+                                }
+                                destination.Write(buffer, 0, read);
+                                int percent = (int)(total * 100L / update.Size);
+                                if (percent != lastReportedPercent)
+                                {
+                                    lastReportedPercent = percent;
+                                    ReportUpdateProgress(
+                                        progress,
+                                        UpdateProgressStage.Downloading,
+                                        total,
+                                        update.Size);
+                                }
+                            }
+                            if (total != update.Size)
+                            {
+                                throw new InvalidDataException(
+                                    "Installer size does not match the manifest.");
+                            }
                         }
                     }
-                    if (total != update.Size)
+                    catch (Exception exception)
                     {
-                        throw new InvalidDataException(
-                            "Installer size does not match the manifest.");
+                        if (Interlocked.CompareExchange(
+                                ref deadlineReached,
+                                0,
+                                0) != 0 ||
+                            totalTimer.ElapsedMilliseconds >=
+                                DownloadTotalTimeoutMilliseconds)
+                        {
+                            throw new WebException(
+                                "Installer download exceeded its total time budget.",
+                                exception,
+                                WebExceptionStatus.Timeout,
+                                null);
+                        }
+                        throw;
                     }
                 }
             }
         }
 
-        private static HttpWebResponse OpenTrustedInstallerResponse(string address)
+        private static HttpWebResponse OpenTrustedInstallerResponse(
+            string address,
+            Stopwatch totalTimer)
         {
             string currentAddress = address;
             bool releaseSource = IsTrustedReleaseInstallerAddress(address);
@@ -3003,7 +3084,7 @@ namespace Boostix
             {
                 HttpWebRequest request = CreateRequest(
                     currentAddress,
-                    DownloadReadTimeoutMilliseconds);
+                    GetInstallerRequestTimeout(totalTimer));
                 HttpWebResponse response = (HttpWebResponse)request.GetResponse();
                 if (!IsRedirectStatus(response.StatusCode))
                 {
@@ -3040,6 +3121,42 @@ namespace Boostix
                 currentAddress = redirected.AbsoluteUri;
             }
             throw new InvalidDataException("Too many installer redirects.");
+        }
+
+        private static int GetInstallerRequestTimeout(Stopwatch totalTimer)
+        {
+            return Math.Min(
+                DownloadReadTimeoutMilliseconds,
+                GetRemainingInstallerDownloadMilliseconds(totalTimer));
+        }
+
+        private static int GetRemainingInstallerDownloadMilliseconds(
+            Stopwatch totalTimer)
+        {
+            if (totalTimer == null)
+            {
+                throw new ArgumentNullException("totalTimer");
+            }
+            return CalculateRemainingInstallerDownloadMilliseconds(
+                totalTimer.ElapsedMilliseconds);
+        }
+
+        private static int CalculateRemainingInstallerDownloadMilliseconds(
+            long elapsedMilliseconds)
+        {
+            if (elapsedMilliseconds < 0)
+            {
+                throw new ArgumentOutOfRangeException("elapsedMilliseconds");
+            }
+            long remaining =
+                DownloadTotalTimeoutMilliseconds - elapsedMilliseconds;
+            if (remaining <= 0)
+            {
+                throw new WebException(
+                    "Installer download exceeded its total time budget.",
+                    WebExceptionStatus.Timeout);
+            }
+            return (int)Math.Min(remaining, int.MaxValue);
         }
 
         private static bool IsRedirectStatus(HttpStatusCode status)
@@ -3233,9 +3350,20 @@ namespace Boostix
             long? expectedBytes,
             string expectedAddress)
         {
+            if (response.StatusCode == HttpStatusCode.PartialContent ||
+                !string.IsNullOrWhiteSpace(response.Headers["Content-Range"]))
+            {
+                throw new InvalidDataException(
+                    "Partial HTTP responses are not accepted for update files.");
+            }
             if (response.StatusCode != HttpStatusCode.OK)
             {
-                throw new WebException("Unexpected HTTP status: " + (int)response.StatusCode + ".");
+                throw new InstallerNetworkException(
+                    "Unexpected HTTP status: " +
+                        (int)response.StatusCode + ".",
+                    null,
+                    WebExceptionStatus.ProtocolError,
+                    (int)response.StatusCode);
             }
             if (response.ResponseUri == null ||
                 !string.Equals(response.ResponseUri.AbsoluteUri, expectedAddress, StringComparison.Ordinal))
@@ -3485,7 +3613,7 @@ namespace Boostix
                 Width = 300,
                 Height = 4,
                 CornerRadius = new CornerRadius(2),
-                Background = new SolidColorBrush(Color.FromRgb(42, 42, 42)),
+                Background = new SolidColorBrush(BoostixDesignTokens.Divider),
                 ClipToBounds = true
             };
             var indicator = new Border
@@ -3579,7 +3707,7 @@ namespace Boostix
                 Width = 300,
                 Height = 5,
                 CornerRadius = new CornerRadius(2.5),
-                Background = new SolidColorBrush(Color.FromRgb(42, 42, 42)),
+                Background = new SolidColorBrush(BoostixDesignTokens.Divider),
                 ClipToBounds = true,
                 HorizontalAlignment = HorizontalAlignment.Center
             };
@@ -3870,8 +3998,10 @@ namespace Boostix
 
         private Button MakeActionButton(string text, bool accentOnHover)
         {
-            Color baseColor = Color.FromRgb(37, 37, 37);
-            Color hoverColor = accentOnHover ? AccentColor : Color.FromRgb(49, 49, 49);
+            Color baseColor = BoostixDesignTokens.SurfaceRaised;
+            Color hoverColor = accentOnHover
+                ? AccentColor
+                : BoostixDesignTokens.Hover;
             var background = new SolidColorBrush(baseColor);
             var translate = new TranslateTransform();
             var button = new Button

@@ -10,9 +10,16 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $requiredTests = @(
+    'Test-AccessibilityTheme.ps1',
     'Test-ActiveBoostMonitor.ps1',
     'Test-ActiveMemoryMaintenance.ps1',
     'Test-ApplicationReliability.ps1',
+    'Test-BackgroundImpactSafety.ps1',
+    'Test-GameTargetProfiles.ps1',
+    'Test-SessionGuard.ps1',
+    'Test-SessionGuardIntegrationBoundary.ps1',
+    'Test-SessionPowerPlan.ps1',
+    'Test-SessionPowerPlanAsyncBoundary.ps1',
     'Test-AtomicFileReplace.ps1',
     'Test-BoostCenterFeatures.ps1',
     'Test-BoostCenterUi.ps1',
@@ -31,7 +38,10 @@ $requiredTests = @(
     'Test-MemoryPressureRelief.ps1',
     'Test-OptimizationElevationSafety.ps1',
     'Test-PerformanceCapture.ps1',
+    'Test-PerformanceProofAndCrash.ps1',
+    'Test-PerformanceProofCoordinator.ps1',
     'Test-PowerPlanProcessTimeout.ps1',
+    'Test-RecoveryWatchdogIdentity.ps1',
     'Test-ReleaseUpdateChannel.ps1',
     'Test-ResponsiveLayout.ps1',
     'Test-SigningAndCiContracts.ps1',
@@ -39,6 +49,7 @@ $requiredTests = @(
     'Test-UninstallCleanupSafety.ps1',
     'Test-UpdaterFailureRecovery.ps1',
     'Test-UpdaterInstallerValidation.ps1',
+    'Test-UpdateTransportReliability.ps1',
     'Test-UpdateRollbackSafety.ps1'
 )
 

@@ -47,6 +47,13 @@ $placementMethod = $windowType.GetMethod(
 if (-not $placementMethod) {
     throw 'Compiled app does not expose the pure per-monitor placement calculation.'
 }
+$placementForSizeMethod = $windowType.GetMethod(
+    'CalculateMonitorPlacementForSize',
+    [Reflection.BindingFlags]::NonPublic -bor
+        [Reflection.BindingFlags]::Static)
+if (-not $placementForSizeMethod) {
+    throw 'Compiled app does not expose size-aware Center placement calculation.'
+}
 
 $productionWindow = $null
 try {
@@ -160,10 +167,41 @@ function Invoke-MonitorPlacement {
             $Center))
 }
 
+function Invoke-MonitorPlacementForSize {
+    param(
+        [int]$WorkLeft,
+        [int]$WorkTop,
+        [int]$WorkRight,
+        [int]$WorkBottom,
+        [uint32]$DpiX,
+        [uint32]$DpiY,
+        [int]$CurrentLeft,
+        [int]$CurrentTop,
+        [bool]$Center,
+        [double]$LayoutWidthDip,
+        [double]$LayoutHeightDip
+    )
+    return [int[]]$placementForSizeMethod.Invoke(
+        $null,
+        [object[]]@(
+            $WorkLeft,
+            $WorkTop,
+            $WorkRight,
+            $WorkBottom,
+            $DpiX,
+            $DpiY,
+            $CurrentLeft,
+            $CurrentTop,
+            $Center,
+            $LayoutWidthDip,
+            $LayoutHeightDip))
+}
+
 foreach ($desktopCase in @(
     @{ Dpi = [uint32]96; Width = 460; Height = 552; Compact = 0 },
     @{ Dpi = [uint32]120; Width = 575; Height = 690; Compact = 0 },
     @{ Dpi = [uint32]144; Width = 690; Height = 828; Compact = 0 },
+    @{ Dpi = [uint32]168; Width = 805; Height = 966; Compact = 0 },
     @{ Dpi = [uint32]192; Width = 920; Height = 984; Compact = 1 }
 )) {
     $placement = Invoke-MonitorPlacement `
@@ -189,6 +227,41 @@ foreach ($desktopCase in @(
         [Math]::Abs(
             $heightDip - $(if ($desktopCase.Compact) { 492.0 } else { 552.0 })) -gt 0.001) {
         throw "1920x1080 placement introduced fractional DIP scaling at $($desktopCase.Dpi) DPI."
+    }
+}
+
+foreach ($centerCase in @(
+    @{ Dpi = [uint32]96; Width = 620; Height = 552; Compact = 0 },
+    @{ Dpi = [uint32]120; Width = 775; Height = 690; Compact = 0 },
+    @{ Dpi = [uint32]144; Width = 930; Height = 828; Compact = 0 },
+    @{ Dpi = [uint32]168; Width = 1085; Height = 966; Compact = 0 },
+    @{ Dpi = [uint32]192; Width = 1240; Height = 984; Compact = 1 }
+)) {
+    $placement = Invoke-MonitorPlacementForSize `
+        -WorkLeft 0 `
+        -WorkTop 0 `
+        -WorkRight 1920 `
+        -WorkBottom 1080 `
+        -DpiX $centerCase.Dpi `
+        -DpiY $centerCase.Dpi `
+        -CurrentLeft 0 `
+        -CurrentTop 0 `
+        -Center $true `
+        -LayoutWidthDip 620 `
+        -LayoutHeightDip 552
+    if ($placement[2] -ne $centerCase.Width -or
+        $placement[3] -ne $centerCase.Height -or
+        $placement[4] -ne $centerCase.Compact) {
+        throw (
+            "620 DIP Center placement at $($centerCase.Dpi) DPI was " +
+            "$($placement -join ', ').")
+    }
+    $widthDip = $placement[2] * 96.0 / $centerCase.Dpi
+    $heightDip = $placement[3] * 96.0 / $centerCase.Dpi
+    $expectedHeightDip = if ($centerCase.Compact) { 492.0 } else { 552.0 }
+    if ([Math]::Abs($widthDip - 620.0) -gt 0.001 -or
+        [Math]::Abs($heightDip - $expectedHeightDip) -gt 0.001) {
+        throw "Boost Center placement introduced fractional DIP scaling at $($centerCase.Dpi) DPI."
     }
 }
 
@@ -365,6 +438,23 @@ function Find-ById {
     throw "UI element did not appear: $AutomationId"
 }
 
+function Assert-ElementAbsent {
+    param(
+        [Windows.Automation.AutomationElement]$Root,
+        [string]$AutomationId
+    )
+
+    $condition = New-Object Windows.Automation.PropertyCondition(
+        [Windows.Automation.AutomationElement]::AutomationIdProperty,
+        $AutomationId)
+    $element = $Root.FindFirst(
+        [Windows.Automation.TreeScope]::Descendants,
+        $condition)
+    if ($element -and -not $element.Current.IsOffscreen) {
+        throw "Obsolete main-window element is still exposed: $AutomationId"
+    }
+}
+
 function Invoke-Element {
     param([Windows.Automation.AutomationElement]$Element)
 
@@ -376,12 +466,13 @@ function Invoke-Element {
 function Get-NormalizedBounds {
     param(
         [Windows.Automation.AutomationElement]$Element,
-        [Windows.Automation.AutomationElement]$Window
+        [Windows.Automation.AutomationElement]$Window,
+        [double]$DesignWidth = 460.0
     )
 
     $windowBounds = $Window.Current.BoundingRectangle
     $bounds = $Element.Current.BoundingRectangle
-    $factor = 460.0 / $windowBounds.Width
+    $factor = $DesignWidth / $windowBounds.Width
     return [pscustomobject]@{
         Left = ($bounds.Left - $windowBounds.Left) * $factor
         Top = ($bounds.Top - $windowBounds.Top) * $factor
@@ -390,6 +481,34 @@ function Get-NormalizedBounds {
         RightInset = ($windowBounds.Right - $bounds.Right) * $factor
         BottomInset = ($windowBounds.Bottom - $bounds.Bottom) * $factor
     }
+}
+
+function Assert-CenterTabContract {
+    param([Windows.Automation.AutomationElement]$Element)
+
+    Assert-KeyboardFocusable $Element 'Boost Center tab'
+    if ($Element.Current.ControlType -ne
+        [Windows.Automation.ControlType]::TabItem) {
+        throw "Boost Center tab is not exposed as UIA TabItem: $($Element.Current.AutomationId)"
+    }
+    $pattern = $null
+    if (-not $Element.TryGetCurrentPattern(
+            [Windows.Automation.SelectionItemPattern]::Pattern,
+            [ref]$pattern)) {
+        throw "Boost Center tab lacks SelectionItemPattern: $($Element.Current.AutomationId)"
+    }
+}
+
+function Select-CenterTab {
+    param([Windows.Automation.AutomationElement]$Element)
+
+    $pattern = $null
+    if (-not $Element.TryGetCurrentPattern(
+            [Windows.Automation.SelectionItemPattern]::Pattern,
+            [ref]$pattern)) {
+        throw "Boost Center tab lacks SelectionItemPattern: $($Element.Current.AutomationId)"
+    }
+    ([Windows.Automation.SelectionItemPattern]$pattern).Select()
 }
 
 function Assert-Between {
@@ -439,7 +558,7 @@ function Wait-ForFocusedId {
     throw "Keyboard focus was '$actualId', expected '$AutomationId'."
 }
 
-$scales = @(1.0, 1.25, 1.5, 2.0)
+$scales = @(1.0, 1.25, 1.5, 1.75, 2.0)
 $results = @()
 foreach ($scale in $scales) {
     $process = $null
@@ -465,17 +584,20 @@ foreach ($scale in $scales) {
         $minimize = Find-ById $window 'Boostix.Minimize'
         $close = Find-ById $window 'Boostix.Close'
         $boost = Find-ById $window 'Boostix.Activate' 20000
-        $discord = Find-ById $window 'Boostix.Keep.DISCORD'
-        $epic = Find-ById $window 'Boostix.Keep.EPICGAMES'
-        $steam = Find-ById $window 'Boostix.Keep.STEAM'
+        $target = Find-ById $window 'Boostix.Target.Select'
         $watermark = Find-ById $window 'Boostix.Watermark' 10000 -AllowDisabled
+
+        foreach ($obsoleteId in @(
+            'Boostix.Keep.DISCORD',
+            'Boostix.Keep.EPICGAMES',
+            'Boostix.Keep.STEAM')) {
+            Assert-ElementAbsent $window $obsoleteId
+        }
 
         foreach ($pair in @(
             @($gear, 'Settings button'),
             @($boost, 'Boost button'),
-            @($discord, 'Discord switch'),
-            @($epic, 'Epic Games switch'),
-            @($steam, 'Steam switch'),
+            @($target, 'Exact game target selector'),
             @($minimize, 'Minimize button'),
             @($close, 'Close button'))) {
             Assert-KeyboardFocusable $pair[0] $pair[1]
@@ -483,8 +605,8 @@ foreach ($scale in $scales) {
 
         foreach ($chrome in @($gear, $minimize, $close)) {
             $chromeBounds = Get-NormalizedBounds $chrome $window
-            Assert-Between $chromeBounds.Width 31 33 'Title control width'
-            Assert-Between $chromeBounds.Height 31 33 'Title control height'
+            Assert-Between $chromeBounds.Width 30.5 33.5 'Title control width'
+            Assert-Between $chromeBounds.Height 30.5 33.5 'Title control height'
             Assert-Between $chromeBounds.Top 8.5 13.5 'Title control top inset'
         }
 
@@ -500,21 +622,27 @@ foreach ($scale in $scales) {
             throw 'Version text overlaps the minimize button.'
         }
 
-        foreach ($switch in @($discord, $epic, $steam)) {
-            $switchBounds = Get-NormalizedBounds $switch $window
-            Assert-Between $switchBounds.Height 37 39 'Main switch row height'
-            if ($switchBounds.RightInset -lt 24) {
-                throw "Main switch entered the 24 DIP right safe area at scale $scale."
-            }
+        $targetBounds = Get-NormalizedBounds $target $window
+        Assert-Between $targetBounds.Height 42.5 45.5 'Exact target selector height'
+        if ($targetBounds.Left -lt 52 -or $targetBounds.RightInset -lt 52) {
+            throw (
+                "Exact target selector left its centered safe area at scale $scale " +
+                "(left $($targetBounds.Left), right $($targetBounds.RightInset) DIP).")
         }
-        $steamBounds = Get-NormalizedBounds $steam $window
-        if ($steamBounds.BottomInset -lt 24) {
-            throw "Main switch group has less than 24 DIP bottom breathing room."
+        if ($target.Current.ControlType -ne
+            [Windows.Automation.ControlType]::Button) {
+            throw 'Exact game target selector is not exposed as a UIA button.'
+        }
+        if ([string]::IsNullOrWhiteSpace($target.Current.HelpText) -or
+            $target.Current.HelpText -notmatch 'EXE') {
+            throw 'Exact game target selector does not explain its executable binding.'
         }
         $watermarkBounds = Get-NormalizedBounds $watermark $window
-        if ($watermarkBounds.RightInset -lt 24 -or
-            $watermarkBounds.BottomInset -lt 24) {
-            throw 'Watermark left its 24 DIP footer safe area.'
+        if ($watermarkBounds.RightInset -lt 22.5 -or
+            $watermarkBounds.BottomInset -lt 22.5) {
+            throw (
+                "Watermark left its 24 DIP footer safe area at scale $scale " +
+                "(right $($watermarkBounds.RightInset), bottom $($watermarkBounds.BottomInset) DIP).")
         }
 
         # Verify the explicit tab order once; scaling does not change focus order.
@@ -535,24 +663,34 @@ foreach ($scale in $scales) {
             [Windows.Forms.SendKeys]::SendWait('{TAB}')
             Wait-ForFocusedId 'Boostix.Activate' 1000
             [Windows.Forms.SendKeys]::SendWait('{TAB}')
-            Wait-ForFocusedId 'Boostix.Keep.DISCORD' 1000
-            [Windows.Forms.SendKeys]::SendWait('{TAB}')
-            Wait-ForFocusedId 'Boostix.Keep.EPICGAMES' 1000
-            [Windows.Forms.SendKeys]::SendWait('{TAB}')
-            Wait-ForFocusedId 'Boostix.Keep.STEAM' 1000
+            Wait-ForFocusedId 'Boostix.Target.Select' 1000
         }
 
+        $mainPixelsPerDip = $windowBounds.Width / 460.0
         Invoke-Element $gear
         $readiness = Find-ById $window 'Boostix.Center.Tab.Readiness'
+        $impact = Find-ById $window 'Boostix.Center.Tab.Impact'
         $report = Find-ById $window 'Boostix.Center.Tab.Report'
-        $history = Find-ById $window 'Boostix.Center.Tab.History'
+        $profiles = Find-ById $window 'Boostix.Center.Tab.Profiles'
         $settings = Find-ById $window 'Boostix.Center.Tab.Settings'
-        foreach ($tab in @($readiness, $report, $history, $settings)) {
-            Assert-KeyboardFocusable $tab 'Boost Center tab'
+        foreach ($tab in @($readiness, $impact, $report, $profiles, $settings)) {
+            Assert-CenterTabContract $tab
+            $tabBounds = Get-NormalizedBounds $tab $window 620.0
+            Assert-Between $tabBounds.Height 38 45.5 'Boost Center tab height'
+        }
+        $centerWindowBounds = $window.Current.BoundingRectangle
+        $centerWidthDip = $centerWindowBounds.Width / $mainPixelsPerDip
+        Assert-Between $centerWidthDip 617 623 'Expanded Boost Center width'
+
+        $centerTarget = Find-ById $window 'Boostix.Center.SelectTarget'
+        $centerTargetBounds = Get-NormalizedBounds $centerTarget $window 620.0
+        Assert-Between $centerTargetBounds.Height 38 42 'Boost Center target action height'
+        if ($centerTargetBounds.Left -lt 24 -or $centerTargetBounds.RightInset -lt 24) {
+            throw 'Boost Center exact-target action is clipped.'
         }
 
         $stopwatch = [Diagnostics.Stopwatch]::StartNew()
-        Invoke-Element $report
+        Select-CenterTab $report
         if ([System.Windows.SystemParameters]::ClientAreaAnimation) {
             Wait-ForFocusedId 'Boostix.Center.ReportBenchmark' 1500
             $stopwatch.Stop()
@@ -563,12 +701,12 @@ foreach ($scale in $scales) {
                 'Directional report transition'
         }
 
-        Invoke-Element $settings
+        Select-CenterTab $settings
         $setting = Find-ById $window 'Boostix.Center.Setting.0'
         # The new page enters from the right by design. Measure the permanent
         # scroll/toggle gutter only after the directional transition settles.
         Start-Sleep -Milliseconds ($transitionMilliseconds + 40)
-        $settingBounds = Get-NormalizedBounds $setting $window
+        $settingBounds = Get-NormalizedBounds $setting $window 620.0
         if ($settingBounds.RightInset -lt 36) {
             throw "Boost Center switch entered the scroll/toggle safe gutter."
         }
@@ -584,8 +722,8 @@ foreach ($scale in $scales) {
         }
 
         $restore = Find-ById $window 'Boostix.Center.Restore'
-        $restoreBounds = Get-NormalizedBounds $restore $window
-        $watermarkBounds = Get-NormalizedBounds $watermark $window
+        $restoreBounds = Get-NormalizedBounds $restore $window 620.0
+        $watermarkBounds = Get-NormalizedBounds $watermark $window 620.0
         $horizontalOverlap =
             $restoreBounds.Left -lt ($watermarkBounds.Left + $watermarkBounds.Width) -and
             ($restoreBounds.Left + $restoreBounds.Width) -gt $watermarkBounds.Left
@@ -625,15 +763,15 @@ try {
     if ($compactHeightDip -gt 500) {
         throw "Compact layout height was $compactHeightDip; expected at most 500 DIP."
     }
-    $compactSteam = Find-ById `
+    $compactTarget = Find-ById `
         $compactWindow `
-        'Boostix.Keep.STEAM' `
+        'Boostix.Target.Select' `
         15000
-    $compactSteamBounds = Get-NormalizedBounds `
-        $compactSteam `
+    $compactTargetBounds = Get-NormalizedBounds `
+        $compactTarget `
         $compactWindow
-    if ($compactSteamBounds.BottomInset -lt 12) {
-        throw 'Compact layout clipped the final preference switch.'
+    if ($compactTargetBounds.BottomInset -lt 62) {
+        throw 'Compact layout clipped the exact game target selector or live metrics.'
     }
     $compactWatermark = Find-ById `
         $compactWindow `
@@ -643,22 +781,22 @@ try {
     $compactWatermarkBounds = Get-NormalizedBounds `
         $compactWatermark `
         $compactWindow
-    if ($compactWatermarkBounds.RightInset -lt 24 -or
-        $compactWatermarkBounds.BottomInset -lt 24) {
+    if ($compactWatermarkBounds.RightInset -lt 22.5 -or
+        $compactWatermarkBounds.BottomInset -lt 22.5) {
         throw 'Compact layout moved the watermark outside its 24 DIP footer safe area.'
     }
     $compactHorizontalOverlap =
-        $compactSteamBounds.Left -lt
+        $compactTargetBounds.Left -lt
             ($compactWatermarkBounds.Left + $compactWatermarkBounds.Width) -and
-        ($compactSteamBounds.Left + $compactSteamBounds.Width) -gt
+        ($compactTargetBounds.Left + $compactTargetBounds.Width) -gt
             $compactWatermarkBounds.Left
     $compactVerticalOverlap =
-        $compactSteamBounds.Top -lt
+        $compactTargetBounds.Top -lt
             ($compactWatermarkBounds.Top + $compactWatermarkBounds.Height) -and
-        ($compactSteamBounds.Top + $compactSteamBounds.Height) -gt
+        ($compactTargetBounds.Top + $compactTargetBounds.Height) -gt
             $compactWatermarkBounds.Top
     if ($compactHorizontalOverlap -and $compactVerticalOverlap) {
-        throw 'Compact layout overlaps the final preference switch and watermark.'
+        throw 'Compact layout overlaps the exact game target selector and watermark.'
     }
 }
 finally {
@@ -690,9 +828,7 @@ try {
     foreach ($automationId in @(
         'Boostix.OpenCenter',
         'Boostix.Activate',
-        'Boostix.Keep.DISCORD',
-        'Boostix.Keep.EPICGAMES',
-        'Boostix.Keep.STEAM',
+        'Boostix.Target.Select',
         'Boostix.Close')) {
         $element = Find-ById $ultraWindow $automationId 15000
         $bounds = $element.Current.BoundingRectangle
@@ -771,4 +907,4 @@ foreach ($motionSourcePath in @(
     }
 }
 
-"Responsive layout test passed: $($results -join ', '); crisp 1920x1080 100/125/150/200% placement, per-monitor mixed-DPI compact reflow, reduced motion, keyboard focus, gutters, overlay and $transitionMilliseconds ms motion verified."
+"Responsive layout test passed: $($results -join ', '); 460 DIP main and 620 DIP Center remain unclipped at 1920x1080 100/125/150/175/200%, with exact-target focus order, UIA tabs, mixed-DPI compact reflow, reduced motion, gutters and $transitionMilliseconds ms motion verified."

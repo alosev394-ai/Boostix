@@ -170,7 +170,7 @@ internal static class ForeignProgram { private static void Main() { } }
         -Fragment 'InstallWithSystemTransactionGuard(createDesktopShortcut, progress);' `
         -Scenario 'damaged installations must use atomic payload replacement'
     Assert-SourceContains `
-        -Fragment 'ValidateFileNotReparse(InstalledExe); FileVersionInfo installedInfo' `
+        -Fragment 'ValidateFileNotReparse(candidate); FileVersionInfo installedInfo' `
         -Scenario 'repair must still refuse a redirected installed executable'
     Assert-SourceContains `
         -Fragment 'downgrade comparison is skipped for transactional repair.' `

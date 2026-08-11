@@ -10,9 +10,13 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $utf8NoBom = New-Object Text.UTF8Encoding($false)
+$strictUtf8NoBom = New-Object Text.UTF8Encoding($false, $true)
 $systemDirectory = [IO.Path]::GetFullPath([Environment]::SystemDirectory)
 $programDataRoot = [IO.Path]::GetFullPath([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData))
 if (-not $systemDirectory -or -not $programDataRoot) { throw 'Trusted Windows security roots could not be resolved from the OS.' }
+$boostixProgramDataRoot = Join-Path $programDataRoot 'Boostix'
+$sessionPowerPlanRoot = Join-Path $boostixProgramDataRoot 'SessionPowerPlan'
+$trustedPowerPlanPath = Join-Path $sessionPowerPlanRoot 'trusted-plan.json'
 $boostixStateRoot = Join-Path $programDataRoot 'BoostixOptimization'
 $legacyStateRoot = Join-Path $programDataRoot 'CodexGamingOptimization'
 $stateRoot = $boostixStateRoot
@@ -37,6 +41,7 @@ if (-not $currentUserSid -or $currentUserSid.Value -ine $expectedIdentitySid.Val
 }
 $administratorsSid = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')
 $systemSid = New-Object Security.Principal.SecurityIdentifier('S-1-5-18')
+$usersSid = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-545')
 $storageHadUntrustedWriteBeforeProtection = $false
 $untrustedPointerWasDiscarded = $false
 
@@ -330,6 +335,171 @@ function Write-ProtectedJsonAtomic {
     Write-ProtectedTextAtomic -Path $Path -Text ($Value | ConvertTo-Json -Depth $Depth)
 }
 
+function New-TrustedPowerPlanFileSystemSecurity {
+    param([switch]$Directory)
+    $security = if ($Directory) {
+        New-Object Security.AccessControl.DirectorySecurity
+    }
+    else { New-Object Security.AccessControl.FileSecurity }
+    $security.SetOwner($administratorsSid)
+    $security.SetAccessRuleProtection($true, $false)
+    if ($Directory) {
+        $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+            [Security.AccessControl.InheritanceFlags]::ObjectInherit
+        $propagation = [Security.AccessControl.PropagationFlags]::None
+        $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($systemSid, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, $propagation, [Security.AccessControl.AccessControlType]::Allow)))
+        $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($administratorsSid, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, $propagation, [Security.AccessControl.AccessControlType]::Allow)))
+        $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($usersSid, [Security.AccessControl.FileSystemRights]::ReadAndExecute, $inheritance, $propagation, [Security.AccessControl.AccessControlType]::Allow)))
+    }
+    else {
+        $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($systemSid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow)))
+        $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($administratorsSid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow)))
+        $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($usersSid, [Security.AccessControl.FileSystemRights]::ReadAndExecute, [Security.AccessControl.AccessControlType]::Allow)))
+    }
+    return $security
+}
+
+function Set-TrustedPowerPlanDirectorySecurity {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $wasExisting = Test-Path -LiteralPath $Path
+    if (-not $wasExisting) { [void][IO.Directory]::CreateDirectory($Path) }
+    Assert-NoReparsePath -Path $Path -StopAt $programDataRoot
+    $existing = [IO.Directory]::GetAccessControl($Path)
+    if ($wasExisting -and ((-not (Test-TrustedOwner -Security $existing)) -or
+        (Test-HasUntrustedWriteAce -Security $existing))) {
+        throw "Existing session power-plan directory is not trustworthy: $Path"
+    }
+    [IO.Directory]::SetAccessControl($Path, (New-TrustedPowerPlanFileSystemSecurity -Directory))
+    Assert-TrustedSessionPowerPlanDirectory -Path $Path
+}
+
+function Set-TrustedPowerPlanFileSecurity {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    Assert-NoReparsePath -Path $Path -StopAt $programDataRoot
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Trusted session power-plan file is missing: $Path"
+    }
+    [IO.File]::SetAccessControl($Path, (New-TrustedPowerPlanFileSystemSecurity))
+    $verified = [IO.File]::GetAccessControl($Path)
+    if (-not $verified.AreAccessRulesProtected -or
+        -not (Test-TrustedOwner -Security $verified) -or
+        (Test-HasUntrustedWriteAce -Security $verified)) {
+        throw "Unable to enforce trusted session power-plan file ACL: $Path"
+    }
+}
+
+function Assert-TrustedSessionPowerPlanDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    Assert-NoReparsePath -Path $Path -StopAt $programDataRoot
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw "Session power-plan directory is missing: $Path"
+    }
+    $security = [IO.Directory]::GetAccessControl($Path)
+    if (-not $security.AreAccessRulesProtected -or
+        -not (Test-TrustedOwner -Security $security) -or
+        (Test-HasUntrustedWriteAce -Security $security)) {
+        throw "Session power-plan directory has untrusted owner/write access: $Path"
+    }
+}
+
+function Initialize-SessionPowerPlanStorage {
+    foreach ($existingDirectory in @($boostixProgramDataRoot, $sessionPowerPlanRoot)) {
+        if (-not (Test-Path -LiteralPath $existingDirectory)) { continue }
+        Assert-TrustedSessionPowerPlanDirectory -Path $existingDirectory
+    }
+    Set-TrustedPowerPlanDirectorySecurity -Path $boostixProgramDataRoot
+    Set-TrustedPowerPlanDirectorySecurity -Path $sessionPowerPlanRoot
+    Assert-TrustedSessionPowerPlanDirectory -Path $boostixProgramDataRoot
+    Assert-TrustedSessionPowerPlanDirectory -Path $sessionPowerPlanRoot
+}
+
+function Get-CanonicalTrustedPowerPlanJson {
+    param([Parameter(Mandatory = $true)][string]$Guid)
+    if (-not (Test-GuidText -Value $Guid)) {
+        throw 'Trusted power-plan GUID is not canonical D format.'
+    }
+    return '{"version":1,"planName":"Boostix Performance","planGuid":"' +
+        $Guid.ToLowerInvariant() + '"}'
+}
+
+function Get-TrustedPowerPlanConfiguration {
+    foreach ($directory in @($boostixProgramDataRoot, $sessionPowerPlanRoot)) {
+        if (Test-Path -LiteralPath $directory) {
+            Assert-TrustedSessionPowerPlanDirectory -Path $directory
+        }
+    }
+    $trustedItem = Get-Item -LiteralPath $trustedPowerPlanPath -Force -ErrorAction SilentlyContinue
+    if (-not $trustedItem) { return $null }
+    Assert-NoReparsePath -Path $trustedPowerPlanPath -StopAt $programDataRoot
+    if (-not (Test-Path -LiteralPath $trustedPowerPlanPath -PathType Leaf)) {
+        throw 'Trusted power-plan state is not a regular file.'
+    }
+    $security = [IO.File]::GetAccessControl($trustedPowerPlanPath)
+    if (-not $security.AreAccessRulesProtected -or
+        -not (Test-TrustedOwner -Security $security) -or
+        (Test-HasUntrustedWriteAce -Security $security)) {
+        throw 'Trusted power-plan state has an untrusted owner or writable ACL.'
+    }
+    $bytes = [IO.File]::ReadAllBytes($trustedPowerPlanPath)
+    if ($bytes.Length -le 0 -or $bytes.Length -gt 512 -or
+        ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and
+         $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) {
+        throw 'Trusted power-plan state has an invalid size or UTF-8 BOM.'
+    }
+    $text = $strictUtf8NoBom.GetString($bytes)
+    $match = [regex]::Match(
+        $text,
+        '^\{"version":1,"planName":"Boostix Performance","planGuid":"([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})"\}$',
+        [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+    if (-not $match.Success -or -not (Test-GuidText -Value $match.Groups[1].Value) -or
+        $text -cne (Get-CanonicalTrustedPowerPlanJson -Guid $match.Groups[1].Value)) {
+        throw 'Trusted power-plan JSON is corrupt or non-canonical.'
+    }
+    return [pscustomobject]@{
+        Version = 1
+        PlanName = 'Boostix Performance'
+        PlanGuid = $match.Groups[1].Value
+        CanonicalJson = $text
+    }
+}
+
+function Publish-TrustedPowerPlanConfiguration {
+    param([Parameter(Mandatory = $true)][string]$Guid)
+    $canonicalGuid = if (Test-GuidText -Value $Guid) {
+        ([Guid]$Guid).ToString('D').ToLowerInvariant()
+    }
+    else {
+        throw 'Trusted power-plan GUID is invalid.'
+    }
+    $existing = Get-TrustedPowerPlanConfiguration
+    if ($existing) {
+        if ([string]$existing.PlanGuid -cne $canonicalGuid) {
+            throw 'An external trusted power-plan configuration already owns another GUID.'
+        }
+        return [pscustomobject]@{ Created = $false; PlanGuid = $canonicalGuid }
+    }
+
+    Initialize-SessionPowerPlanStorage
+    # Re-check after directory creation/ACL hardening to close the existence race.
+    $existing = Get-TrustedPowerPlanConfiguration
+    if ($existing) {
+        if ([string]$existing.PlanGuid -cne $canonicalGuid) {
+            throw 'Trusted power-plan state changed before publication.'
+        }
+        return [pscustomobject]@{ Created = $false; PlanGuid = $canonicalGuid }
+    }
+
+    $canonicalJson = Get-CanonicalTrustedPowerPlanJson -Guid $canonicalGuid
+    Write-TextAtomic -Path $trustedPowerPlanPath -Text $canonicalJson
+    Set-TrustedPowerPlanFileSecurity -Path $trustedPowerPlanPath
+    $verified = Get-TrustedPowerPlanConfiguration
+    if (-not $verified -or [string]$verified.PlanGuid -cne $canonicalGuid -or
+        [string]$verified.CanonicalJson -cne $canonicalJson) {
+        throw 'Trusted power-plan state verification failed after atomic publication.'
+    }
+    return [pscustomobject]@{ Created = $true; PlanGuid = $canonicalGuid }
+}
+
 function Initialize-ProtectedStateStorage {
     foreach ($existingDirectory in @($stateRoot, $backupRoot)) {
         if (-not (Test-Path -LiteralPath $existingDirectory -PathType Container)) { continue }
@@ -467,6 +637,16 @@ function Test-PowerSchemeExists {
     return $output -match [regex]::Escape($Guid)
 }
 
+function Test-PowerSchemeHasBoostixName {
+    param([Parameter(Mandatory = $true)][string]$Guid)
+    if (-not (Test-GuidText -Value $Guid)) { return $false }
+    $canonicalGuid = ([Guid]$Guid).ToString('D')
+    $matchingLines = @((Invoke-PowerCfg -Arguments @('/list')) -split "`r?`n" |
+        Where-Object { $_ -match [regex]::Escape($canonicalGuid) })
+    if ($matchingLines.Count -ne 1) { return $false }
+    return $matchingLines[0] -match '\(\s*Boostix Performance\s*\)\s*\*?\s*$'
+}
+
 function Get-PowerSchemeGuids {
     $output = Invoke-PowerCfg -Arguments @('/list')
     return @([regex]::Matches($output, '[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}') |
@@ -497,8 +677,6 @@ function Get-AllowedRegistryTarget {
         'hkcu:\software\microsoft\windows\currentversion\gamedvr|appcaptureenabled' = 0
         'hkcu:\software\microsoft\windows\currentversion\gamedvr|historicalcaptureenabled' = 0
         'hkcu:\system\gameconfigstore|gamedvr_enabled' = 0
-        'hklm:\system\currentcontrolset\control\power\powerthrottling|powerthrottlingoff' = 1
-        'hklm:\software\microsoft\windows nt\currentversion\multimedia\systemprofile|systemresponsiveness' = 10
         'hkcu:\software\microsoft\windows\currentversion\explorer\visualeffects|visualfxsetting' = 2
         'hkcu:\software\microsoft\windows\currentversion\themes\personalize|enabletransparency' = 0
         'hklm:\software\policies\microsoft\dsh|allownewsandinterests' = 0
@@ -787,6 +965,22 @@ try {
         $legacyStatePath = $existingStatePath
         $statePath = $legacyStatePath
         $existingState = Upgrade-LegacyState -LegacyState $existingState -LegacyStatePath $legacyStatePath
+        $legacyActiveScheme = Get-ActivePowerScheme
+        $legacyMaxScheme = ([string]$existingState.MaxPowerScheme).ToLowerInvariant()
+        $legacyOriginalScheme = ([string]$existingState.OriginalPowerScheme).ToLowerInvariant()
+        if ($legacyActiveScheme -eq $legacyMaxScheme) {
+            if (-not (Test-PowerSchemeExists -Guid $legacyOriginalScheme)) {
+                throw 'The original power scheme is missing; the legacy globally active Boostix plan cannot be migrated safely.'
+            }
+            [void](Invoke-PowerCfg -Arguments @('/setactive', $legacyOriginalScheme))
+            if ((Get-ActivePowerScheme) -ne $legacyOriginalScheme) {
+                throw 'The original power scheme could not be restored while migrating legacy optimization state.'
+            }
+            $existingState.Warnings = @($existingState.Warnings) + 'The legacy globally active performance plan was returned to its original plan before creating the session-scoped Boostix profile.'
+        }
+        elseif ($legacyActiveScheme -ne $legacyOriginalScheme) {
+            $existingState.Warnings = @($existingState.Warnings) + "The active power plan is an external override and was preserved during legacy migration: $legacyActiveScheme"
+        }
         $existingState.Status = 'SupersededLegacy'
         Set-ObjectProperty -Object $existingState -Name 'Phase' -Value 'SupersededLegacy'
         Set-ObjectProperty -Object $existingState -Name 'MutationsStarted' -Value $false
@@ -827,11 +1021,60 @@ try {
         if (-not (Test-GuidText -Value $maxScheme) -or -not (Test-PowerSchemeExists -Guid $maxScheme)) {
             throw "The adopted state references a missing Boostix power scheme: $maxScheme"
         }
+        if (-not (Test-PowerSchemeHasBoostixName -Guid $maxScheme)) {
+            throw "The adopted power scheme does not have the exact trusted Boostix Performance name: $maxScheme"
+        }
         $activeScheme = Get-ActivePowerScheme
-        $powerPlanPreserved = $activeScheme -ne $maxScheme.ToLowerInvariant()
-        if ($powerPlanPreserved) {
+        $powerPlanPreserved = $true
+        if ($activeScheme -eq $maxScheme.ToLowerInvariant()) {
+            $originalScheme = [string]$existingState.OriginalPowerScheme
+            if (-not (Test-GuidText -Value $originalScheme) -or -not (Test-PowerSchemeExists -Guid $originalScheme)) {
+                throw 'The original power scheme is missing; the legacy globally active Boostix plan cannot be migrated safely.'
+            }
+            [void](Invoke-PowerCfg -Arguments @('/setactive', $originalScheme))
+            if ((Get-ActivePowerScheme) -ne $originalScheme.ToLowerInvariant()) {
+                throw 'The original power scheme could not be restored while migrating the adopted state.'
+            }
+            Set-ObjectProperty -Object $existingState -Name 'Warnings' -Value (@($existingState.Warnings) + 'A legacy globally active Boostix plan was returned to the original plan; Boostix Performance is now session-scoped.')
+            Write-ProtectedJsonAtomic -Path $existingStatePath -Value $existingState
+        }
+        elseif ($activeScheme -ne ([string]$existingState.OriginalPowerScheme).ToLowerInvariant()) {
             Set-ObjectProperty -Object $existingState -Name 'Warnings' -Value (@($existingState.Warnings) + 'The active power plan differs from the adopted Boostix plan and was preserved as a user override.')
             Write-ProtectedJsonAtomic -Path $existingStatePath -Value $existingState
+        }
+
+        if ($existingState.Power -and [bool]$existingState.Power.SchemeCreated) {
+            foreach ($property in @(
+                @{ Name = 'TrustedConfigGuid'; Value = $maxScheme.ToLowerInvariant() },
+                @{ Name = 'TrustedConfigCreatedByUs'; Value = $false },
+                @{ Name = 'TrustedConfigWritePending'; Value = $false },
+                @{ Name = 'TrustedConfigRestored'; Value = $false }
+            )) {
+                if (-not ($existingState.Power.PSObject.Properties.Name -contains $property.Name)) {
+                    Set-ObjectProperty -Object $existingState.Power -Name $property.Name -Value $property.Value
+                }
+            }
+            $trustedConfig = Get-TrustedPowerPlanConfiguration
+            if ($trustedConfig -and [string]$trustedConfig.PlanGuid -cne $maxScheme.ToLowerInvariant()) {
+                throw 'A trusted session power-plan configuration already references another GUID.'
+            }
+            if (-not $trustedConfig) {
+                Set-ObjectProperty -Object $existingState.Power -Name 'TrustedConfigWritePending' -Value $true
+                Write-ProtectedJsonAtomic -Path $existingStatePath -Value $existingState
+                $publishedConfig = Publish-TrustedPowerPlanConfiguration -Guid $maxScheme
+                if (-not [bool]$publishedConfig.Created) {
+                    throw 'The trusted session power-plan configuration appeared concurrently and was not claimed.'
+                }
+                Set-ObjectProperty -Object $existingState.Power -Name 'TrustedConfigCreatedByUs' -Value $true
+                Set-ObjectProperty -Object $existingState.Power -Name 'TrustedConfigWritePending' -Value $false
+                Write-ProtectedJsonAtomic -Path $existingStatePath -Value $existingState
+            }
+            elseif ([bool]$existingState.Power.TrustedConfigWritePending) {
+                # Recovery after a crash between atomic publication and the state update.
+                Set-ObjectProperty -Object $existingState.Power -Name 'TrustedConfigCreatedByUs' -Value $true
+                Set-ObjectProperty -Object $existingState.Power -Name 'TrustedConfigWritePending' -Value $false
+                Write-ProtectedJsonAtomic -Path $existingStatePath -Value $existingState
+            }
         }
         Write-ProtectedTextAtomic -Path $latestStatePointer -Text $existingStatePath
         $adoptResult = [ordered]@{
@@ -859,7 +1102,7 @@ try {
 
         $state = [ordered]@{
             Version = 2
-            Profile = 'BoostixWindowsPerformanceV1'
+            Profile = 'BoostixWindowsPerformanceV2'
             OperationId = $operationId
             Status = 'Applying'
             Phase = 'Prepared'
@@ -952,6 +1195,14 @@ try {
 
         $originalPowerScheme = Get-ActivePowerScheme
         $powerSchemesBefore = @(Get-PowerSchemeGuids)
+        foreach ($existingDirectory in @($boostixProgramDataRoot, $sessionPowerPlanRoot)) {
+            if (Test-Path -LiteralPath $existingDirectory) {
+                Assert-TrustedSessionPowerPlanDirectory -Path $existingDirectory
+            }
+        }
+        if (Get-TrustedPowerPlanConfiguration) {
+            throw 'A trusted session power-plan configuration already exists without an adoptable transaction; no new plan was created.'
+        }
         $state.OriginalPowerScheme = $originalPowerScheme
         $state.PowerSchemesBefore = @($powerSchemesBefore)
         $state.Phase = 'PowerPlanCreationPending'
@@ -1006,6 +1257,10 @@ try {
             Target = $maxPowerScheme
             ChangedByUs = $true
             SchemeCreated = $true
+            TrustedConfigGuid = $maxPowerScheme
+            TrustedConfigCreatedByUs = $false
+            TrustedConfigWritePending = $false
+            TrustedConfigRestored = $false
         }
         $state.Phase = 'PowerPlanCreated'
         Save-State
@@ -1013,6 +1268,10 @@ try {
         if ($duplicateFailure) { throw $duplicateFailure }
 
         [void](Invoke-PowerCfg -Arguments @('/changename', $maxPowerScheme, 'Boostix Performance', 'Reversible Windows performance profile created by Boostix.'))
+        if (-not (Test-PowerSchemeExists -Guid $maxPowerScheme) -or
+            -not (Test-PowerSchemeHasBoostixName -Guid $maxPowerScheme)) {
+            throw 'Boostix power scheme creation/name verification failed.'
+        }
         $state.Phase = 'ApplyingSettings'
         Save-State
 
@@ -1023,36 +1282,46 @@ try {
             Add-Warning -Message "Restore point was not created: $($_.Exception.Message)"
         }
         $processorSubgroup = '54533251-82be-4824-96c1-47b60b740d00'
-        $coreParkingMin = '0cc5b647-c1df-4637-891a-dec35c318583'
-        $coreParkingMax = 'ea062031-0e34-4ff1-9b6d-eb1059334028'
         $energyPerformancePreference = '36687f9e-e3a5-4dbf-b1dc-15eb381c6863'
         $boostMode = 'be337238-0d82-4146-a960-4f3749d470c7'
-        $usbSubgroup = '2a737441-1930-4402-8d77-b2bebba308a3'
-        $usbSelectiveSuspend = '48e6b7a6-50f5-4782-a5d4-53bb8f07e226'
-        $diskSubgroup = '0012ee47-9041-4b5d-9b77-535fba8b1442'
-        $diskIdle = '6738e2c4-e8a5-4a42-b16a-e040e769756e'
         foreach ($powerSetting in @(
-            @($processorSubgroup, $coreParkingMin, '100'),
-            @($processorSubgroup, $coreParkingMax, '100'),
-            @($processorSubgroup, $energyPerformancePreference, '0'),
-            @($processorSubgroup, $boostMode, '2'),
-            @($usbSubgroup, $usbSelectiveSuspend, '0'),
-            @($diskSubgroup, $diskIdle, '0')
+            @($processorSubgroup, $energyPerformancePreference, '20'),
+            @($processorSubgroup, $boostMode, '1')
         )) {
             [void](Invoke-PowerCfg -Arguments @('/setacvalueindex', $maxPowerScheme, $powerSetting[0], $powerSetting[1], $powerSetting[2]))
         }
-        [void](Invoke-PowerCfg -Arguments @('/setactive', $maxPowerScheme))
-        if ((Get-ActivePowerScheme) -ne $maxPowerScheme) {
-            throw 'Boostix power scheme activation verification failed.'
+
+        $activeAfterProvisioning = Get-ActivePowerScheme
+        if ($activeAfterProvisioning -eq $maxPowerScheme) {
+            [void](Invoke-PowerCfg -Arguments @('/setactive', $originalPowerScheme))
+            if ((Get-ActivePowerScheme) -ne $originalPowerScheme) {
+                throw 'The original active power scheme could not be restored after provisioning.'
+            }
         }
+        elseif ($activeAfterProvisioning -ne $originalPowerScheme) {
+            Add-Warning -Message "The active power plan changed externally during provisioning and was preserved: $activeAfterProvisioning"
+        }
+        if ((Get-ActivePowerScheme) -eq $maxPowerScheme) {
+            throw 'Boostix Performance must not remain globally active after provisioning.'
+        }
+
+        $state.Phase = 'TrustedConfigPublicationPending'
+        $state.Power.TrustedConfigWritePending = $true
+        Save-State
+        $publishedConfig = Publish-TrustedPowerPlanConfiguration -Guid $maxPowerScheme
+        if (-not [bool]$publishedConfig.Created) {
+            throw 'The trusted session power-plan configuration appeared concurrently and was not claimed.'
+        }
+        $state.Power.TrustedConfigCreatedByUs = $true
+        $state.Power.TrustedConfigWritePending = $false
+        $state.Phase = 'TrustedConfigPublished'
+        Save-State
 
         Set-TrackedRegistryValue -Path 'HKCU:\Software\Microsoft\GameBar' -Name 'AutoGameModeEnabled' -Value 1 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKCU:\Software\Microsoft\GameBar' -Name 'AllowAutoGameMode' -Value 1 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR' -Name 'AppCaptureEnabled' -Value 0 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR' -Name 'HistoricalCaptureEnabled' -Value 0 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKCU:\System\GameConfigStore' -Name 'GameDVR_Enabled' -Value 0 -Kind DWord
-        Set-TrackedRegistryValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling' -Name 'PowerThrottlingOff' -Value 1 -Kind DWord
-        Set-TrackedRegistryValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' -Name 'SystemResponsiveness' -Value 10 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects' -Name 'VisualFXSetting' -Value 2 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'EnableTransparency' -Value 0 -Kind DWord
         Set-TrackedRegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Dsh' -Name 'AllowNewsAndInterests' -Value 0 -Kind DWord

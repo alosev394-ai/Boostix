@@ -52,6 +52,7 @@ namespace Boostix
         public string ProcessName;
         public DateTime StartTimeUtc;
         public long WorkingSetBytes;
+        public string ExecutablePath;
 
         public string DisplayName
         {
@@ -75,6 +76,8 @@ namespace Boostix
         public string CsvPath;
         public PerformanceTargetProcess Target;
         public BoostPerformanceResult Performance;
+        public List<double> FrameTimesMs;
+        public double CaptureDurationSeconds;
 
         public bool CanRetryElevated
         {
@@ -137,10 +140,34 @@ namespace Boostix
         {
             var candidates = new List<PerformanceTargetProcess>();
             AddRunningTargets(candidates);
-            return candidates
-                .OrderByDescending(candidate => candidate.WorkingSetBytes)
-                .ThenByDescending(candidate => candidate.StartTimeUtc)
-                .FirstOrDefault();
+            // Never guess a game by its working-set size. This legacy helper is
+            // retained for compatibility, but succeeds only when the choice is
+            // unambiguous. Boostix 2.0 production paths pass the user's exact
+            // selected PID + start time to CaptureTargetAsync.
+            List<PerformanceTargetProcess> distinct = candidates
+                .GroupBy(candidate => candidate.ProcessId)
+                .Select(group => group.First())
+                .Take(2)
+                .ToList();
+            return distinct.Count == 1 ? distinct[0] : null;
+        }
+
+        public static Task<PerformanceCaptureAttemptResult> CaptureTargetAsync(
+            PerformanceTargetProcess target,
+            IProgress<PerformanceCaptureProgress> progress,
+            CancellationToken cancellationToken)
+        {
+            if (target == null)
+            {
+                return Task.FromResult(CreateFailure(
+                    PerformanceCaptureStatus.NoSupportedProcess,
+                    "Сначала выберите точную игру в Boostix.",
+                    null,
+                    false,
+                    null,
+                    null));
+            }
+            return CaptureAsync(target, false, progress, cancellationToken);
         }
 
         public static Task<PerformanceCaptureAttemptResult> CaptureRunningTargetAsync(
@@ -152,8 +179,8 @@ namespace Boostix
             {
                 return Task.FromResult(CreateFailure(
                     PerformanceCaptureStatus.NoSupportedProcess,
-                    "Не найдено подходящее приложение с видимым окном. " +
-                    "Запустите нужное приложение и повторите замер.",
+                    "Не удалось однозначно определить приложение. " +
+                    "Выберите точную игру в Boostix и повторите замер.",
                     null,
                     false,
                     null,
@@ -457,6 +484,18 @@ namespace Boostix
                 target,
                 elevated,
                 tool.Path);
+            if (parsed.Status == PerformanceCaptureStatus.Completed &&
+                !IsSameTargetProcessRunning(target))
+            {
+                return CreateFailure(
+                    PerformanceCaptureStatus.TargetExited,
+                    "Выбранное приложение завершилось, было перезапущено " +
+                    "или сменило исполняемый файл во время измерения.",
+                    target,
+                    elevated,
+                    tool.Path,
+                    csvPath);
+            }
             if (parsed.Status == PerformanceCaptureStatus.Completed)
             {
                 Report(
@@ -573,6 +612,18 @@ namespace Boostix
                             header = row;
                             frameTimeIndex = candidateFrameTimeIndex;
                             processIdIndex = FindColumn(row, "ProcessID", "ProcessId");
+                            if (processIdIndex < 0)
+                            {
+                                return CreateFailure(
+                                    PerformanceCaptureStatus.InvalidCapture,
+                                    "В файле PresentMon отсутствует обязательная " +
+                                    "колонка ProcessID; кадры нельзя безопасно " +
+                                    "связать с выбранным приложением.",
+                                    target,
+                                    elevated,
+                                    toolPath,
+                                    csvPath);
+                            }
                             swapChainIndex = FindColumn(
                                 row,
                                 "SwapChainAddress",
@@ -585,7 +636,11 @@ namespace Boostix
                         {
                             continue;
                         }
-                        if (processIdIndex >= 0 && processIdIndex < row.Count)
+                        if (processIdIndex >= row.Count)
+                        {
+                            continue;
+                        }
+                        if (processIdIndex >= 0)
                         {
                             int rowProcessId;
                             if (!int.TryParse(
@@ -692,7 +747,10 @@ namespace Boostix
                     ToolPath = toolPath,
                     CsvPath = csvPath,
                     Target = target,
-                    Performance = performance
+                    Performance = performance,
+                    FrameTimesMs = new List<double>(selected.FrameTimes),
+                    CaptureDurationSeconds =
+                        selected.DurationMilliseconds / 1000.0
                 };
             }
             catch (Exception ex)
@@ -1075,12 +1133,18 @@ namespace Boostix
                             continue;
                         }
 
+                        string executablePath = TryGetProcessPath(process);
+                        if (string.IsNullOrWhiteSpace(executablePath))
+                        {
+                            continue;
+                        }
                         candidates.Add(new PerformanceTargetProcess
                         {
                             ProcessId = process.Id,
                             ProcessName = processName,
                             StartTimeUtc = process.StartTime.ToUniversalTime(),
-                            WorkingSetBytes = process.WorkingSet64
+                            WorkingSetBytes = process.WorkingSet64,
+                            ExecutablePath = executablePath
                         });
                     }
                     catch
@@ -1096,7 +1160,8 @@ namespace Boostix
         {
             if (target == null ||
                 target.ProcessId <= 0 ||
-                string.IsNullOrWhiteSpace(target.ProcessName))
+                string.IsNullOrWhiteSpace(target.ProcessName) ||
+                string.IsNullOrWhiteSpace(target.ExecutablePath))
             {
                 return false;
             }
@@ -1105,16 +1170,42 @@ namespace Boostix
             {
                 using (Process process = Process.GetProcessById(target.ProcessId))
                 {
-                    return string.Equals(
-                               process.ProcessName,
-                               target.ProcessName,
-                               StringComparison.OrdinalIgnoreCase) &&
-                           process.StartTime.ToUniversalTime() == target.StartTimeUtc;
+                    bool exactIdentity = string.Equals(
+                            process.ProcessName,
+                            target.ProcessName,
+                            StringComparison.OrdinalIgnoreCase) &&
+                        process.StartTime.ToUniversalTime() == target.StartTimeUtc;
+                    if (!exactIdentity)
+                    {
+                        return false;
+                    }
+                    string actualPath = TryGetProcessPath(process);
+                    return !string.IsNullOrWhiteSpace(actualPath) &&
+                        GameExecutablePath.AreEquivalent(
+                            actualPath,
+                            target.ExecutablePath);
                 }
             }
             catch
             {
                 return false;
+            }
+        }
+
+        private static string TryGetProcessPath(Process process)
+        {
+            try
+            {
+                string path = process == null || process.MainModule == null
+                    ? null
+                    : process.MainModule.FileName;
+                return string.IsNullOrWhiteSpace(path)
+                    ? null
+                    : Path.GetFullPath(path);
+            }
+            catch
+            {
+                return null;
             }
         }
 
@@ -1429,6 +1520,8 @@ namespace Boostix
                 ToolPath = toolPath,
                 CsvPath = csvPath,
                 Target = target,
+                FrameTimesMs = new List<double>(),
+                CaptureDurationSeconds = 0.0,
                 Performance = new BoostPerformanceResult
                 {
                     Available = false,

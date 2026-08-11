@@ -26,7 +26,16 @@ foreach ($required in @(
     'TaskScheduler.UnobservedTaskException',
     'internal static class CrashLog',
     'MaximumLogBytes = 512 * 1024',
-    'BoostSessionReportStore.WriteAllTextAtomic('
+    'BoostSessionReportStore.WriteAllTextAtomic(',
+    'StartExactTargetExitWatcher(generation)',
+    'StopExactTargetExitWatcher();',
+    'process.StartTime.ToUniversalTime()',
+    'GameExecutablePath.AreEquivalent(',
+    'process.Exited += handler',
+    'process.EnableRaisingEvents = true',
+    'exitedProcess.ExitTime.ToUniversalTime()',
+    'exitCode = exitedProcess.ExitCode',
+    'ExitCode = observedExitCode'
 )) {
     if (-not $program.Contains($required)) {
         throw "Application reliability contract is missing: $required"
@@ -90,6 +99,48 @@ $storeType = $assembly.GetType('Boostix.BoostSessionReportStore', $true)
 $atomicWrite = $storeType.GetMethod('WriteAllTextAtomic', $allStatic)
 if (-not $atomicWrite) {
     throw 'Atomic settings writer was not compiled.'
+}
+
+# Once the sampler has observed a genuine zero commit reserve, a later healthy
+# diagnostic sample must not rewrite it as if the critical event never happened.
+$instanceFlags = [Reflection.BindingFlags]::Instance -bor
+    [Reflection.BindingFlags]::Public -bor
+    [Reflection.BindingFlags]::NonPublic
+$reportType = $assembly.GetType('Boostix.BoostSessionReport', $true)
+$diagnosticType = $assembly.GetType('Boostix.DiagnosticSnapshot', $true)
+$report = [Activator]::CreateInstance($reportType, $true)
+$diagnostic = [Activator]::CreateInstance($diagnosticType, $true)
+$reportType.GetField('MemorySamples', $instanceFlags).SetValue($report, 1)
+$reportType.GetField('MinimumCommitHeadroomBytes', $instanceFlags).SetValue(
+    $report,
+    [long]0)
+$reportType.GetField('MinimumAvailableMemoryBytes', $instanceFlags).SetValue(
+    $report,
+    [long]0)
+$diagnosticType.GetField('MemoryAvailable', $instanceFlags).SetValue(
+    $diagnostic,
+    $true)
+$diagnosticType.GetField('PhysicalAvailableBytes', $instanceFlags).SetValue(
+    $diagnostic,
+    [long](8GB))
+$diagnosticType.GetField('CommitHeadroomBytes', $instanceFlags).SetValue(
+    $diagnostic,
+    [long](12GB))
+$diagnosticType.GetField('PhysicalTotalBytes', $instanceFlags).SetValue(
+    $diagnostic,
+    [long](16GB))
+$diagnosticType.GetField('CommitLimitBytes', $instanceFlags).SetValue(
+    $diagnostic,
+    [long](32GB))
+$applyDiagnostic = $reportType.GetMethod(
+    'ApplyDiagnosticSnapshot',
+    $instanceFlags)
+[void]$applyDiagnostic.Invoke($report, [object[]]@($diagnostic))
+$minimumCommit = [long]$reportType.GetField(
+    'MinimumCommitHeadroomBytes',
+    $instanceFlags).GetValue($report)
+if ($minimumCommit -ne 0) {
+    throw "A zero commit-headroom observation was lost: $minimumCommit"
 }
 $testRoot = Join-Path $env:TEMP (
     'Boostix-AppReliability-' + [Guid]::NewGuid().ToString('N'))

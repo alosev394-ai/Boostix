@@ -1,5 +1,7 @@
 [CmdletBinding()]
 param(
+    # Retained so older CI/release invocations do not break. The V2 safety
+    # contract validates source boundaries and does not load a release binary.
     [string]$ApplicationPath
 )
 
@@ -11,127 +13,164 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-if (-not $ApplicationPath) {
-    $ApplicationPath = Join-Path $projectRoot 'dist\Boostix.exe'
-}
-$ApplicationPath = (Resolve-Path -LiteralPath $ApplicationPath).Path
+$programPath = Join-Path $projectRoot 'Boostix\Program.cs'
+$guardPath = Join-Path $projectRoot 'Boostix\SessionGuard.cs'
+$runAllPath = Join-Path $PSScriptRoot 'Run-All.ps1'
+$guardTestPath = Join-Path $PSScriptRoot 'Test-SessionGuard.ps1'
+$integrationTestPath = Join-Path $PSScriptRoot (
+    'Test-SessionGuardIntegrationBoundary.ps1')
 
-$program = [IO.File]::ReadAllText(
-    (Join-Path $projectRoot 'Boostix\Program.cs'))
-$features = [IO.File]::ReadAllText(
-    (Join-Path $projectRoot 'Boostix\BoostFeatures.cs'))
-
-foreach ($required in @(
-    'public const int IntervalSeconds = 60',
-    'GCCollectionMode.Forced',
-    'GetPerformanceInfo(',
-    'EmptyWorkingSet(GetCurrentProcess())',
-    'public const int RequiredCriticalSamples = 2',
-    'result.Collected = result.Success',
-    'ResetPolicyState()'
+foreach ($requiredPath in @(
+    $programPath,
+    $guardPath,
+    $runAllPath,
+    $guardTestPath,
+    $integrationTestPath
 )) {
-    if (-not $features.Contains($required)) {
-        throw "The pressure-aware memory contract is missing: $required"
+    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+        throw "Required V2 safety-contract file is missing: $requiredPath"
     }
 }
 
-foreach ($required in @(
-    'nextMemoryMaintenanceTimestamp = Stopwatch.GetTimestamp();',
-    'ActiveMemoryMaintenanceService.GetNextDueTimestamp(nowTimestamp);',
-    'Interlocked.CompareExchange(ref benchmarkCaptureActive, 0, 0)',
-    'ActiveMemoryMaintenanceService.ResetPolicyState();',
-    'UpdateSessionMemoryTelemetry(result.Before);',
-    'if (!result.Attempted)',
-    'if (result.Success)',
-    'currentSession.MemoryReliefBytes',
-    'result.ReclaimedWorkingSetBytes',
-    'Memory pressure relief affected the current app only: working set decreased by '
-)) {
-    if (-not $program.Contains($required)) {
-        throw "The Active Boost memory integration is missing: $required"
+function Get-ProductionSourceFiles {
+    $roots = @(
+        (Join-Path $projectRoot 'Boostix'),
+        (Join-Path $projectRoot 'BoostixInstaller')
+    )
+    $files = @(
+        foreach ($root in $roots) {
+            if (Test-Path -LiteralPath $root -PathType Container) {
+                Get-ChildItem -LiteralPath $root -Recurse -File |
+                    Where-Object {
+                        $_.Extension -ceq '.cs' -or $_.Extension -ceq '.ps1'
+                    }
+            }
+        }
+    )
+    if ($files.Count -eq 0) {
+        throw 'No production source files were discovered for the safety scan.'
+    }
+    return $files
+}
+
+function Assert-ProductionPatternAbsent {
+    param(
+        [Parameter(Mandatory = $true)][IO.FileInfo[]]$Files,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Pattern
+    )
+
+    $options = [Text.RegularExpressions.RegexOptions]::CultureInvariant -bor
+        [Text.RegularExpressions.RegexOptions]::IgnoreCase
+    foreach ($file in $Files) {
+        $source = [IO.File]::ReadAllText($file.FullName)
+        $match = [regex]::Match($source, $Pattern, $options)
+        if ($match.Success) {
+            $line = 1 + [regex]::Matches(
+                $source.Substring(0, $match.Index), "`n").Count
+            throw (
+                "Forbidden production memory behavior '$Name' was found in " +
+                "$($file.FullName):$line")
+        }
     }
 }
 
-$applicationSources = Get-ChildItem -LiteralPath (
-    Join-Path $projectRoot 'Boostix') -Filter '*.cs' -File |
-    ForEach-Object { [IO.File]::ReadAllText($_.FullName) }
-$combined = [string]::Join([Environment]::NewLine, $applicationSources)
-foreach ($forbidden in @(
-    'NtSetSystemInformation',
-    'MemoryPurgeStandbyList',
-    'SetSystemFileCacheSize',
-    'SetProcessWorkingSetSize',
-    'AdjustTokenPrivileges',
-    'OpenProcess(',
-    'WaitForPendingFinalizers'
+$productionFiles = @(Get-ProductionSourceFiles)
+$forbiddenBehaviors = @(
+    @{
+        Name = 'working-set trim (EmptyWorkingSet)'
+        Pattern = '\bEmptyWorkingSet\b'
+    },
+    @{
+        Name = 'working-set trim (SetProcessWorkingSetSize)'
+        Pattern = '\bSetProcessWorkingSetSize(?:Ex)?\b'
+    },
+    @{
+        Name = 'standby-list purge (NtSetSystemInformation)'
+        Pattern = '\bNtSetSystemInformation\b'
+    },
+    @{
+        Name = 'standby-list purge command'
+        Pattern = '\b(?:MemoryPurgeStandbyList|SystemMemoryListInformation|EmptyStandbyList|PurgeStandbyList)\b'
+    },
+    @{
+        Name = 'system file-cache mutation'
+        Pattern = '\bSetSystemFileCacheSize\b'
+    },
+    @{
+        Name = 'forced garbage collection'
+        Pattern = '\b(?:System\s*\.\s*)?GC\s*\.\s*Collect\s*\('
+    },
+    @{
+        Name = 'forced garbage-collection mode'
+        Pattern = '\bGCCollectionMode\s*\.\s*Forced\b'
+    }
+)
+foreach ($behavior in $forbiddenBehaviors) {
+    Assert-ProductionPatternAbsent `
+        -Files $productionFiles `
+        -Name $behavior.Name `
+        -Pattern $behavior.Pattern
+}
+Assert-ProductionPatternAbsent `
+    -Files $productionFiles `
+    -Name 'runtime call to legacy ActiveMemoryMaintenanceService' `
+    -Pattern '\bActiveMemoryMaintenanceService\s*\.\s*(?:Run|RunImmediateForCurrentProcess)\s*\('
+
+$program = [IO.File]::ReadAllText($programPath)
+foreach ($legacyCall in @(
+    '(?m)^\s*(?:this\s*\.\s*)?RunActiveMemoryMaintenance\s*\('
 )) {
-    if ($combined.Contains($forbidden)) {
-        throw "Unsafe system-wide memory manipulation is forbidden: $forbidden"
+    if ([regex]::IsMatch(
+            $program,
+            $legacyCall,
+            [Text.RegularExpressions.RegexOptions]::CultureInvariant)) {
+        throw 'Program.cs contains a runtime call to legacy memory maintenance.'
     }
 }
 
-$serviceStart = $features.IndexOf(
-    'internal static class ActiveMemoryMaintenanceService',
-    [StringComparison]::Ordinal)
-$preflightStart = $features.IndexOf(
-    'internal static class BoostPreflightService',
-    $serviceStart,
-    [StringComparison]::Ordinal)
-if ($serviceStart -lt 0 -or $preflightStart -le $serviceStart) {
-    throw 'Memory service source section could not be located.'
-}
-$serviceSource = $features.Substring(
-    $serviceStart,
-    $preflightStart - $serviceStart)
-if ($serviceSource.Contains('Process.GetProcessesByName') -or
-    $serviceSource.Contains('Process.GetProcessById')) {
-    throw 'Memory relief must never trim an external process.'
+foreach ($requiredBoundary in @(
+    'new SessionGuardTargetIdentity(',
+    'selectedTarget.ProcessId',
+    'selectedTarget.ProcessStartTimeUtc',
+    'selectedTarget.ExecutablePath',
+    'Task ignored = sampler.StartAsync(',
+    'guardTarget,',
+    'cancellation.Token'
+)) {
+    if (-not $program.Contains($requiredBoundary)) {
+        throw "The exact-target Session Guard boundary is missing: $requiredBoundary"
+    }
 }
 
-$startMethodStart = $program.IndexOf(
-    'private void StartActiveBoostMaintenance',
-    [StringComparison]::Ordinal)
-$refreshMethodStart = $program.IndexOf(
-    'private void RefreshActiveBoostMaintenance',
-    $startMethodStart,
-    [StringComparison]::Ordinal)
-$startMethod = $program.Substring(
-    $startMethodStart,
-    $refreshMethodStart - $startMethodStart)
-if ($startMethod.IndexOf(
-        'nextMemoryMaintenanceTimestamp = Stopwatch.GetTimestamp();',
-        [StringComparison]::Ordinal) -lt 0 -or
-    $startMethod.IndexOf(
-        'QueueActiveBoostMaintenance();',
-        [StringComparison]::Ordinal) -lt 0) {
-    throw 'The first pressure sample is not queued immediately.'
+$guardTests = [IO.File]::ReadAllText($guardTestPath)
+foreach ($requiredBehaviorTest in @(
+    'TestSingleSpikeIsIgnored();',
+    'TestSustainedCriticalAlert();',
+    'TestZeroCommitHeadroom();',
+    'TestRecoveryHysteresisAndCooldown();',
+    'TestExactTargetIdentity();',
+    'TestWindowsSourceRejectsIdentityMismatch();'
+)) {
+    if (-not $guardTests.Contains($requiredBehaviorTest)) {
+        throw "A required Session Guard regression is missing: $requiredBehaviorTest"
+    }
 }
 
-$assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($ApplicationPath))
-$serviceType = $assembly.GetType(
-    'Boostix.ActiveMemoryMaintenanceService',
-    $true)
-$flags = [Reflection.BindingFlags]::Public -bor
-    [Reflection.BindingFlags]::NonPublic -bor
-    [Reflection.BindingFlags]::Static
-$getNextDue = $serviceType.GetMethod('GetNextDueTimestamp', $flags)
-$isDue = $serviceType.GetMethod('IsDue', $flags)
-$now = 123456L
-$next = [long]$getNextDue.Invoke($null, [object[]]@($now))
-$expectedNext = $now + ([Diagnostics.Stopwatch]::Frequency * 60L)
-if ($next -ne $expectedNext) {
-    throw "The monotonic sampling interval is not 60 seconds: $next"
-}
-if ([bool]$isDue.Invoke($null, [object[]]@([long]($next - 1), $next)) -or
-    -not [bool]$isDue.Invoke($null, [object[]]@($next, $next))) {
-    throw 'Monotonic due-time boundary is incorrect.'
+$runAll = [IO.File]::ReadAllText($runAllPath)
+foreach ($requiredV2Test in @(
+    'Test-BackgroundImpactSafety.ps1',
+    'Test-GameTargetProfiles.ps1',
+    'Test-PerformanceProofAndCrash.ps1',
+    'Test-SessionGuard.ps1',
+    'Test-SessionGuardIntegrationBoundary.ps1'
+)) {
+    if (-not $runAll.Contains("'$requiredV2Test'")) {
+        throw "Run-All.ps1 does not require the V2 test: $requiredV2Test"
+    }
 }
 
-& (Join-Path $PSScriptRoot 'Test-MemoryPressureRelief.ps1') `
-    -ApplicationPath $ApplicationPath
-if (-not $?) {
-    throw 'Detailed memory pressure relief test failed.'
-}
-
-Write-Host 'Pressure-aware Active Boost memory regression test passed.' `
+Write-Host (
+    'Active memory-maintenance safety contract passed: Session Guard is ' +
+    'advisory-only and legacy relief has no runtime call site.') `
     -ForegroundColor Green

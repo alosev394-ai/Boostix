@@ -5,7 +5,9 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$brandPath = Join-Path $projectRoot 'ProductBrand.cs'
 $flowPath = Join-Path $projectRoot 'Boostix\OptimizationFlow.cs'
+$designTokensPath = Join-Path $projectRoot 'Boostix\DesignTokens.cs'
 $applyPath = Join-Path $projectRoot 'outputs\MaxFPS-Apply.ps1'
 $restorePath = Join-Path $projectRoot 'outputs\MaxFPS-Restore.ps1'
 $flow = [IO.File]::ReadAllText($flowPath)
@@ -77,6 +79,8 @@ try {
         "/reference:$wpfRoot\WindowsBase.dll",
         "/reference:$wpfRoot\PresentationCore.dll",
         "/reference:$wpfRoot\PresentationFramework.dll",
+        $brandPath,
+        $designTokensPath,
         $flowPath
     )
     & $compiler @compileArguments
