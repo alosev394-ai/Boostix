@@ -514,6 +514,39 @@ function Get-NormalizedBounds {
     }
 }
 
+function Get-PixelScaleNormalizedBounds {
+    param(
+        [Windows.Automation.AutomationElement]$Element,
+        [Windows.Automation.AutomationElement]$Window,
+        [double]$PixelsPerDip
+    )
+
+    if ($PixelsPerDip -le 0) {
+        throw 'Center bounds require a positive pixel-to-DIP scale.'
+    }
+    $windowBounds = $Window.Current.BoundingRectangle
+    $bounds = $Element.Current.BoundingRectangle
+    $factor = 1.0 / $PixelsPerDip
+    return [pscustomobject]@{
+        Left = ($bounds.Left - $windowBounds.Left) * $factor
+        Top = ($bounds.Top - $windowBounds.Top) * $factor
+        Width = $bounds.Width * $factor
+        Height = $bounds.Height * $factor
+        RightInset = ($windowBounds.Right - $bounds.Right) * $factor
+        BottomInset = ($windowBounds.Bottom - $bounds.Bottom) * $factor
+    }
+}
+
+# A constrained 200% Center keeps 40 DIP controls at 80 physical pixels even
+# when the outer width is capped to 1044 px. Width-based normalization would
+# incorrectly inflate the same control to about 47.5 DIP.
+$constrainedTabHeightDip = 80.0 / 2.0
+$legacyWidthNormalizedHeightDip = 80.0 * (620.0 / 1044.0)
+if ([Math]::Abs($constrainedTabHeightDip - 40.0) -gt 0.001 -or
+    $legacyWidthNormalizedHeightDip -le 45.5) {
+    throw 'The deterministic constrained Center pixel-scale fixture is invalid.'
+}
+
 function Assert-CenterTabContract {
     param([Windows.Automation.AutomationElement]$Element)
 
@@ -769,8 +802,15 @@ foreach ($scale in $scales) {
         $settings = Find-ById $window 'Boostix.Center.Tab.Settings'
         foreach ($tab in @($readiness, $impact, $report, $profiles, $settings)) {
             Assert-CenterTabContract $tab
-            $tabBounds = Get-NormalizedBounds $tab $window 620.0
-            Assert-Between $tabBounds.Height 38 45.5 'Boost Center tab height'
+            $tabBounds = Get-PixelScaleNormalizedBounds `
+                $tab `
+                $window `
+                $mainPixelsPerDip
+            Assert-Between `
+                $tabBounds.Height `
+                38 `
+                45.5 `
+                "Boost Center tab height at scale $scale"
         }
         $centerWindowBounds = $window.Current.BoundingRectangle
         $centerWidthDip = $centerWindowBounds.Width / $mainPixelsPerDip
@@ -805,10 +845,21 @@ foreach ($scale in $scales) {
         }
 
         $centerTarget = Find-ById $window 'Boostix.Center.SelectTarget'
-        $centerTargetBounds = Get-NormalizedBounds $centerTarget $window 620.0
-        Assert-Between $centerTargetBounds.Height 38 42 'Boost Center target action height'
-        if ($centerTargetBounds.Left -lt 24 -or $centerTargetBounds.RightInset -lt 24) {
-            throw 'Boost Center exact-target action is clipped.'
+        $centerTargetBounds = Get-PixelScaleNormalizedBounds `
+            $centerTarget `
+            $window `
+            $mainPixelsPerDip
+        Assert-Between `
+            $centerTargetBounds.Height `
+            38 `
+            42 `
+            "Boost Center target action height at scale $scale"
+        if ($centerTargetBounds.Left -lt 23.5 -or
+            $centerTargetBounds.RightInset -lt 23.5) {
+            throw (
+                "Boost Center exact-target action is clipped at scale $scale " +
+                "(left $($centerTargetBounds.Left), " +
+                "right $($centerTargetBounds.RightInset) DIP).")
         }
 
         $stopwatch = [Diagnostics.Stopwatch]::StartNew()
@@ -828,9 +879,12 @@ foreach ($scale in $scales) {
         # The new page enters from the right by design. Measure the permanent
         # scroll/toggle gutter only after the directional transition settles.
         Start-Sleep -Milliseconds ($transitionMilliseconds + 40)
-        $settingBounds = Get-NormalizedBounds $setting $window 620.0
+        $settingBounds = Get-PixelScaleNormalizedBounds `
+            $setting `
+            $window `
+            $mainPixelsPerDip
         if ($settingBounds.RightInset -lt 36) {
-            throw "Boost Center switch entered the scroll/toggle safe gutter."
+            throw "Boost Center switch entered the scroll/toggle safe gutter at scale $scale."
         }
         Assert-KeyboardFocusable $setting 'Boost Center setting switch'
         $oldReportCondition = New-Object Windows.Automation.PropertyCondition(
@@ -844,8 +898,10 @@ foreach ($scale in $scales) {
         }
 
         $restore = Find-ById $window 'Boostix.Center.Restore'
-        $restoreBounds = Get-NormalizedBounds $restore $window 620.0
-        $watermarkBounds = Get-NormalizedBounds $watermark $window 620.0
+        # Overlap is coordinate-system invariant; compare the raw physical UIA
+        # rectangles so a constrained outer Center width cannot distort it.
+        $restoreBounds = $restore.Current.BoundingRectangle
+        $watermarkBounds = $watermark.Current.BoundingRectangle
         $horizontalOverlap =
             $restoreBounds.Left -lt ($watermarkBounds.Left + $watermarkBounds.Width) -and
             ($restoreBounds.Left + $restoreBounds.Width) -gt $watermarkBounds.Left
