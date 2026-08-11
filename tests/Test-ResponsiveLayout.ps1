@@ -265,6 +265,37 @@ foreach ($centerCase in @(
     }
 }
 
+# A genuinely constrained monitor must use all safe horizontal room for the
+# Center, remain inside the work area and still expand beyond the 460 DIP main
+# surface. This deterministic calculation covers production placement without
+# depending on the CI runner's maximum-track-size policy.
+$constrainedCenter = Invoke-MonitorPlacementForSize `
+    -WorkLeft 0 `
+    -WorkTop 0 `
+    -WorkRight 580 `
+    -WorkBottom 800 `
+    -DpiX 96 `
+    -DpiY 96 `
+    -CurrentLeft 900 `
+    -CurrentTop -50 `
+    -Center $true `
+    -LayoutWidthDip 620 `
+    -LayoutHeightDip 552
+if ($constrainedCenter[0] -ne 8 -or
+    $constrainedCenter[1] -ne 176 -or
+    $constrainedCenter[2] -ne 564 -or
+    $constrainedCenter[3] -ne 447 -or
+    $constrainedCenter[4] -ne 1) {
+    throw (
+        'Constrained Center did not use the maximal 8 DIP safe work-area ' +
+        "width: $($constrainedCenter -join ', ').")
+}
+if ($constrainedCenter[2] -le 460 -or
+    $constrainedCenter[0] -lt 0 -or
+    ($constrainedCenter[0] + $constrainedCenter[2]) -gt 580) {
+    throw 'Constrained Center stayed at main width or escaped its work area.'
+}
+
 foreach ($workBottom in @(1040, 1032)) {
     $placement = Invoke-MonitorPlacement `
         -WorkLeft 0 `
@@ -538,6 +569,69 @@ function Assert-KeyboardFocusable {
     }
 }
 
+function Get-ExpandedCenterWidthContract {
+    param(
+        [double]$MainWidthPixels,
+        [double]$WorkAreaWidthPixels
+    )
+
+    if ($MainWidthPixels -le 0 -or $WorkAreaWidthPixels -le 0) {
+        throw 'Center width contract requires positive main/work-area widths.'
+    }
+    $pixelsPerDip = $MainWidthPixels / 460.0
+    $workAreaWidthDip = $WorkAreaWidthPixels / $pixelsPerDip
+    $safeWorkAreaWidthDip = $workAreaWidthDip - 16.0
+    if ($safeWorkAreaWidthDip -ge 620.0) {
+        return [pscustomobject]@{
+            Exact = $true
+            Minimum = 617.0
+            Maximum = 623.0
+            WorkAreaWidthDip = $workAreaWidthDip
+        }
+    }
+
+    return [pscustomobject]@{
+        Exact = $false
+        Minimum = [Math]::Max(
+            461.0,
+            [Math]::Min(617.0, $workAreaWidthDip - 16.0))
+        # Maximum-track bounds may include about 12 DIP of invisible
+        # non-client width beyond the visible work area.
+        Maximum = [Math]::Min(623.0, $workAreaWidthDip + 12.0)
+        WorkAreaWidthDip = $workAreaWidthDip
+    }
+}
+
+# Exercise the dynamic CI branch deterministically even on a wide developer
+# desktop. These are the 1024 px runner constraints at 175% and 200%.
+foreach ($constrainedContractCase in @(
+    @{ Scale = 1.75; Main = 805.0; Center = 1044.0; Work = 1024.0 },
+    @{ Scale = 2.0; Main = 920.0; Center = 1044.0; Work = 1024.0 }
+)) {
+    $contract = Get-ExpandedCenterWidthContract `
+        -MainWidthPixels $constrainedContractCase.Main `
+        -WorkAreaWidthPixels $constrainedContractCase.Work
+    $actualDip = $constrainedContractCase.Center /
+        ($constrainedContractCase.Main / 460.0)
+    if ($contract.Exact -or
+        $actualDip -lt $contract.Minimum -or
+        $actualDip -gt $contract.Maximum -or
+        460.0 -ge $contract.Minimum) {
+        throw (
+            "Deterministic constrained Center contract at scale " +
+            "$($constrainedContractCase.Scale) rejected $actualDip DIP or " +
+            'would accept an unchanged 460 DIP window.')
+    }
+}
+$wideContract = Get-ExpandedCenterWidthContract `
+    -MainWidthPixels 920.0 `
+    -WorkAreaWidthPixels 1920.0
+if (-not $wideContract.Exact -or
+    $wideContract.Minimum -ne 617.0 -or
+    $wideContract.Maximum -ne 623.0) {
+    throw 'A wide 200% work area no longer requires an exact 620 DIP Center.'
+}
+
 function Wait-ForFocusedId {
     param(
         [string]$AutomationId,
@@ -572,6 +666,11 @@ foreach ($scale in $scales) {
         $window = Wait-ForWindow -Process $process -TimeoutMilliseconds 15000
 
         $windowBounds = $window.Current.BoundingRectangle
+        $centerPoint = New-Object Drawing.Point(
+            [int](($windowBounds.Left + $windowBounds.Right) / 2),
+            [int](($windowBounds.Top + $windowBounds.Bottom) / 2))
+        $workArea = [Windows.Forms.Screen]::FromPoint(
+            $centerPoint).WorkingArea
         $aspect = $windowBounds.Height / $windowBounds.Width
         Assert-Between `
             $aspect `
@@ -647,11 +746,6 @@ foreach ($scale in $scales) {
 
         # Verify the explicit tab order once; scaling does not change focus order.
         if ([Math]::Abs($scale - 1.0) -lt 0.001) {
-            $centerPoint = New-Object Drawing.Point(
-                [int](($windowBounds.Left + $windowBounds.Right) / 2),
-                [int](($windowBounds.Top + $windowBounds.Bottom) / 2))
-            $workArea = [Windows.Forms.Screen]::FromPoint(
-                $centerPoint).WorkingArea
             if ($windowBounds.Left -lt $workArea.Left -or
                 $windowBounds.Top -lt $workArea.Top -or
                 $windowBounds.Right -gt $workArea.Right -or
@@ -680,7 +774,35 @@ foreach ($scale in $scales) {
         }
         $centerWindowBounds = $window.Current.BoundingRectangle
         $centerWidthDip = $centerWindowBounds.Width / $mainPixelsPerDip
-        Assert-Between $centerWidthDip 617 623 'Expanded Boost Center width'
+        $centerWidthContract = Get-ExpandedCenterWidthContract `
+            -MainWidthPixels $windowBounds.Width `
+            -WorkAreaWidthPixels $workArea.Width
+        if ($centerWidthContract.Exact) {
+            if ($centerWidthDip -lt 617.0 -or $centerWidthDip -gt 623.0) {
+                throw (
+                    "Expanded Boost Center width at scale $scale was " +
+                    "$centerWidthDip DIP; work area " +
+                    "$($centerWidthContract.WorkAreaWidthDip) DIP " +
+                    'fits the desired 620 DIP width plus safe insets.')
+            }
+        }
+        else {
+            # Windows can expose an outer maximum-track rectangle roughly
+            # 12 DIP wider than the visible work area. Accept that non-client
+            # envelope, but require near-maximal safe expansion and explicitly
+            # reject an unchanged 460 DIP main window.
+            if ($centerWidthDip -lt $centerWidthContract.Minimum -or
+                $centerWidthDip -gt $centerWidthContract.Maximum -or
+                $centerWindowBounds.Width -le ($windowBounds.Width + 1.0)) {
+                throw (
+                    "Constrained Boost Center width at scale $scale was " +
+                    "$centerWidthDip DIP; expected maximal safe expansion " +
+                    "$($centerWidthContract.Minimum).." +
+                    "$($centerWidthContract.Maximum) DIP for work area " +
+                    "$($centerWidthContract.WorkAreaWidthDip) DIP, and greater than " +
+                    'the 460 DIP main width.')
+            }
+        }
 
         $centerTarget = Find-ById $window 'Boostix.Center.SelectTarget'
         $centerTargetBounds = Get-NormalizedBounds $centerTarget $window 620.0
@@ -907,4 +1029,4 @@ foreach ($motionSourcePath in @(
     }
 }
 
-"Responsive layout test passed: $($results -join ', '); 460 DIP main and 620 DIP Center remain unclipped at 1920x1080 100/125/150/175/200%, with exact-target focus order, UIA tabs, mixed-DPI compact reflow, reduced motion, gutters and $transitionMilliseconds ms motion verified."
+"Responsive layout test passed: $($results -join ', '); 460 DIP main and exact 620 DIP Center when the work area fits (maximal safe expansion otherwise) remain unclipped at 1920x1080 100/125/150/175/200%, with exact-target focus order, UIA tabs, mixed-DPI compact reflow, reduced motion, gutters and $transitionMilliseconds ms motion verified."
