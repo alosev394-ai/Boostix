@@ -588,7 +588,7 @@ namespace Boostix
                 result.Verdict = PerformanceProofVerdict.Positive;
                 result.Conclusive = true;
                 result.Summary =
-                    "В этом повторяемом сценарии замеры с Boost были устойчиво лучше базовых.";
+                    "С Boost игра стабильно шла быстрее.";
             }
             else if (result.AverageFpsDeltaPercent < -result.RequiredEffectPercent &&
                      agreement >= 0.75 &&
@@ -597,14 +597,14 @@ namespace Boostix
                 result.Verdict = PerformanceProofVerdict.Negative;
                 result.Conclusive = true;
                 result.Summary =
-                    "В этом повторяемом сценарии замеры с Boost были устойчиво хуже базовых.";
+                    "С Boost игра стабильно шла медленнее.";
             }
             else
             {
                 result.Verdict = PerformanceProofVerdict.Neutral;
                 result.Conclusive = false;
                 result.Summary =
-                    "Разница находится в пределах вариативности или метрики дают смешанный сигнал.";
+                    "Разница в пределах обычного разброса между проходами.";
             }
 
             return result;

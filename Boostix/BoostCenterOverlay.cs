@@ -768,9 +768,7 @@ namespace Boostix
                     visuals.Background.BeginAnimation(SolidColorBrush.ColorProperty, null);
                     visuals.Label.BeginAnimation(SolidColorBrush.ColorProperty, null);
                     visuals.Icon.BeginAnimation(SolidColorBrush.ColorProperty, null);
-                    visuals.Indicator.Background = BoostixDesignTokens.Gradient(
-                        AccentColor,
-                        BoostixDesignTokens.AccentSecondary);
+                    visuals.Indicator.Background = new SolidColorBrush(TextColor);
                 }
                 pair.Value.FocusVisualStyle =
                     MakeKeyboardFocusVisualStyle(BoostixDesignTokens.RadiusSmall);
@@ -1123,34 +1121,8 @@ namespace Boostix
                 Width = new GridLength(1, GridUnitType.Star)
             });
 
-            FrameworkElement markIcon = BoostixIcons.Create(
-                BoostixIcons.Zap,
-                18,
-                new SolidColorBrush(BoostixDesignTokens.AccentForeground),
-                2.1);
-            markIcon.HorizontalAlignment = HorizontalAlignment.Center;
-            markIcon.VerticalAlignment = VerticalAlignment.Center;
-            var mark = new Border
-            {
-                Width = 36,
-                Height = 36,
-                CornerRadius = new CornerRadius(11),
-                Background = BoostixDesignTokens.Gradient(
-                    AccentColor,
-                    BoostixDesignTokens.AccentSecondary),
-                Child = markIcon,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            if (!SystemParameters.HighContrast)
-            {
-                mark.Effect = new System.Windows.Media.Effects.DropShadowEffect
-                {
-                    Color = AccentColor,
-                    BlurRadius = 16,
-                    ShadowDepth = 0,
-                    Opacity = 0.45
-                };
-            }
+            FrameworkElement mark = BoostixUi.BrandMark(36);
+            mark.VerticalAlignment = VerticalAlignment.Center;
             brand.Children.Add(mark);
 
             var words = new StackPanel
@@ -1159,24 +1131,26 @@ namespace Boostix
                 VerticalAlignment = VerticalAlignment.Center
             };
             var name = MakeText(
-                "BOOSTIX",
+                ProductBrand.ProductName,
                 19,
                 TextColor,
                 semiboldFont,
-                FontWeights.Bold);
+                FontWeights.SemiBold);
             AutomationProperties.SetAutomationId(name, "Boostix.Title");
             words.Children.Add(name);
+            string versionLabel = string.IsNullOrEmpty(ProductBrand.ReleaseLabel)
+                ? GetApplicationVersion()
+                : GetApplicationVersion() + "  " + ProductBrand.ReleaseLabel;
             var version = MakeText(
-                GetApplicationVersion() + "  " + ProductBrand.ReleaseLabel,
-                BoostixDesignTokens.OverlineTextSize,
-                AccentTextColor,
-                semiboldFont,
-                FontWeights.SemiBold);
+                versionLabel,
+                BoostixDesignTokens.MetadataTextSize,
+                MutedColor,
+                regularFont,
+                FontWeights.Normal);
             version.Margin = new Thickness(0, 1, 0, 0);
             AutomationProperties.SetName(
                 version,
-                "Версия приложения " + GetApplicationVersion() + " " +
-                ProductBrand.ReleaseLabel);
+                "Версия приложения " + versionLabel);
             AutomationProperties.SetAutomationId(version, "Boostix.Version");
             words.Children.Add(version);
             Grid.SetColumn(words, 1);
@@ -1208,14 +1182,14 @@ namespace Boostix
                 ? (pressure ? WarningColor : SuccessColor)
                 : MutedColor;
             string title = boostSessionActive
-                ? (pressure ? "Нехватка памяти" : "Boost активен")
+                ? (pressure ? "Мало памяти" : "Boost включён")
                 : "Boost выключен";
             string detail = selectedTarget == null
                 ? "Игра не выбрана"
                 : DescribeTarget(selectedTarget);
             if (boostSessionActive && boostSessionStartedUtc.HasValue)
             {
-                detail += " · " + FormatDuration(
+                detail += ", " + FormatDuration(
                     DateTime.UtcNow - boostSessionStartedUtc.Value);
             }
 
@@ -1318,9 +1292,9 @@ namespace Boostix
                 "Boostix.Center.Tabs");
 
             AddTab(tabs, CenterPage.Home, "Главная", BoostixIcons.Home, 0);
-            AddTab(tabs, CenterPage.Readiness, "Система", BoostixIcons.Activity, 1);
-            AddTab(tabs, CenterPage.Impact, "Фон", BoostixIcons.Layers, 2);
-            AddTab(tabs, CenterPage.Report, "Отчёты", BoostixIcons.Chart, 3);
+            AddTab(tabs, CenterPage.Readiness, "Проверка ПК", BoostixIcons.Activity, 1);
+            AddTab(tabs, CenterPage.Impact, "Фоновые программы", BoostixIcons.Layers, 2);
+            AddTab(tabs, CenterPage.Report, "История", BoostixIcons.Chart, 3);
             AddTab(tabs, CenterPage.Profiles, "Игры", BoostixIcons.Gamepad, 4);
             AddTab(tabs, CenterPage.Settings, "Настройки", BoostixIcons.Sliders, 5);
             return tabs;
@@ -1348,9 +1322,7 @@ namespace Boostix
                 Width = 3,
                 Height = 20,
                 CornerRadius = new CornerRadius(2),
-                Background = BoostixDesignTokens.Gradient(
-                    AccentColor,
-                    BoostixDesignTokens.AccentSecondary),
+                Background = new SolidColorBrush(TextColor),
                 HorizontalAlignment = HorizontalAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(-1, 0, 0, 0),
@@ -1894,21 +1866,21 @@ namespace Boostix
             {
                 headerTitle.Text = "Игровой сеанс";
                 subtitle.Text =
-                    "Выберите игру и запустите Boost — все изменения обратимы.";
+                    "Выберите игру и запустите Boost перед игрой.";
             }
             else if (currentPage == CenterPage.Readiness)
             {
-                headerTitle.Text = "Система";
+                headerTitle.Text = "Проверка ПК";
                 RenderReadiness();
             }
             else if (currentPage == CenterPage.Impact)
             {
-                headerTitle.Text = "Фоновые приложения";
+                headerTitle.Text = "Фоновые программы";
                 RenderImpact();
             }
             else if (currentPage == CenterPage.Report)
             {
-                headerTitle.Text = "Отчёты и замеры";
+                headerTitle.Text = "История";
                 RenderReport();
             }
             else if (currentPage == CenterPage.Profiles)
@@ -1930,10 +1902,10 @@ namespace Boostix
         private void RenderReadiness()
         {
             subtitle.Text = preflight == null
-                ? "Проверяем состояние системы."
+                ? "Проверяем компьютер…"
                 : string.Format(
                     CultureInfo.CurrentCulture,
-                    "Состояние ресурсов и проверки перед запуском · обновлено в {0:HH:mm:ss}",
+                    "Проверено в {0:HH:mm}",
                     preflight.CapturedUtc.ToLocalTime());
 
             pageContent.Children.Add(BuildLiveSessionCard());
@@ -1943,7 +1915,7 @@ namespace Boostix
                 pageContent.Children.Add(BuildResourceSnapshot(diagnosticSnapshot));
             }
 
-            pageContent.Children.Add(MakeSectionHeading("Проверки перед запуском", null));
+            pageContent.Children.Add(MakeSectionHeading("Что проверили", null));
             if (preflight == null)
             {
                 pageContent.Children.Add(MakeEmptyState(
@@ -1976,7 +1948,7 @@ namespace Boostix
                 BoostixIcons.Gamepad);
             choose.Margin = new Thickness(10, 0, 0, 0);
             choose.Click += delegate { Raise(TargetSelectionRequested); };
-            AutomationProperties.SetName(choose, "Выбрать точную игру для сеанса");
+            AutomationProperties.SetName(choose, "Выбрать запущенную игру");
             AutomationProperties.SetAutomationId(
                 choose,
                 "Boostix.Center.SelectTarget");
@@ -2045,10 +2017,8 @@ namespace Boostix
                 semiboldFont,
                 FontWeights.SemiBold));
             string targetDetail = selectedTarget == null
-                ? "Выберите запущенную игру — Boostix не угадывает процесс."
-                : "PID " + selectedTarget.ProcessId.ToString(
-                    CultureInfo.InvariantCulture) + " · " +
-                    System.IO.Path.GetFileName(selectedTarget.ExecutablePath);
+                ? "Запустите игру и выберите её на главной."
+                : "Игра запущена";
             var detail = MakeText(
                 targetDetail,
                 BoostixDesignTokens.MetadataTextSize,
@@ -2063,8 +2033,8 @@ namespace Boostix
             bool pressure = sessionGuardPressureState != null &&
                 sessionGuardPressureState.CriticalAlertActive;
             string state = boostSessionActive
-                ? (pressure ? "Нехватка памяти" : "Активен")
-                : (selectedTarget == null ? "Нет цели" : "Готов");
+                ? (pressure ? "Мало памяти" : "Boost включён")
+                : (selectedTarget == null ? "Игра не выбрана" : "Готов");
             Color stateColor = pressure
                 ? WarningColor
                 : (boostSessionActive ? SuccessColor : SecondaryColor);
@@ -2101,7 +2071,7 @@ namespace Boostix
                 VerticalAlignment = VerticalAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Right
             };
-            TextBlock labelText = BoostixUi.Overline(label);
+            TextBlock labelText = BoostixUi.FieldLabel(label);
             labelText.HorizontalAlignment = HorizontalAlignment.Right;
             block.Children.Add(labelText);
             var valueText = MakeText(
@@ -2119,7 +2089,7 @@ namespace Boostix
         private void RenderImpact()
         {
             subtitle.Text =
-                "Сколько CPU, памяти и диска забирают фоновые приложения. Boostix только измеряет — закрытие только по вашему выбору.";
+                "Какие программы в фоне нагружают компьютер. Boostix ничего не закрывает без вашего решения.";
 
             if (!string.IsNullOrWhiteSpace(impactMessage))
             {
@@ -2138,10 +2108,10 @@ namespace Boostix
             {
                 pageContent.Children.Add(MakeEmptyState(
                     BoostixIcons.Layers,
-                    impactScanBusy ? "Идёт измерение" : "Замера пока нет",
+                    impactScanBusy ? "Идёт измерение" : "Ещё не проверяли",
                     impactScanBusy
-                        ? "Не меняйте нагрузку: сравниваем два снимка в течение 15 секунд."
-                        : "Запустите анализ — Boostix только наблюдает и ничего не закрывает автоматически."));
+                        ? "Подождите 15 секунд и пока не запускайте ничего нового."
+                        : "Проверка займёт 15 секунд и ничего не закроет сама."));
             }
             else
             {
@@ -2155,14 +2125,14 @@ namespace Boostix
             }
 
             var scan = MakeActionButton(
-                impactScanBusy ? "Измерение…" : "Анализ · 15 сек",
+                impactScanBusy ? "Проверяем…" : "Проверить фон",
                 BoostixButtonKind.Primary,
                 BoostixIcons.Activity);
             scan.IsEnabled = !impactScanBusy;
             scan.Click += delegate { Raise(ImpactScanRequested); };
             AutomationProperties.SetName(
                 scan,
-                "Измерить влияние фоновых приложений за 15 секунд");
+                "Проверить фоновые программы за 15 секунд");
             AutomationProperties.SetAutomationId(
                 scan,
                 "Boostix.Center.ImpactScan");
@@ -2190,7 +2160,7 @@ namespace Boostix
             row.Children.Add(icon);
 
             string processName = string.IsNullOrWhiteSpace(item.Identity.ProcessName)
-                ? "Приложение"
+                ? "Программа"
                 : item.Identity.ProcessName;
             var text = new StackPanel
             {
@@ -2204,7 +2174,7 @@ namespace Boostix
                 semiboldFont,
                 FontWeights.SemiBold));
             string metrics = "Память " + FormatBytesCompact(item.PrivateBytes) +
-                " · диск " + FormatBytesCompact(item.ReadBytes + item.WriteBytes);
+                ", диск " + FormatBytesCompact(item.ReadBytes + item.WriteBytes);
             var detail = MakeText(
                 metrics,
                 BoostixDesignTokens.MetadataTextSize,
@@ -2261,7 +2231,7 @@ namespace Boostix
                 "Запросить обычное закрытие " + processName);
             AutomationProperties.SetHelpText(
                 close,
-                "Boostix отправит стандартный запрос закрытия и не будет завершать процесс принудительно.");
+                "Программа получит обычную просьбу закрыться, как при нажатии на крестик.");
             AutomationProperties.SetAutomationId(
                 close,
                 "Boostix.Center.Impact.Close." +
@@ -2281,13 +2251,13 @@ namespace Boostix
         private void RenderProfiles()
         {
             subtitle.Text =
-                "Профиль привязан к точному пути EXE. Автозапуск Boost — только после вашего явного выбора.";
+                "Игры, которые вы выбирали. Включите «Авто», и Boost будет запускаться вместе с игрой.";
             if (gameProfiles.Count == 0)
             {
                 pageContent.Children.Add(MakeEmptyState(
                     BoostixIcons.Gamepad,
-                    "Профилей пока нет",
-                    "Выберите запущенную игру на главной странице — Boostix сохранит её как профиль."));
+                    "Игр пока нет",
+                    "Запустите игру и выберите её на главной. Она появится здесь."));
             }
             else
             {
@@ -2305,7 +2275,7 @@ namespace Boostix
                 BoostixButtonKind.Primary,
                 BoostixIcons.Plus);
             choose.Click += delegate { Raise(TargetSelectionRequested); };
-            AutomationProperties.SetName(choose, "Выбрать запущенную игру и сохранить профиль");
+            AutomationProperties.SetName(choose, "Выбрать запущенную игру");
             AutomationProperties.SetAutomationId(
                 choose,
                 "Boostix.Center.ProfileAdd");
@@ -2376,11 +2346,11 @@ namespace Boostix
             remove.Padding = new Thickness(0);
             remove.Height = BoostixDesignTokens.MinimumActionHeight;
             remove.VerticalAlignment = VerticalAlignment.Center;
-            remove.ToolTip = "Удалить профиль";
+            remove.ToolTip = "Убрать из списка";
             Grid.SetColumn(remove, 3);
             AutomationProperties.SetName(
                 remove,
-                "Удалить профиль " + profile.DisplayName);
+                "Убрать из списка " + profile.DisplayName);
             AutomationProperties.SetAutomationId(
                 remove,
                 "Boostix.Center.ProfileRemove." + index.ToString(CultureInfo.InvariantCulture));
@@ -2457,7 +2427,7 @@ namespace Boostix
         private void RenderReport()
         {
             subtitle.Text =
-                "Что Boostix сделал за сеанс, ресурсы и честный замер FPS до и после.";
+                "Что происходило во время игры и как изменился FPS.";
             reportStack = BuildReportPage();
             pageContent.Children.Add(reportStack);
 
@@ -2471,7 +2441,7 @@ namespace Boostix
                 .Take(5);
             if (recent.Any())
             {
-                pageContent.Children.Add(MakeSectionHeading("Недавние сеансы", null));
+                pageContent.Children.Add(MakeSectionHeading("Прошлые сеансы", null));
                 var list = MakeListCard();
                 int historyIndex = 0;
                 foreach (BoostSessionReport report in recent)
@@ -2514,13 +2484,13 @@ namespace Boostix
                 footerButtons.Children.Add(cancelProof);
             }
 
-            string proofButtonText = "Замер FPS · 4×60 с";
+            string proofButtonText = "Замерить FPS";
             if (proofSnapshot != null &&
                 proofSnapshot.State == PerformanceProofCoordinatorState.AwaitingRun &&
                 proofSnapshot.NextStep != null)
             {
                 proofButtonText = proofSnapshot.CompletedSteps == 0
-                    ? "Начать замер FPS"
+                    ? "Замерить FPS: четыре прохода по минуте"
                     : "Шаг " + proofSnapshot.NextStep.StepNumber.ToString(
                         CultureInfo.CurrentCulture) + " из " +
                         proofSnapshot.TotalSteps.ToString(CultureInfo.CurrentCulture);
@@ -2551,7 +2521,7 @@ namespace Boostix
                 benchmark,
                 benchmarkNeedsElevation
                     ? "Повторить текущий этап замера FPS с правами администратора"
-                    : "Запустить следующий этап доказательного сравнения производительности");
+                    : "Запустить следующий проход замера FPS");
             AutomationProperties.SetAutomationId(
                 benchmark,
                 "Boostix.Center.ReportBenchmark");
@@ -2590,8 +2560,8 @@ namespace Boostix
             {
                 report.Children.Add(MakeEmptyState(
                     BoostixIcons.Chart,
-                    "Отчёта ещё нет",
-                    "Запустите Boost — выполненные действия и ресурсы сеанса появятся здесь."));
+                    "Здесь пока пусто",
+                    "Запустите Boost перед игрой, и здесь появится отчёт."));
                 return report;
             }
 
@@ -2621,7 +2591,7 @@ namespace Boostix
                 }
             }
 
-            report.Children.Add(MakeSectionHeading("Действия", null));
+            report.Children.Add(MakeSectionHeading("Что сделал Boostix", null));
             IEnumerable<BoostActionRecord> actions =
                 (sessionReport.Actions ?? new List<BoostActionRecord>())
                     .OrderByDescending(item => item.TimestampUtc)
@@ -2629,7 +2599,7 @@ namespace Boostix
             if (!actions.Any())
             {
                 report.Children.Add(MakeText(
-                    "Действия ещё не зафиксированы.",
+                    "Пока ничего не сделано.",
                     BoostixDesignTokens.MetadataTextSize,
                     MutedColor,
                     regularFont,
@@ -2666,10 +2636,10 @@ namespace Boostix
             {
                 PerformanceProofResult result = snapshot.FinalResult;
                 title = result.Verdict == PerformanceProofVerdict.Positive
-                    ? "Эффект подтверждён"
+                    ? "FPS вырос"
                     : (result.Verdict == PerformanceProofVerdict.Negative
-                        ? "Boost ухудшил результат"
-                        : "Разница не доказана");
+                        ? "FPS снизился"
+                        : "Разница в пределах погрешности");
                 detail = string.Format(
                     CultureInfo.CurrentCulture,
                     "Средний FPS: {0:+0.0;-0.0;0.0}% · 1% low: {1:+0.0;-0.0;0.0} FPS · P95: {2:+0.0;-0.0;0.0} мс · разброс ±{3:0.0}%\n{4}",
@@ -2682,10 +2652,10 @@ namespace Boostix
             else if (snapshot.State == PerformanceProofCoordinatorState.AwaitingRun &&
                      snapshot.NextStep != null)
             {
-                title = "Замер FPS · шаг " +
+                title = "Замер FPS, шаг " +
                     snapshot.NextStep.StepNumber.ToString(CultureInfo.CurrentCulture) + " из " +
                     snapshot.TotalSteps.ToString(CultureInfo.CurrentCulture) +
-                    " · " + snapshot.NextStep.SequenceLabel;
+                    ", " + snapshot.NextStep.SequenceLabel;
                 detail = snapshot.NextStep.Instruction;
             }
             else
@@ -2799,7 +2769,7 @@ namespace Boostix
         {
             var section = new StackPanel();
             section.Children.Add(MakeSectionHeading(
-                "Ресурсы сейчас",
+                "Память сейчас",
                 null,
                 BoostixUi.Chip(
                     FormatPressure(snapshot.Pressure.ToString()),
@@ -2820,12 +2790,12 @@ namespace Boostix
                     : double.NaN));
             AddTile(grid, 1, BuildResourceTile(
                 BoostixIcons.Layers,
-                "Запас виртуальной памяти",
+                "Резерв памяти Windows",
                 snapshot.MemoryAvailable
                     ? FormatBytesCompact(snapshot.CommitHeadroomBytes)
                     : "Недоступно",
                 snapshot.MemoryAvailable
-                    ? "из " + FormatBytesCompact(snapshot.CommitLimitBytes) + " (commit)"
+                    ? "из " + FormatBytesCompact(snapshot.CommitLimitBytes)
                     : string.Empty,
                 snapshot.MemoryAvailable && snapshot.CommitLimitBytes > 0
                     ? 1.0 - (double)snapshot.CommitHeadroomBytes / snapshot.CommitLimitBytes
@@ -2874,7 +2844,7 @@ namespace Boostix
             }
             AutomationProperties.SetName(
                 section,
-                "Текущее состояние памяти. " +
+                "Память сейчас. " +
                 FormatPressure(snapshot.Pressure.ToString()));
             return section;
         }
@@ -2895,7 +2865,7 @@ namespace Boostix
             FrameworkElement icon = BoostixIcons.Create(iconData, 15, MutedColor);
             icon.Margin = new Thickness(0, 0, 7, 0);
             heading.Children.Add(icon);
-            heading.Children.Add(BoostixUi.Overline(title));
+            heading.Children.Add(BoostixUi.FieldLabel(title));
             content.Children.Add(heading);
 
             var valueLine = new WrapPanel
@@ -2927,8 +2897,8 @@ namespace Boostix
             {
                 Color fill = usedFraction >= 0.92
                     ? ErrorColor
-                    : (usedFraction >= 0.8 ? WarningColor : AccentColor);
-                Grid bar = BoostixUi.ProgressBar(usedFraction, fill, 5);
+                    : (usedFraction >= 0.8 ? WarningColor : SecondaryColor);
+                Grid bar = BoostixUi.ProgressBar(usedFraction, fill, 4);
                 bar.Margin = new Thickness(0, 10, 0, 0);
                 content.Children.Add(bar);
             }
@@ -2956,20 +2926,20 @@ namespace Boostix
                     string.Empty),
                 DeltaColor(comparison.OnePercentLowFpsDelta, true)));
             AddTile(grid, 2, BuildMetric(
-                "P95 кадра",
+                "Время кадра, 95%",
                 BoostSessionComparison.FormatSigned(
                     comparison.P95FrameTimeDeltaMs,
                     " мс"),
                 DeltaColor(comparison.P95FrameTimeDeltaMs, false)));
             AddTile(grid, 3, BuildMetric(
-                "Кадры > 50 мс",
+                "Подлагивания",
                 (comparison.FramesOver50MsDelta > 0 ? "+" : string.Empty) +
                     comparison.FramesOver50MsDelta.ToString(
                         CultureInfo.CurrentCulture),
                 DeltaColor(comparison.FramesOver50MsDelta, false)));
             section.Children.Add(grid);
             var note = MakeText(
-                "Зелёный — лучше, красный — хуже; сравнение только с той же игрой и сценой.",
+                "Зелёный значит лучше, красный хуже. Сравнивайте одну и ту же игру и сцену.",
                 BoostixDesignTokens.MetadataTextSize,
                 MutedColor,
                 regularFont,
@@ -3025,19 +2995,19 @@ namespace Boostix
                 FormatDuration(duration),
                 TextColor));
             AddTile(grid, 1, BuildMetric(
-                "Мин. свободно RAM",
+                "Свободно памяти, минимум",
                 report.MinimumAvailableMemoryBytes > 0
                     ? FormatBytesCompact(report.MinimumAvailableMemoryBytes)
                     : "—",
                 TextColor));
             AddTile(grid, 2, BuildMetric(
-                "Мин. запас памяти",
+                "Резерв памяти, минимум",
                 report.MinimumCommitHeadroomBytes > 0
                     ? FormatBytesCompact(report.MinimumCommitHeadroomBytes)
                     : "—",
                 TextColor));
             AddTile(grid, 3, BuildMetric(
-                "Пик видеопамяти",
+                "Видеопамять, максимум",
                 report.GpuMemorySamples > 0 &&
                     report.GpuDedicatedTotalBytes > 0
                     ? FormatBytesCompact(report.PeakGpuDedicatedUsageBytes) +
@@ -3046,14 +3016,14 @@ namespace Boostix
                     : "Нет данных",
                 TextColor));
             AddTile(grid, 4, BuildMetric(
-                "Пик подкачки",
+                "Файл подкачки, максимум",
                 report.PageFileAllocatedBytes > 0
                     ? FormatBytesCompact(report.PeakPageFileUsedBytes) +
                         " / " + FormatBytesCompact(report.PageFileAllocatedBytes)
                     : "Нет данных",
                 TextColor));
             AddTile(grid, 5, BuildMetric(
-                "Действий",
+                "Действий Boostix",
                 (report.Actions == null ? 0 : report.Actions.Count).ToString(
                     CultureInfo.CurrentCulture),
                 TextColor));
@@ -3063,7 +3033,7 @@ namespace Boostix
         private FrameworkElement BuildPerformanceGrid(BoostPerformanceResult result)
         {
             var host = new StackPanel();
-            host.Children.Add(MakeSectionHeading("Покадровый замер", null));
+            host.Children.Add(MakeSectionHeading("Замер FPS", null));
             var grid = MakeTileGrid(3);
             AddTile(grid, 0, BuildMetric(
                 "Средний FPS",
@@ -3074,19 +3044,19 @@ namespace Boostix
                 result.OnePercentLowFps.ToString("0.0", CultureInfo.CurrentCulture),
                 TextColor));
             AddTile(grid, 2, BuildMetric(
-                "P95 кадра",
+                "Время кадра, 95%",
                 result.P95FrameTimeMs.ToString("0.0", CultureInfo.CurrentCulture) + " мс",
                 TextColor));
             AddTile(grid, 3, BuildMetric(
-                "P99 кадра",
+                "Время кадра, 99%",
                 result.P99FrameTimeMs.ToString("0.0", CultureInfo.CurrentCulture) + " мс",
                 TextColor));
             AddTile(grid, 4, BuildMetric(
-                "Кадры > 50 мс",
+                "Подлагивания",
                 result.FramesOver50Ms.ToString(CultureInfo.CurrentCulture),
                 TextColor));
             AddTile(grid, 5, BuildMetric(
-                "Кадры > 100 мс",
+                "Сильные подлагивания",
                 result.FramesOver100Ms.ToString(CultureInfo.CurrentCulture),
                 TextColor));
             host.Children.Add(grid);
@@ -3101,7 +3071,7 @@ namespace Boostix
             var host = BoostixUi.Card(new Thickness(14, 11, 14, 12));
             host.MinHeight = 66;
             var content = new StackPanel();
-            content.Children.Add(BoostixUi.Overline(title));
+            content.Children.Add(BoostixUi.FieldLabel(title));
             var valueText = MakeText(
                 value,
                 BoostixDesignTokens.MetricValueSize,
@@ -3248,7 +3218,7 @@ namespace Boostix
 
             DateTime localStart = report.StartedUtc.ToLocalTime();
             string target = string.IsNullOrWhiteSpace(report.TargetName)
-                ? "Сеанс производительности"
+                ? "Сеанс"
                 : report.TargetName;
             var title = MakeText(
                 localStart.ToString("dd.MM · HH:mm", CultureInfo.CurrentCulture) +
@@ -3279,7 +3249,7 @@ namespace Boostix
             string detailText = "Длительность " + FormatDuration(duration);
             if (!string.IsNullOrWhiteSpace(report.WorstResourcePressure))
             {
-                detailText += " · ресурсы: " +
+                detailText += ", память: " +
                     FormatPressure(report.WorstResourcePressure).ToLowerInvariant();
             }
             var detail = MakeText(
@@ -3360,7 +3330,7 @@ namespace Boostix
             }
             if (string.Equals(report.Status, "Active", StringComparison.OrdinalIgnoreCase))
             {
-                return "Активен";
+                return "Boost включён";
             }
             if (string.Equals(report.Status, "Preparing", StringComparison.OrdinalIgnoreCase))
             {
@@ -3380,7 +3350,7 @@ namespace Boostix
         private void RenderSettings()
         {
             subtitle.Text =
-                "Настройки сеанса применяются сразу, без перезагрузки.";
+                "Изменения сохраняются сразу.";
             settingsLoading = true;
             int settingIndex = 0;
             if (!string.IsNullOrWhiteSpace(exportMessageTitle))
@@ -3396,7 +3366,7 @@ namespace Boostix
                 AddListRow(launch, BuildSettingToggle(
                     settingIndex++,
                     "Проверка перед запуском",
-                    "Показывать предупреждения о питании, памяти и перезагрузке до старта Boost.",
+                    "Перед запуском Boost проверять компьютер и предупреждать о проблемах.",
                     settings.CheckBeforeBoost,
                     delegate(bool value) { settings.CheckBeforeBoost = value; }));
                 pageContent.Children.Add(launch);
@@ -3405,7 +3375,7 @@ namespace Boostix
                     "Закрывать при запуске Boost",
                     null));
                 var hint = MakeText(
-                    "Включённые приложения получат обычный запрос на закрытие. Принудительно Boostix ничего не завершает и обратно не запускает.",
+                    "Отмеченные программы закроются при запуске Boost. После игры откройте их сами.",
                     BoostixDesignTokens.MetadataTextSize,
                     MutedColor,
                     regularFont,
@@ -3425,13 +3395,13 @@ namespace Boostix
                 AddListRow(close, BuildSettingToggle(
                     settingIndex++,
                     "Epic Games Launcher",
-                    "Закрыть лаунчер Epic и его web-процессы.",
+                    "Закрыть Epic Games Launcher.",
                     !settings.KeepEpic,
                     delegate(bool value) { settings.KeepEpic = !value; }));
                 AddListRow(close, BuildSettingToggle(
                     settingIndex++,
                     "Steam",
-                    "Закрыть клиент Steam и его overlay. Не включайте, если игра из Steam.",
+                    "Закрыть Steam. Не включайте, если игра из Steam.",
                     !settings.KeepSteam,
                     delegate(bool value) { settings.KeepSteam = !value; }));
                 AddListRow(close, BuildSettingToggle(
@@ -3455,10 +3425,26 @@ namespace Boostix
                 AddListRow(close, BuildSettingToggle(
                     settingIndex++,
                     "NVIDIA Overlay",
-                    "Закрыть NVIDIA Overlay; запись клипов будет недоступна.",
+                    "Закрыть оверлей NVIDIA. Запись клипов будет недоступна.",
                     !settings.KeepNvidiaOverlay,
                     delegate(bool value) { settings.KeepNvidiaOverlay = !value; }));
                 pageContent.Children.Add(close);
+
+                pageContent.Children.Add(MakeSectionHeading("Управление", null));
+                var control = MakeListCard();
+                AddListRow(control, BuildSettingToggle(
+                    settingIndex++,
+                    "Горячая клавиша " + BoostHotkey.DisplayText,
+                    "Включает и выключает Boost прямо из игры.",
+                    settings.GlobalHotkey,
+                    delegate(bool value) { settings.GlobalHotkey = value; }));
+                AddListRow(control, BuildSettingToggle(
+                    settingIndex++,
+                    "Сворачивать в трей",
+                    "Кнопка «Свернуть» прячет окно к часам. Boostix продолжает работать.",
+                    settings.MinimizeToTray,
+                    delegate(bool value) { settings.MinimizeToTray = value; }));
+                pageContent.Children.Add(control);
             }
             finally
             {
@@ -3477,7 +3463,7 @@ namespace Boostix
             restore.Click += delegate { Raise(RestoreRequested); };
             AutomationProperties.SetName(
                 restore,
-                "Открыть безопасное восстановление системных настроек");
+                "Вернуть исходные настройки Windows");
             AutomationProperties.SetAutomationId(
                 restore,
                 "Boostix.Center.Restore");
@@ -4005,38 +3991,32 @@ namespace Boostix
             return frame;
         }
 
+        /// <summary>
+        /// Empty sections say what to do next, left-aligned like the rest of
+        /// the page; the action itself sits in the footer.
+        /// </summary>
         private Border MakeEmptyState(string iconData, string title, string detail)
         {
-            var host = BoostixUi.Card(new Thickness(24, 30, 24, 32));
+            var host = BoostixUi.Card(new Thickness(20, 18, 20, 20));
             host.Margin = new Thickness(0, 0, 0, 16);
-            var content = new StackPanel
-            {
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            FrameworkElement badge = MakeIconBadge(iconData, AccentTextColor, 52);
-            badge.HorizontalAlignment = HorizontalAlignment.Center;
-            content.Children.Add(badge);
+            var content = new StackPanel();
             var titleText = MakeText(
                 title,
                 BoostixDesignTokens.SectionTitleSize,
                 TextColor,
                 semiboldFont,
                 FontWeights.SemiBold);
-            titleText.TextAlignment = TextAlignment.Center;
-            titleText.HorizontalAlignment = HorizontalAlignment.Center;
-            titleText.Margin = new Thickness(0, 14, 0, 0);
             content.Children.Add(titleText);
             var detailText = MakeText(
                 detail,
                 BoostixDesignTokens.BodyTextSize,
-                MutedColor,
+                SecondaryColor,
                 regularFont,
                 FontWeights.Normal);
-            detailText.TextAlignment = TextAlignment.Center;
             detailText.TextWrapping = TextWrapping.Wrap;
             detailText.TextTrimming = TextTrimming.None;
-            detailText.MaxWidth = 360;
+            detailText.MaxWidth = 460;
+            detailText.HorizontalAlignment = HorizontalAlignment.Left;
             detailText.Margin = new Thickness(0, 6, 0, 0);
             content.Children.Add(detailText);
             host.Child = content;
@@ -4096,20 +4076,20 @@ namespace Boostix
             return BoostixUi.FocusVisual(radius);
         }
 
-        private static Style MakeBoostixVerticalScrollBarStyle()
+        internal static Style MakeBoostixVerticalScrollBarStyle()
         {
             string trackColor = SystemParameters.HighContrast
                 ? ColorToXaml(BackgroundColor)
                 : "#00000000";
             string thumbColor = SystemParameters.HighContrast
                 ? ColorToXaml(AccentColor)
-                : "#FF3A3552";
+                : ColorToXaml(BoostixDesignTokens.Hover);
             string thumbHoverColor = SystemParameters.HighContrast
                 ? ColorToXaml(AccentColor)
-                : ProductBrand.AccentVisualHex;
+                : ColorToXaml(BoostixDesignTokens.MutedText);
             string thumbDragColor = SystemParameters.HighContrast
                 ? ColorToXaml(AccentColor)
-                : ProductBrand.AccentHex;
+                : ColorToXaml(BoostixDesignTokens.SecondaryText);
             string xaml =
                 "<Style xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
                 "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" " +
@@ -4436,7 +4416,7 @@ namespace Boostix
                             DiagnosticPressureClassifier.OneGibibyte,
                             snapshot.CommitLimitBytes / 20))
                 {
-                    return "Запас виртуальной памяти почти исчерпан — проверьте файл подкачки и свободное место на системном диске.";
+                    return "Windows почти исчерпала резерв памяти. Освободите место на диске C: или увеличьте файл подкачки.";
                 }
                 if (snapshot.GpuUsageAvailable &&
                     snapshot.GpuTotalAvailable &&
@@ -4444,17 +4424,17 @@ namespace Boostix
                     (double)snapshot.GpuDedicatedUsageBytes /
                         snapshot.GpuDedicatedTotalBytes >= 0.95)
                 {
-                    return "Видеопамять почти заполнена — высокое качество текстур может вызвать статтеры.";
+                    return "Видеопамять почти заполнена. Снизьте качество текстур, чтобы не было подлагиваний.";
                 }
-                return "Свободной оперативной памяти осталось критически мало.";
+                return "Оперативной памяти почти не осталось.";
             }
             if (snapshot.Pressure == DiagnosticPressureLevel.Elevated)
             {
-                return "Запас ресурсов ниже рекомендуемого; закройте тяжёлые фоновые приложения перед игрой.";
+                return "Памяти маловато. Закройте тяжёлые программы перед игрой.";
             }
             if (snapshot.Pressure == DiagnosticPressureLevel.Normal)
             {
-                return "Запас оперативной и виртуальной памяти в норме.";
+                return "Памяти достаточно.";
             }
             return "Часть показателей недоступна в этой версии Windows или драйвера.";
         }

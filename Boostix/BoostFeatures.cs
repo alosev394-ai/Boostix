@@ -73,6 +73,8 @@ namespace Boostix
         public bool KeepTeams;
         public bool KeepWallpaper;
         public bool KeepNvidiaOverlay;
+        public bool GlobalHotkey;
+        public bool MinimizeToTray;
 
         public BoostCenterSettings Clone()
         {
@@ -86,7 +88,9 @@ namespace Boostix
                 KeepOneDrive = KeepOneDrive,
                 KeepTeams = KeepTeams,
                 KeepWallpaper = KeepWallpaper,
-                KeepNvidiaOverlay = KeepNvidiaOverlay
+                KeepNvidiaOverlay = KeepNvidiaOverlay,
+                GlobalHotkey = GlobalHotkey,
+                MinimizeToTray = MinimizeToTray
             };
         }
     }
@@ -808,19 +812,19 @@ namespace Boostix
             if (string.Equals(normalized, "NeedsRecovery", StringComparison.OrdinalIgnoreCase))
             {
                 severity = BoostCheckSeverity.Blocked;
-                detail = "Сначала завершите безопасное восстановление настроек.";
+                detail = "Сначала завершите возврат настроек Windows.";
             }
             else if (string.Equals(normalized, "Active", StringComparison.OrdinalIgnoreCase))
             {
                 severity = BoostCheckSeverity.Pass;
-                detail = "Системная оптимизация применена, резервная копия доступна.";
+                detail = "Настройка Windows для игр выполнена.";
             }
             else if (string.Equals(normalized, "NotApplied", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(normalized, "None", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(normalized, "Restored", StringComparison.OrdinalIgnoreCase))
             {
                 severity = BoostCheckSeverity.Info;
-                detail = "Системная оптимизация ещё не применена.";
+                detail = "Настройка Windows для игр ещё не выполнена.";
             }
             else
             {
@@ -893,7 +897,7 @@ namespace Boostix
                 }
                 else
                 {
-                    detail = "Ноутбук работает от батареи — производительность может быть ограничена.";
+                    detail = "Ноутбук работает от батареи. Подключите зарядку для полной скорости.";
                     severity = BoostCheckSeverity.Warning;
                 }
 
@@ -981,7 +985,7 @@ namespace Boostix
                     Title = "ЧАСТОТА МОНИТОРА",
                     Detail = mode.DisplayFrequency > 1
                         ? mode.DisplayFrequency.ToString(CultureInfo.CurrentCulture) + " Гц"
-                        : "Частота определяется драйвером дисплея.",
+                        : "Частоту обновления задаёт драйвер видеокарты.",
                     Severity = mode.DisplayFrequency > 1
                         ? BoostCheckSeverity.Info
                         : BoostCheckSeverity.Unknown
@@ -1040,7 +1044,7 @@ namespace Boostix
                 string detail;
                 if (ready)
                 {
-                    detail = "Game Mode включён, фоновая запись DVR отключена.";
+                    detail = "Игровой режим включён, фоновая запись выключена.";
                 }
                 else if (gameMode == -1 && dvr == -1)
                 {

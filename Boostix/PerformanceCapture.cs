@@ -161,7 +161,7 @@ namespace Boostix
             {
                 return Task.FromResult(CreateFailure(
                     PerformanceCaptureStatus.NoSupportedProcess,
-                    "Сначала выберите точную игру в Boostix.",
+                    "Сначала выберите игру в Boostix.",
                     null,
                     false,
                     null,
@@ -180,7 +180,7 @@ namespace Boostix
                 return Task.FromResult(CreateFailure(
                     PerformanceCaptureStatus.NoSupportedProcess,
                     "Не удалось однозначно определить приложение. " +
-                    "Выберите точную игру в Boostix и повторите замер.",
+                    "Выберите игру в Boostix и повторите замер.",
                     null,
                     false,
                     null,
@@ -389,7 +389,7 @@ namespace Boostix
                             PerformanceCaptureStatus.AccessDenied,
                             elevated
                                 ? "PresentMon не получил доступ даже после подтверждения UAC."
-                                : "Для измерения FPS требуется разовое подтверждение UAC.",
+                                : "Для замера FPS Windows попросит разрешение.",
                             target,
                             elevated,
                             tool.Path,
@@ -431,7 +431,7 @@ namespace Boostix
                 {
                     return CreateFailure(
                         PerformanceCaptureStatus.UacCancelled,
-                        "Подтверждение UAC отменено. Boost продолжает работать без замера FPS.",
+                        "Разрешение не дано. Boost работает, замер FPS пропущен.",
                         target,
                         true,
                         tool.Path,
@@ -559,7 +559,7 @@ namespace Boostix
                     elapsed,
                     waiting
                         ? "Подготавливаем стабильный замер."
-                        : "Измеряем плавность выбранного приложения.");
+                        : "Измеряем FPS игры.");
 
                 await Task.Delay(250, cancellationToken).ConfigureAwait(false);
             }

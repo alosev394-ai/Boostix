@@ -67,10 +67,10 @@ foreach ($identityContract in @(
     'ProductName = "Boostix"',
     'ProductFileName = "Boostix"',
     'CompanyName = "Silas Suspect"',
-    'ReleaseLabel = "BETA"',
-    'AccentHex = "#FF7C3AED"',
-    'AccentVisualHex = "#FF8B5CF6"',
-    'AccentTextHex = "#FFA78BFA"'
+    'ReleaseLabel = ""',
+    'AccentHex = "#FFFFA030"',
+    'AccentVisualHex = "#FFFFB862"',
+    'AccentTextHex = "#FFFFB862"'
 )) {
     if (-not $brand.Contains($identityContract)) {
         throw "The central brand contract is missing: $identityContract"
@@ -107,17 +107,17 @@ $sessionScript = [IO.File]::ReadAllText($sessionScriptPath)
 $applyScript = [IO.File]::ReadAllText($applyScriptPath)
 $build = [IO.File]::ReadAllText($buildPath)
 
-# The BOOSTIX wordmark heads the navigation sidebar on every page.
+# The Boostix wordmark heads the navigation sidebar on every page.
 $brandStart = $center.IndexOf('private FrameworkElement BuildBrand()', [StringComparison]::Ordinal)
 $brandEnd = $center.IndexOf('internal static string GetApplicationVersion()', [StringComparison]::Ordinal)
 if ($brandStart -lt 0 -or $brandEnd -le $brandStart) {
     throw 'The sidebar brand block was not found.'
 }
 $brandBlock = $center.Substring($brandStart, $brandEnd - $brandStart)
-if (-not $brandBlock.Contains('"BOOSTIX"') -or
+if (-not $brandBlock.Contains('ProductBrand.ProductName') -or
     -not $brandBlock.Contains('"Boostix.Title"') -or
     -not $brandBlock.Contains('ProductBrand.ReleaseLabel')) {
-    throw 'The sidebar is not headed by the required BOOSTIX wordmark and release label.'
+    throw 'The sidebar is not headed by the required Boostix wordmark and release label.'
 }
 if ($program.Contains('MakeText("BOOST",') -or $center.Contains('MakeText("BOOST",')) {
     throw 'The retired two-line Boost title returned to the main page.'

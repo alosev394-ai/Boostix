@@ -41,6 +41,7 @@ $requiredTests = @(
     'Test-SetupSkippedSettings.ps1',
     'Test-DiagnosticBundle.ps1',
     'Test-WhatsNew.ps1',
+    'Test-TrayHotkey.ps1',
     'Test-PerformanceCapture.ps1',
     'Test-PerformanceProofAndCrash.ps1',
     'Test-PerformanceProofCoordinator.ps1',

@@ -62,49 +62,45 @@ internal static class GenerateIcon
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
             graphics.Clear(Color.Transparent);
 
-            // Brand mark: violet-to-fuchsia rounded square with a lightning bolt.
+            // Brand mark: a boost gauge on a graphite tile; the needle rests
+            // in the amber Boost zone.
             float scale = size / 256F;
             var bounds = new RectangleF(8 * scale, 8 * scale, 240 * scale, 240 * scale);
-            using (GraphicsPath frame = RoundedRectangle(bounds, 60 * scale))
-            using (var background = new LinearGradientBrush(
-                bounds,
-                Color.FromArgb(124, 58, 237),
-                Color.FromArgb(192, 38, 211),
-                45F))
-            using (var highlight = new Pen(Color.FromArgb(70, 255, 255, 255), Math.Max(1F, 4F * scale)))
+            using (GraphicsPath frame = RoundedRectangle(bounds, 56 * scale))
+            using (var background = new SolidBrush(Color.FromArgb(34, 39, 45)))
+            using (var edge = new Pen(Color.FromArgb(53, 60, 68), Math.Max(1F, 6F * scale)))
             {
                 graphics.FillPath(background, frame);
-                if (size >= 32)
-                {
-                    graphics.DrawPath(highlight, frame);
-                }
+                graphics.DrawPath(edge, frame);
             }
 
-            PointF[] grid =
+            float centerX = 128F * scale;
+            float centerY = 148F * scale;
+            float radius = 78F * scale;
+            var arcBounds = new RectangleF(centerX - radius, centerY - radius, radius * 2, radius * 2);
+            using (var scalePen = new Pen(Color.FromArgb(138, 146, 156), Math.Max(1.2F, 18F * scale)))
+            using (var zonePen = new Pen(Color.FromArgb(255, 160, 48), Math.Max(1.6F, 24F * scale)))
+            using (var needlePen = new Pen(Color.FromArgb(237, 239, 242), Math.Max(1.4F, 18F * scale)))
+            using (var hub = new SolidBrush(Color.FromArgb(255, 160, 48)))
             {
-                new PointF(13F, 2.5F),
-                new PointF(4F, 13.5F),
-                new PointF(11.5F, 13.5F),
-                new PointF(10.5F, 21.5F),
-                new PointF(20F, 10F),
-                new PointF(12.5F, 10F)
-            };
-            float unit = 9F * scale;
-            var bolt = new PointF[grid.Length];
-            for (int index = 0; index < grid.Length; index++)
-            {
-                bolt[index] = new PointF(
-                    128F * scale + (grid[index].X - 12F) * unit,
-                    128F * scale + (grid[index].Y - 12F) * unit);
-            }
-            using (var path = new GraphicsPath())
-            using (var brush = new SolidBrush(Color.White))
-            using (var outline = new Pen(Color.White, Math.Max(1F, 10F * scale)))
-            {
-                outline.LineJoin = LineJoin.Round;
-                path.AddPolygon(bolt);
-                graphics.FillPath(brush, path);
-                graphics.DrawPath(outline, path);
+                scalePen.StartCap = LineCap.Round;
+                scalePen.EndCap = LineCap.Round;
+                zonePen.StartCap = LineCap.Round;
+                zonePen.EndCap = LineCap.Round;
+                needlePen.StartCap = LineCap.Round;
+                needlePen.EndCap = LineCap.Round;
+                // GDI+ measures arcs clockwise from +X; the gauge measures from up.
+                graphics.DrawArc(scalePen, arcBounds, -120F - 90F, 175F);
+                graphics.DrawArc(zonePen, arcBounds, 62F - 90F, 58F);
+                double needle = 78 * Math.PI / 180;
+                graphics.DrawLine(
+                    needlePen,
+                    centerX,
+                    centerY,
+                    centerX + (float)(radius * 0.92 * Math.Sin(needle)),
+                    centerY - (float)(radius * 0.92 * Math.Cos(needle)));
+                float hubRadius = Math.Max(1.5F, 20F * scale);
+                graphics.FillEllipse(hub, centerX - hubRadius, centerY - hubRadius, hubRadius * 2, hubRadius * 2);
             }
         }
         return bitmap;

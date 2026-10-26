@@ -163,6 +163,33 @@ try {
         throw 'A registry failure other than an access refusal must still abort the profile.'
     }
 
+    # 3b. Rollback removes a key that only existed because the profile created
+    #     it, and keeps keys that were there before (or whose history is unknown).
+    $restorePath = Join-Path $projectRoot 'outputs\MaxFPS-Restore.ps1'
+    foreach ($case in @(
+        @{ Name = 'CreatedByProfile'; Snapshot = [pscustomobject]@{ KeyExists = $false; Exists = $false; Kind = $null; Value = $null }; KeepKey = $false },
+        @{ Name = 'ExistedBefore'; Snapshot = [pscustomobject]@{ KeyExists = $true; Exists = $false; Kind = $null; Value = $null }; KeepKey = $true },
+        @{ Name = 'LegacyState'; Snapshot = [pscustomobject]@{ Exists = $false; Kind = $null; Value = $null }; KeepKey = $true }
+    )) {
+        $caseKey = Join-Path $fixtureRoot ('Restore' + $case.Name)
+        New-Item -Path $caseKey -Force | Out-Null
+        New-ItemProperty -Path $caseKey -Name 'AllowNewsAndInterests' -Value 0 -PropertyType DWord -Force | Out-Null
+        & {
+            param($ProductionScript, $KeyPath, $Snapshot)
+            $ErrorActionPreference = 'Stop'
+            Set-StrictMode -Version Latest
+            . (Get-ProductionFunctionScriptBlock -ScriptPath $ProductionScript -Name 'Restore-RegistrySnapshot')
+            Restore-RegistrySnapshot -Path $KeyPath -Name 'AllowNewsAndInterests' -Snapshot $Snapshot
+        } $restorePath $caseKey $case.Snapshot
+        $exists = Test-Path -LiteralPath $caseKey
+        if ($exists -ne $case.KeepKey) {
+            throw "Rollback case $($case.Name): key exists=$exists, expected $($case.KeepKey)."
+        }
+        if ($exists -and (@((Get-Item -LiteralPath $caseKey).GetValueNames()) -contains 'AllowNewsAndInterests')) {
+            throw "Rollback case $($case.Name): the value created by the profile was not removed."
+        }
+    }
+
     # 4. The real failed-apply path uses the same explaining rollback as the
     #    demo flow exercised below, not the rollback that closes Boostix.
     $flowSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\OptimizationFlow.cs'))

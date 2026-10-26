@@ -184,7 +184,7 @@ namespace Boostix
                 {
                     return CreateTransitionLocked(
                         PerformanceProofSubmissionStatus.TerminalState,
-                        "Этот доказательный тест уже завершён.");
+                        "Этот замер FPS уже завершён.");
                 }
 
                 string expectedPairId = stepIndex < 2
@@ -215,7 +215,7 @@ namespace Boostix
                 {
                     return FailLocked(
                         PerformanceProofCoordinatorFailure.TargetMismatch,
-                        "Исполняемый файл изменился. Доказательный тест остановлен.");
+                        "Игра обновилась. Замер FPS остановлен.");
                 }
                 if (!string.Equals(
                         run.ContextKey,
@@ -224,7 +224,7 @@ namespace Boostix
                 {
                     return FailLocked(
                         PerformanceProofCoordinatorFailure.ContextMismatch,
-                        "Сценарий или параметры экрана изменились. Доказательный тест остановлен.");
+                        "Настройки экрана изменились. Замер FPS остановлен.");
                 }
                 if (run.Variant != ExpectedVariants[stepIndex])
                 {
@@ -273,7 +273,7 @@ namespace Boostix
                 stepIndex++;
                 if (stepIndex < TotalStepCount)
                 {
-                    message = "Этап принят. Подготовьте следующий 60-секундный замер.";
+                    message = "Проход засчитан. Подготовьтесь к следующей минуте.";
                     return CreateTransitionLocked(
                         PerformanceProofSubmissionStatus.Accepted,
                         message);
@@ -306,13 +306,13 @@ namespace Boostix
                 {
                     return CreateTransitionLocked(
                         PerformanceProofSubmissionStatus.TerminalState,
-                        "Этот доказательный тест уже завершён.");
+                        "Этот замер FPS уже завершён.");
                 }
                 state = PerformanceProofCoordinatorState.Cancelled;
                 failure = PerformanceProofCoordinatorFailure.None;
                 message = SanitizeMessage(
                     reason,
-                    "Доказательный тест отменён пользователем.");
+                    "Замер FPS отменён.");
                 return CreateTransitionLocked(
                     PerformanceProofSubmissionStatus.TerminalState,
                     message);
@@ -430,8 +430,8 @@ namespace Boostix
                 ExpectedVariant = variant,
                 SequenceLabel = firstPair ? "A→B" : "B→A",
                 Instruction = variant == PerformanceProofVariant.Boost
-                    ? "Включите Boost, не меняйте сцену и запустите 60-секундный замер."
-                    : "Отключите Boost, не меняйте сцену и запустите 60-секундный замер.",
+                    ? "Включите Boost, оставайтесь в той же сцене и запустите минутный проход."
+                    : "Выключите Boost, оставайтесь в той же сцене и запустите минутный проход.",
                 TargetIdentity = targetIdentity,
                 ContextKey = contextKey
             };
@@ -460,7 +460,7 @@ namespace Boostix
         {
             state = PerformanceProofCoordinatorState.Failed;
             failure = failureCode;
-            message = SanitizeMessage(failureMessage, "Доказательный тест остановлен.");
+            message = SanitizeMessage(failureMessage, "Замер FPS остановлен.");
             return CreateTransitionLocked(
                 PerformanceProofSubmissionStatus.Failed,
                 message);
@@ -1192,14 +1192,14 @@ namespace Boostix
                     if (string.IsNullOrWhiteSpace(directory) ||
                         !Directory.Exists(directory))
                     {
-                        error = "Сохранённый доказательный тест не найден.";
+                        error = "Сохранённый замер FPS не найден.";
                         return false;
                     }
                     EnsureSafeDirectory(directory);
                     var file = new FileInfo(checkpointPath);
                     if (!file.Exists)
                     {
-                        error = "Сохранённый доказательный тест не найден.";
+                        error = "Сохранённый замер FPS не найден.";
                         return false;
                     }
                     if ((file.Attributes & FileAttributes.ReparsePoint) != 0 ||

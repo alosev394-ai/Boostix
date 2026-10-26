@@ -891,6 +891,14 @@ function Restore-RegistrySnapshot {
     }
     elseif (Test-Path -LiteralPath $Path) {
         Remove-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue
+        # A key the profile created only for this value goes away with it.
+        # Older states do not record KeyExists; their keys are kept.
+        if (($Snapshot.PSObject.Properties.Name -contains 'KeyExists') -and -not [bool]$Snapshot.KeyExists) {
+            $key = Get-Item -LiteralPath $Path
+            if ($key.ValueCount -eq 0 -and $key.SubKeyCount -eq 0) {
+                Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 }
 

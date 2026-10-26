@@ -312,9 +312,9 @@ function Convert-PixelsToDip {
 # control, every other entry is a section page with its primary action.
 $tabContracts = @(
     @{ Id = 'Boostix.Center.Tab.Home'; Name = '0JPQm9CQ0JLQndCQ0K8='; PageElement = 'Boostix.Activate' },
-    @{ Id = 'Boostix.Center.Tab.Readiness'; Name = '0KHQmNCh0KLQldCc0JA='; PageElement = 'Boostix.Center.SelectTarget' },
-    @{ Id = 'Boostix.Center.Tab.Impact'; Name = '0KTQntCd'; PageElement = 'Boostix.Center.ImpactScan' },
-    @{ Id = 'Boostix.Center.Tab.Report'; Name = '0J7QotCn0IHQotCr'; PageElement = 'Boostix.Center.ReportBenchmark' },
+    @{ Id = 'Boostix.Center.Tab.Readiness'; Name = '0J/QoNCe0JLQldCg0JrQkCDQn9Ca'; PageElement = 'Boostix.Center.SelectTarget' },
+    @{ Id = 'Boostix.Center.Tab.Impact'; Name = '0KTQntCd0J7QktCr0JUg0J/QoNCe0JPQoNCQ0JzQnNCr'; PageElement = 'Boostix.Center.ImpactScan' },
+    @{ Id = 'Boostix.Center.Tab.Report'; Name = '0JjQodCi0J7QoNCY0K8='; PageElement = 'Boostix.Center.ReportBenchmark' },
     @{ Id = 'Boostix.Center.Tab.Profiles'; Name = '0JjQk9Cg0Ks='; PageElement = 'Boostix.Center.ProfileAdd' },
     @{ Id = 'Boostix.Center.Tab.Settings'; Name = '0J3QkNCh0KLQoNCe0JnQmtCY'; PageElement = 'Boostix.Center.Setting.0' }
 )

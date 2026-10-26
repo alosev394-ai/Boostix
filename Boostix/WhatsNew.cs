@@ -208,27 +208,7 @@ namespace Boostix
             card.Child = layout;
 
             var header = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
-            var badge = new Border
-            {
-                Width = 44,
-                Height = 44,
-                CornerRadius = new CornerRadius(13),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Background = BoostixDesignTokens.Gradient(
-                    BoostixDesignTokens.Accent,
-                    BoostixDesignTokens.AccentSecondary),
-                Margin = new Thickness(0, 0, 0, 14)
-            };
-            FrameworkElement icon = BoostixIcons.Create(
-                BoostixIcons.Zap,
-                22,
-                new SolidColorBrush(BoostixDesignTokens.AccentForeground),
-                2);
-            icon.HorizontalAlignment = HorizontalAlignment.Center;
-            icon.VerticalAlignment = VerticalAlignment.Center;
-            badge.Child = icon;
-            header.Children.Add(badge);
-            header.Children.Add(BoostixUi.Overline("Boostix обновился"));
+            header.Children.Add(BoostixUi.FieldLabel("Boostix обновился"));
             titleText = BoostixUi.Text(
                 string.Empty,
                 20,
@@ -249,6 +229,8 @@ namespace Boostix
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 Focusable = false
             };
+            scroller.Resources[typeof(System.Windows.Controls.Primitives.ScrollBar)] =
+                BoostCenterOverlay.MakeBoostixVerticalScrollBarStyle();
             Grid.SetRow(scroller, 1);
             layout.Children.Add(scroller);
 

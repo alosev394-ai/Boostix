@@ -59,7 +59,7 @@ namespace Boostix
         private const string ApplyScriptSha256 =
             "27CE23AD18B12C025FA5079AAC06680652A0B0D03555B39554825891E6711C3E";
         private const string RestoreScriptSha256 =
-            "BFE02A3B3C4DBC58F215A62ABFA80EBD7B3CCC40C7A2C488A62ED06D0F1C0D76";
+            "7A1FE6FF001874FC667C5425971CE9530C3845E5FC82D27260296674ABB3DFDE";
 
         private readonly Window owner;
         private readonly string[] arguments;
@@ -436,32 +436,50 @@ namespace Boostix
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var header = BuildHeader(
-                "Перед первым запуском",
+                "Настроим Windows для игр",
                 "Boostix применит обратимый профиль производительности Windows.");
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
             var body = new StackPanel { Margin = new Thickness(0, 4, 0, 12) };
-            body.Children.Add(MakeText(
-                "Сохраним исходные значения, затем программа:",
-                10.5,
-                TextColor,
-                semiboldFont,
-                FontWeights.SemiBold));
-            body.Children.Add(MakeConsentBullet("создаст и включит отдельный план Boostix Performance для питания от сети;"));
-            body.Children.Add(MakeConsentBullet("выберет максимум производительности CPU, отключит парковку ядер, простой диска и USB-селективное отключение;"));
-            body.Children.Add(MakeConsentBullet("включит Game Mode, отключит DVR-запись и ограничение мощности, снизит резерв CPU для фоновых задач до 10%;"));
-            body.Children.Add(MakeConsentBullet("выберет быстрые визуальные эффекты, отключит прозрачность и фоновые виджеты Windows;"));
-            body.Children.Add(MakeConsentBullet("попытается создать точку восстановления; после применения потребуется перезагрузка."));
-
+            body.Children.Add(MakeConsentSummary(
+                "Питание на максимум",
+                "компьютер не будет экономить энергию во время игры"));
+            body.Children.Add(MakeConsentSummary(
+                "Игровой режим Windows",
+                "фоновые задачи меньше мешают игре"));
+            body.Children.Add(MakeConsentSummary(
+                "Меньше лишних эффектов",
+                "без прозрачности, виджетов и фоновой записи"));
             var safetyText = MakeText(
-                "Меняются только отличающиеся значения. Резервная копия позволяет безопасно вернуть изменения.",
-                9.4,
+                "Сначала Boostix сохранит текущие настройки. Вернуть их можно одной кнопкой в разделе «Настройки». После настройки нужна перезагрузка.",
+                10,
                 MutedColor,
                 regularFont,
                 FontWeights.Normal);
-            safetyText.Margin = new Thickness(0, 10, 0, 0);
+            safetyText.Margin = new Thickness(0, 12, 0, 0);
             body.Children.Add(safetyText);
+
+            // Full disclosure of every change, one click away.
+            var details = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 8, 0, 0) };
+            details.Children.Add(MakeConsentBullet("создаст и включит отдельный план Boostix Performance для питания от сети;"));
+            details.Children.Add(MakeConsentBullet("выберет максимум производительности CPU, отключит парковку ядер, простой диска и USB-селективное отключение;"));
+            details.Children.Add(MakeConsentBullet("включит Game Mode, отключит DVR-запись и ограничение мощности, снизит резерв CPU для фоновых задач до 10%;"));
+            details.Children.Add(MakeConsentBullet("выберет быстрые визуальные эффекты, отключит прозрачность и фоновые виджеты Windows;"));
+            details.Children.Add(MakeConsentBullet("попытается создать точку восстановления; после применения потребуется перезагрузка."));
+            details.Children.Add(MakeConsentBullet("меняются только отличающиеся значения, резервная копия позволяет вернуть всё обратно."));
+            var detailsToggle = MakeActionButton("Что именно изменится", false);
+            detailsToggle.HorizontalAlignment = HorizontalAlignment.Left;
+            detailsToggle.Margin = new Thickness(0, 10, 0, 0);
+            detailsToggle.Click += delegate
+            {
+                bool show = details.Visibility != Visibility.Visible;
+                details.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+                BoostixUi.SetButtonText(detailsToggle, show ? "Скрыть подробности" : "Что именно изменится");
+            };
+            AutomationProperties.SetName(detailsToggle, "Показать полный список изменений");
+            body.Children.Add(detailsToggle);
+            body.Children.Add(details);
 
             if (!string.IsNullOrWhiteSpace(notice))
             {
@@ -479,7 +497,7 @@ namespace Boostix
             AutomationProperties.SetName(cancelButton, "Отменить первоначальную настройку и закрыть программу");
             buttons.Children.Add(cancelButton);
 
-            var skipButton = MakeActionButton("Без настройки", false);
+            var skipButton = MakeActionButton("Пропустить", false);
             skipButton.Margin = new Thickness(10, 0, 0, 0);
             skipButton.Click += delegate { HideFlow(); };
             AutomationProperties.SetName(
@@ -487,7 +505,7 @@ namespace Boostix
                 "Продолжить без системной оптимизации");
             buttons.Children.Add(skipButton);
 
-            var continueButton = MakeActionButton("Применить", true);
+            var continueButton = MakeActionButton("Настроить", true);
             continueButton.Margin = new Thickness(10, 0, 0, 0);
             continueButton.IsDefault = true;
             continueButton.Click += ContinueButtonClick;
@@ -1246,26 +1264,6 @@ namespace Boostix
             {
                 Margin = new Thickness(0, 0, 0, 16)
             };
-            var badge = new Border
-            {
-                Width = 44,
-                Height = 44,
-                CornerRadius = new CornerRadius(13),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Background = BoostixDesignTokens.Gradient(
-                    BoostixDesignTokens.Accent,
-                    BoostixDesignTokens.AccentSecondary),
-                Margin = new Thickness(0, 0, 0, 14)
-            };
-            FrameworkElement icon = BoostixIcons.Create(
-                BoostixIcons.Zap,
-                22,
-                new SolidColorBrush(BoostixDesignTokens.AccentForeground),
-                2);
-            icon.HorizontalAlignment = HorizontalAlignment.Center;
-            icon.VerticalAlignment = VerticalAlignment.Center;
-            badge.Child = icon;
-            header.Children.Add(badge);
             TextBlock titleText = MakeText(title, 22, TextColor, semiboldFont, FontWeights.SemiBold);
             AutomationProperties.SetHeadingLevel(titleText, AutomationHeadingLevel.Level1);
             header.Children.Add(titleText);
@@ -1278,6 +1276,33 @@ namespace Boostix
             subtitleText.Margin = new Thickness(0, 6, 0, 0);
             header.Children.Add(subtitleText);
             return header;
+        }
+
+        private FrameworkElement MakeConsentSummary(string title, string detail)
+        {
+            var row = new Grid { Margin = new Thickness(0, 8, 0, 0) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            FrameworkElement check = BoostixIcons.Create(BoostixIcons.Check, 15, BoostixDesignTokens.Success);
+            check.VerticalAlignment = VerticalAlignment.Top;
+            check.Margin = new Thickness(0, 3, 0, 0);
+            row.Children.Add(check);
+            var texts = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            texts.Inlines.Add(new System.Windows.Documents.Run(title)
+            {
+                FontFamily = semiboldFont,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(TextColor)
+            });
+            texts.Inlines.Add(new System.Windows.Documents.Run(": " + detail)
+            {
+                FontFamily = regularFont,
+                Foreground = new SolidColorBrush(BoostixDesignTokens.SecondaryText)
+            });
+            texts.FontSize = 13;
+            Grid.SetColumn(texts, 1);
+            row.Children.Add(texts);
+            return row;
         }
 
         private TextBlock MakeConsentBullet(string text)

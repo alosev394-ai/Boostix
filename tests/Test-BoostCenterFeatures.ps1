@@ -130,7 +130,7 @@ $windowControlsStart = $program.IndexOf(
     'private StackPanel BuildWindowControls()',
     [StringComparison]::Ordinal)
 $windowControlsEnd = $program.IndexOf(
-    'private Grid BuildBoostButton()',
+    'private FrameworkElement BuildBoostButton()',
     $windowControlsStart,
     [StringComparison]::Ordinal)
 if ($windowControlsStart -lt 0 -or $windowControlsEnd -le $windowControlsStart) {
@@ -283,8 +283,7 @@ foreach ($required in @(
     'BoostixDesignTokens.Accent',
     'BoostixDesignTokens.AccentText',
     'MakeBoostixVerticalScrollBarStyle',
-    'ProductBrand.AccentVisualHex',
-    'ProductBrand.AccentHex',
+    'ColorToXaml(BoostixDesignTokens.Hover)',
     'CanContentScroll = false',
     'PageScrollerPreviewMouseWheel',
     'CalculateSmoothScrollTarget',
@@ -337,7 +336,7 @@ foreach ($forbiddenPublicUi in @(
     }
 }
 foreach ($requiredPublicUi in @(
-    'BOOSTIX",',
+    'ProductBrand.ProductName,',
     '"Boostix.Center"',
     '"Boostix.Center.SelectTarget"',
     '"Boostix.Center.ImpactScan"',
@@ -393,7 +392,7 @@ $mainCompositionStart = $program.IndexOf(
     'private Grid BuildShell()',
     [StringComparison]::Ordinal)
 $mainCompositionEnd = $program.IndexOf(
-    'private TextBlock AddLiveMetric(',
+    'private TextBlock AddStatusRow(',
     $mainCompositionStart,
     [StringComparison]::Ordinal)
 if ($mainCompositionStart -lt 0 -or $mainCompositionEnd -le $mainCompositionStart) {
@@ -407,7 +406,7 @@ foreach ($required in @(
     'private Button BuildTargetSelector()',
     'private Border BuildBoostCard()',
     'private Border BuildHomeSystemCard()',
-    'Grid orb = BuildBoostButton();'
+    'FrameworkElement gauge = BuildBoostButton();'
 )) {
     if (-not $mainComposition.Contains($required)) {
         throw "The Home composition contract is missing: $required"

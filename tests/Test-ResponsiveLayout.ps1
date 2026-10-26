@@ -713,7 +713,10 @@ foreach ($sourceText in @(
 
 $tokensSource = Get-Content -Raw -Encoding UTF8 (
     Join-Path $projectRoot 'Boostix\DesignTokens.cs')
-if ([regex]::Matches($tokensSource, 'SystemParameters\.ClientAreaAnimation').Count -lt 3) {
+# MotionEnabled (used by the Boost gauge) and the shared colour animation; 3.0
+# removed the hover lift, so there is no third animated helper any more.
+if ([regex]::Matches($tokensSource, 'SystemParameters\.ClientAreaAnimation').Count -lt 2 -or
+    -not $tokensSource.Contains('public static bool MotionEnabled')) {
     throw 'Shared button and color motion no longer respects reduced motion.'
 }
 foreach ($motionSourcePath in @(

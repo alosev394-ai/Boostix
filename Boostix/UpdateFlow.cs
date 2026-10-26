@@ -3709,7 +3709,7 @@ namespace Boostix
             body.Children.Add(progressPercentText);
 
             progressStageText = MakeText(
-                "Скачиваем установщик...",
+                "Скачиваем обновление…",
                 11.5,
                 TextColor,
                 semiboldFont,
@@ -3786,17 +3786,17 @@ namespace Boostix
 
             if (progress.Stage == UpdateProgressStage.Verifying)
             {
-                progressStageText.Text = "Проверяем целостность и версию...";
+                progressStageText.Text = "Проверяем файл…";
                 progressBytesText.Text = "Загрузка завершена";
             }
             else if (progress.Stage == UpdateProgressStage.Launching)
             {
-                progressStageText.Text = "Открываем установщик...";
+                progressStageText.Text = "Открываем установку…";
                 progressBytesText.Text = "Подтвердите запрос Windows";
             }
             else
             {
-                progressStageText.Text = "Скачиваем установщик...";
+                progressStageText.Text = "Скачиваем обновление…";
                 progressBytesText.Text = FormatBytes(downloaded) + " из " + FormatBytes(total);
             }
             AutomationProperties.SetName(progressStageText, progressStageText.Text);
@@ -3836,7 +3836,7 @@ namespace Boostix
 
             StackPanel header = BuildHeader(
                 "Доступно обновление",
-                "Для продолжения необходимо обновить Boostix.");
+                "Вышла новая версия Boostix.");
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
@@ -3856,7 +3856,7 @@ namespace Boostix
             body.Children.Add(versionText);
 
             TextBlock description = MakeText(
-                "Программа скачает установщик с официального GitHub-репозитория, проверит размер, версию и SHA-256, затем запросит права администратора.",
+                "Boostix скачает обновление, проверит его и попросит разрешения Windows на установку.",
                 10.5,
                 MutedColor,
                 regularFont,
@@ -3896,7 +3896,7 @@ namespace Boostix
 
             StackPanel header = BuildHeader(
                 "Нужно обновление",
-                "Текущая версия не будет запущена без обязательного обновления.");
+                "Эта версия больше не запускается. Установите обновление.");
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
@@ -3937,7 +3937,7 @@ namespace Boostix
 
             StackPanel header = BuildHeader(
                 "Обновление готово",
-                "Проверенный установщик передаётся отдельному окну обновления.");
+                "Сейчас откроется установка.");
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
@@ -3971,26 +3971,6 @@ namespace Boostix
             {
                 Margin = new Thickness(0, 0, 0, 16)
             };
-            var badge = new Border
-            {
-                Width = 44,
-                Height = 44,
-                CornerRadius = new CornerRadius(13),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Background = BoostixDesignTokens.Gradient(
-                    BoostixDesignTokens.Accent,
-                    BoostixDesignTokens.AccentSecondary),
-                Margin = new Thickness(0, 0, 0, 14)
-            };
-            FrameworkElement icon = BoostixIcons.Create(
-                BoostixIcons.Download,
-                22,
-                new SolidColorBrush(BoostixDesignTokens.AccentForeground),
-                2);
-            icon.HorizontalAlignment = HorizontalAlignment.Center;
-            icon.VerticalAlignment = VerticalAlignment.Center;
-            badge.Child = icon;
-            header.Children.Add(badge);
             TextBlock titleText = MakeText(title, 22, TextColor, semiboldFont, FontWeights.SemiBold);
             AutomationProperties.SetHeadingLevel(titleText, AutomationHeadingLevel.Level1);
             header.Children.Add(titleText);

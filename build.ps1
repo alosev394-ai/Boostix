@@ -175,6 +175,8 @@ $appArguments = @(
     '/reference:System.Core.dll',
     '/reference:System.Management.dll',
     '/reference:System.IO.Compression.dll',
+    '/reference:System.Drawing.dll',
+    '/reference:System.Windows.Forms.dll',
     "/reference:$frameworkRoot\System.Xaml.dll",
     "/reference:$wpfRoot\WindowsBase.dll",
     "/reference:$wpfRoot\PresentationCore.dll",
@@ -185,6 +187,7 @@ $appArguments = @(
     "/out:$appOutput",
     "$projectRoot\ProductBrand.cs",
     "$projectRoot\Boostix\DesignTokens.cs",
+    "$projectRoot\Boostix\BoostGauge.cs",
     "$projectRoot\Boostix\BackgroundImpact.cs",
     "$projectRoot\Boostix\GameTargetProfiles.cs",
     "$projectRoot\Boostix\SessionGuard.cs",
@@ -200,7 +203,8 @@ $appArguments = @(
     "$projectRoot\Boostix\PerformanceCapture.cs",
     "$projectRoot\Boostix\OptimizationFlow.cs",
     "$projectRoot\Boostix\UpdateFlow.cs",
-    "$projectRoot\Boostix\WhatsNew.cs"
+    "$projectRoot\Boostix\WhatsNew.cs",
+    "$projectRoot\Boostix\TrayIntegration.cs"
 )
 
 & $compiler @appArguments

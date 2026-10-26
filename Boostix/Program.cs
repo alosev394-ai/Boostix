@@ -240,7 +240,6 @@ namespace Boostix
         private const double BaseWindowWidth = BoostixDesignTokens.WindowWidth;
         private const double BaseWindowHeight = BoostixDesignTokens.WindowHeight;
         private const double TitleControlSize = 32;
-        private const double OrbSize = 164;
         private const double WorkAreaSafetyInset = 8;
         private const string GuidedProofScenarioId =
             "BOOSTIX-GUIDED-SAME-SCENE-V1";
@@ -324,13 +323,6 @@ namespace Boostix
             ref int attributeValue,
             int attributeSize);
 
-        private enum OrbState
-        {
-            Idle,
-            Working,
-            Active
-        }
-
         private sealed class ChromeButtonVisuals
         {
             public SolidColorBrush BackgroundBrush;
@@ -369,36 +361,26 @@ namespace Boostix
         private Button centerButton;
         private Button minimizeButton;
         private Button closeButton;
-        private Ellipse orbRing;
-        private Ellipse orbGlow;
-        private System.Windows.Shapes.Path orbSpinner;
-        private RotateTransform orbSpinnerRotation;
-        private OrbState orbState = OrbState.Idle;
+        private BoostGauge boostGauge;
         private Border targetIconHost;
         private TextBlock targetActionText;
-        private Border homePressureHost;
+        private Ellipse homeVerdictDot;
         private StackPanel homeMeters;
         private TextBlock homeChecksText;
-        private Grid rocket;
-        private Canvas grayRocketLayer;
-        private Canvas colorRocketLayer;
-        private Canvas starField;
-        private Grid flameLayer;
+        private TextBlock homeChecksDetail;
         private TextBlock caption;
         private Button targetSelectorButton;
         private TextBlock targetNameText;
         private TextBlock targetDetailText;
         private TextBlock liveStateText;
-        private TextBlock liveMemoryText;
         private TextBlock liveTimerText;
         private OptimizationFlowOverlay optimizationOverlay;
         private UpdateFlowOverlay updateOverlay;
         private WhatsNewOverlay whatsNewOverlay;
+        private BoostixTrayIcon trayIcon;
+        private HwndSource hotkeySource;
+        private bool hotkeyRegistered;
         private BoostCenterOverlay boostCenterOverlay;
-        private ScaleTransform rocketScale;
-        private TranslateTransform flightTranslation;
-        private TranslateTransform floatTranslation;
-        private readonly List<FrameworkElement> stars = new List<FrameworkElement>();
         private DispatcherTimer readinessTimer;
         private DispatcherTimer activeBoostTimer;
         private DispatcherTimer autoBoostDiscoveryTimer;
@@ -679,6 +661,7 @@ namespace Boostix
             {
                 centerSettings = boostCenterOverlay.Settings;
                 SaveBoostPreferences();
+                ApplyHotkeyPreference();
                 if (boostActive)
                 {
                     RefreshActiveBoostMaintenance();
@@ -855,8 +838,6 @@ namespace Boostix
             {
                 Height = new GridLength(1, GridUnitType.Star)
             });
-            home.RowDefinitions.Add(new RowDefinition { Height = new GridLength(14) });
-            home.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             AutomationProperties.SetAutomationId(home, "Boostix.Home");
 
             Button target = BuildTargetSelector();
@@ -864,7 +845,7 @@ namespace Boostix
             home.Children.Add(target);
 
             var hero = new Grid();
-            hero.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(248) });
+            hero.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(268) });
             hero.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
             hero.ColumnDefinitions.Add(new ColumnDefinition
             {
@@ -878,25 +859,6 @@ namespace Boostix
             hero.Children.Add(systemCard);
             Grid.SetRow(hero, 2);
             home.Children.Add(hero);
-
-            var metrics = new Grid();
-            metrics.ColumnDefinitions.Add(new ColumnDefinition
-            {
-                Width = new GridLength(1, GridUnitType.Star)
-            });
-            metrics.ColumnDefinitions.Add(new ColumnDefinition
-            {
-                Width = new GridLength(1, GridUnitType.Star)
-            });
-            metrics.ColumnDefinitions.Add(new ColumnDefinition
-            {
-                Width = new GridLength(1, GridUnitType.Star)
-            });
-            liveStateText = AddLiveMetric(metrics, BoostixIcons.Activity, "Сеанс", "Нет цели", 0);
-            liveMemoryText = AddLiveMetric(metrics, BoostixIcons.Memory, "Запас памяти", "—", 1);
-            liveTimerText = AddLiveMetric(metrics, BoostixIcons.Clock, "Время сеанса", "00:00", 2);
-            Grid.SetRow(metrics, 4);
-            home.Children.Add(metrics);
 
             if (updateHealthProbe)
             {
@@ -950,7 +912,7 @@ namespace Boostix
                 "Boostix.Target.Select");
             AutomationProperties.SetHelpText(
                 targetSelectorButton,
-                "Выбор привязывается к точному процессу, времени запуска и пути EXE.");
+                "Покажет запущенные игры. Boostix запомнит выбранную игру по её файлу EXE.");
 
             var targetContent = new Grid();
             targetContent.ColumnDefinitions.Add(new ColumnDefinition
@@ -988,11 +950,11 @@ namespace Boostix
                 Margin = new Thickness(14, 0, 12, 0),
                 VerticalAlignment = VerticalAlignment.Center
             };
-            texts.Children.Add(BoostixUi.Overline("Игра для Boost"));
+            texts.Children.Add(BoostixUi.FieldLabel("Шаг 1. Игра"));
             targetNameText = MakeText(
                 "Выберите игру",
                 17,
-                "#FFF4F2FA",
+                "#FFEDEFF2",
                 FontWeights.SemiBold);
             targetNameText.SetResourceReference(
                 TextBlock.ForegroundProperty,
@@ -1003,9 +965,9 @@ namespace Boostix
             texts.Children.Add(targetNameText);
 
             targetDetailText = MakeText(
-                "Boostix привяжется к точному процессу и пути EXE",
+                "Запустите игру, затем выберите её здесь",
                 BoostixDesignTokens.MetadataTextSize,
-                "#FF928CAA",
+                "#FF8A929C",
                 FontWeights.Normal);
             targetDetailText.SetResourceReference(
                 TextBlock.ForegroundProperty,
@@ -1047,7 +1009,7 @@ namespace Boostix
             {
                 AnimateBrush(
                     targetBorder,
-                    BoostixDesignTokens.Accent,
+                    BoostixDesignTokens.SecondaryText,
                     BoostixDesignTokens.MotionStandardMilliseconds);
                 AnimateBrush(
                     targetBackground,
@@ -1101,10 +1063,11 @@ namespace Boostix
 
         private Border BuildBoostCard()
         {
-            var card = BoostixUi.Card(new Thickness(14, 16, 14, 16));
+            var card = BoostixUi.Card(new Thickness(14, 12, 14, 14));
             card.CornerRadius = new CornerRadius(BoostixDesignTokens.RadiusLarge);
             AutomationProperties.SetAutomationId(card, "Boostix.BoostCard");
             var layout = new Grid();
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition
             {
                 Height = new GridLength(1, GridUnitType.Star)
@@ -1112,15 +1075,20 @@ namespace Boostix
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            Grid orb = BuildBoostButton();
-            orb.HorizontalAlignment = HorizontalAlignment.Center;
-            orb.VerticalAlignment = VerticalAlignment.Center;
-            layout.Children.Add(orb);
+            TextBlock step = BoostixUi.FieldLabel("Шаг 2. Boost");
+            step.HorizontalAlignment = HorizontalAlignment.Left;
+            layout.Children.Add(step);
+
+            FrameworkElement gauge = BuildBoostButton();
+            gauge.HorizontalAlignment = HorizontalAlignment.Center;
+            gauge.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetRow(gauge, 1);
+            layout.Children.Add(gauge);
 
             caption = MakeText(
-                "Нажмите, чтобы запустить",
+                "Boost выключен",
                 15,
-                "#FFC4BFD4",
+                "#FFB4BBC3",
                 FontWeights.SemiBold);
             caption.SetResourceReference(
                 TextBlock.ForegroundProperty,
@@ -1128,25 +1096,24 @@ namespace Boostix
             caption.FontFamily = LoadAppSemiboldFontFamily();
             caption.HorizontalAlignment = HorizontalAlignment.Center;
             caption.TextAlignment = TextAlignment.Center;
-            caption.Margin = new Thickness(0, 4, 0, 0);
             AutomationProperties.SetName(caption, "Состояние Boost");
             AutomationProperties.SetAutomationId(caption, "Boostix.Status");
             AutomationProperties.SetLiveSetting(caption, AutomationLiveSetting.Polite);
-            Grid.SetRow(caption, 1);
+            Grid.SetRow(caption, 2);
             layout.Children.Add(caption);
 
             var hint = MakeText(
-                "Enter — запуск и остановка",
-                BoostixDesignTokens.OverlineTextSize,
-                "#FF928CAA",
+                "Нажмите на датчик или Enter",
+                BoostixDesignTokens.MetadataTextSize,
+                "#FF8A929C",
                 FontWeights.Normal);
             hint.SetResourceReference(
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.MutedTextBrushKey);
             hint.HorizontalAlignment = HorizontalAlignment.Center;
-            hint.Margin = new Thickness(0, 4, 0, 0);
+            hint.Margin = new Thickness(0, 3, 0, 0);
             AutomationProperties.SetAutomationId(hint, "Boostix.Hint");
-            Grid.SetRow(hint, 2);
+            Grid.SetRow(hint, 3);
             layout.Children.Add(hint);
             card.Child = layout;
             return card;
@@ -1154,10 +1121,11 @@ namespace Boostix
 
         private Border BuildHomeSystemCard()
         {
-            var card = BoostixUi.Card(new Thickness(18, 16, 18, 12));
+            var card = BoostixUi.Card(new Thickness(20, 18, 20, 12));
             card.CornerRadius = new CornerRadius(BoostixDesignTokens.RadiusLarge);
             AutomationProperties.SetAutomationId(card, "Boostix.SystemCard");
             var layout = new Grid();
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition
             {
@@ -1165,66 +1133,70 @@ namespace Boostix
             });
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            var header = new Grid();
-            header.ColumnDefinitions.Add(new ColumnDefinition
+            // One plain verdict first: can I play right now?
+            var verdict = new Grid();
+            verdict.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            verdict.ColumnDefinitions.Add(new ColumnDefinition
             {
                 Width = new GridLength(1, GridUnitType.Star)
             });
-            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var title = MakeText(
-                "Система",
-                BoostixDesignTokens.SectionTitleSize,
-                "#FFF4F2FA",
+            homeVerdictDot = new Ellipse
+            {
+                Width = 10,
+                Height = 10,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, 6, 12, 0)
+            };
+            verdict.Children.Add(homeVerdictDot);
+            var verdictTexts = new StackPanel();
+            homeChecksText = MakeText(
+                "Проверяем компьютер…",
+                17,
+                "#FFEDEFF2",
                 FontWeights.SemiBold);
-            title.SetResourceReference(
+            homeChecksText.SetResourceReference(
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.TextBrushKey);
-            title.FontFamily = LoadAppSemiboldFontFamily();
-            title.VerticalAlignment = VerticalAlignment.Center;
-            header.Children.Add(title);
-            homePressureHost = new Border
-            {
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            Grid.SetColumn(homePressureHost, 1);
-            header.Children.Add(homePressureHost);
-            layout.Children.Add(header);
-
-            homeMeters = new StackPanel
-            {
-                Margin = new Thickness(0, 14, 0, 0)
-            };
-            AutomationProperties.SetAutomationId(homeMeters, "Boostix.SystemMeters");
-            Grid.SetRow(homeMeters, 1);
-            layout.Children.Add(homeMeters);
-
-            var footer = new Grid
-            {
-                Margin = new Thickness(0, 4, 0, 0)
-            };
-            footer.ColumnDefinitions.Add(new ColumnDefinition
-            {
-                Width = new GridLength(1, GridUnitType.Star)
-            });
-            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            homeChecksText = MakeText(
-                "Проверки выполняются…",
-                BoostixDesignTokens.MetadataTextSize,
-                "#FF928CAA",
-                FontWeights.SemiBold);
             homeChecksText.FontFamily = LoadAppSemiboldFontFamily();
-            homeChecksText.VerticalAlignment = VerticalAlignment.Center;
+            homeChecksText.TextWrapping = TextWrapping.Wrap;
+            homeChecksText.TextTrimming = TextTrimming.None;
             AutomationProperties.SetAutomationId(homeChecksText, "Boostix.SystemChecks");
             AutomationProperties.SetLiveSetting(homeChecksText, AutomationLiveSetting.Polite);
-            footer.Children.Add(homeChecksText);
+            verdictTexts.Children.Add(homeChecksText);
+            homeChecksDetail = MakeText(
+                "Это займёт пару секунд",
+                BoostixDesignTokens.BodyTextSize,
+                "#FF8A929C",
+                FontWeights.Normal);
+            homeChecksDetail.SetResourceReference(
+                TextBlock.ForegroundProperty,
+                BoostixDesignTokens.MutedTextBrushKey);
+            homeChecksDetail.TextWrapping = TextWrapping.Wrap;
+            homeChecksDetail.TextTrimming = TextTrimming.None;
+            homeChecksDetail.Margin = new Thickness(0, 3, 0, 0);
+            verdictTexts.Children.Add(homeChecksDetail);
+            Grid.SetColumn(verdictTexts, 1);
+            verdict.Children.Add(verdictTexts);
+            layout.Children.Add(verdict);
+
+            var rows = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
+            homeMeters = new StackPanel();
+            AutomationProperties.SetAutomationId(homeMeters, "Boostix.SystemMeters");
+            rows.Children.Add(homeMeters);
+            liveStateText = AddStatusRow(rows, "Сеанс", "Игра не выбрана");
+            liveTimerText = AddStatusRow(rows, "Время в игре", "00:00");
+            Grid.SetRow(rows, 1);
+            layout.Children.Add(rows);
+
             Button details = BoostixUi.ActionButton(
-                "Подробнее",
+                "Подробнее о проверке",
                 BoostixButtonKind.Ghost,
-                BoostixIcons.Activity);
+                null);
             details.MinWidth = 0;
-            details.Padding = new Thickness(12, 0, 12, 0);
-            details.Margin = new Thickness(0, 0, -8, 0);
-            AutomationProperties.SetName(details, "Открыть раздел «Система»");
+            details.HorizontalAlignment = HorizontalAlignment.Left;
+            details.Padding = new Thickness(10, 0, 10, 0);
+            details.Margin = new Thickness(-10, 0, 0, 0);
+            AutomationProperties.SetName(details, "Открыть раздел «Проверка ПК»");
             AutomationProperties.SetAutomationId(details, "Boostix.OpenSystem");
             KeyboardNavigation.SetTabIndex(details, 12);
             details.Click += delegate
@@ -1234,10 +1206,8 @@ namespace Boostix
                     boostCenterOverlay.OpenReadiness(false);
                 }
             };
-            Grid.SetColumn(details, 1);
-            footer.Children.Add(details);
-            Grid.SetRow(footer, 2);
-            layout.Children.Add(footer);
+            Grid.SetRow(details, 3);
+            layout.Children.Add(details);
 
             card.Child = layout;
             UpdateHomeSystemCard();
@@ -1246,93 +1216,87 @@ namespace Boostix
 
         private void UpdateHomeSystemCard()
         {
-            if (homeMeters == null || homePressureHost == null || homeChecksText == null)
+            if (homeMeters == null || homeChecksText == null || homeChecksDetail == null)
             {
                 return;
             }
 
             DiagnosticSnapshot snapshot = latestDiagnosticSnapshot;
             homeMeters.Children.Clear();
-            if (snapshot == null || !snapshot.MemoryAvailable)
+            if (snapshot != null && snapshot.MemoryAvailable && snapshot.PhysicalTotalBytes > 0)
             {
-                homePressureHost.Child = null;
-                var waiting = MakeText(
-                    "Собираем показатели памяти…",
-                    BoostixDesignTokens.BodyTextSize,
-                    "#FF928CAA",
-                    FontWeights.Normal);
-                waiting.SetResourceReference(
-                    TextBlock.ForegroundProperty,
-                    BoostixDesignTokens.MutedTextBrushKey);
-                homeMeters.Children.Add(waiting);
-            }
-            else
-            {
-                homePressureHost.Child = BoostixUi.Chip(
-                    DescribePressure(snapshot.Pressure),
-                    PressureColor(snapshot.Pressure));
                 AddHomeMeter(
-                    "Оперативная память",
-                    snapshot.PhysicalTotalBytes - snapshot.PhysicalAvailableBytes,
-                    snapshot.PhysicalTotalBytes);
-                if (snapshot.GpuUsageAvailable &&
-                    snapshot.GpuTotalAvailable &&
-                    snapshot.GpuDedicatedTotalBytes > 0)
-                {
-                    AddHomeMeter(
-                        "Видеопамять",
-                        snapshot.GpuDedicatedUsageBytes,
-                        snapshot.GpuDedicatedTotalBytes);
-                }
-                AddHomeMeter(
-                    "Виртуальная память",
-                    snapshot.CommitLimitBytes - snapshot.CommitHeadroomBytes,
-                    snapshot.CommitLimitBytes);
+                    "Свободно памяти",
+                    snapshot.PhysicalAvailableBytes,
+                    snapshot.PhysicalTotalBytes,
+                    snapshot.Pressure);
             }
 
             BoostPreflightReport report = latestPreflight;
-            string checks;
-            Color checksColor;
+            string verdict;
+            string detail;
+            Color color;
             if (report == null)
             {
-                checks = "Проверки выполняются…";
-                checksColor = BoostixDesignTokens.MutedText;
+                verdict = "Проверяем компьютер…";
+                detail = "Это займёт пару секунд";
+                color = BoostixDesignTokens.MutedText;
             }
             else
             {
-                int blocked = report.Checks.Count(
+                BoostCheckResult blocked = report.Checks.FirstOrDefault(
                     check => check.Severity == BoostCheckSeverity.Blocked);
-                int warnings = report.Checks.Count(
+                BoostCheckResult warning = report.Checks.FirstOrDefault(
                     check => check.Severity == BoostCheckSeverity.Warning);
-                if (blocked > 0)
+                if (blocked != null)
                 {
-                    checks = "Блокирует запуск: " + blocked.ToString(CultureInfo.CurrentCulture);
-                    checksColor = BoostixDesignTokens.Error;
+                    verdict = "Boost сейчас не запустится";
+                    detail = "Причина: " + LowerFirst(BoostixUi.DisplayCase(blocked.Title));
+                    color = BoostixDesignTokens.Error;
                 }
-                else if (warnings > 0)
+                else if (warning != null)
                 {
-                    checks = "Предупреждений: " + warnings.ToString(CultureInfo.CurrentCulture);
-                    checksColor = BoostixDesignTokens.Warning;
+                    verdict = "Можно играть, есть замечание";
+                    detail = "Замечание: " + LowerFirst(BoostixUi.DisplayCase(warning.Title));
+                    color = BoostixDesignTokens.Warning;
                 }
                 else
                 {
-                    checks = "Все проверки пройдены";
-                    checksColor = BoostixDesignTokens.Success;
+                    verdict = "Компьютер готов к игре";
+                    detail = "Все проверки пройдены";
+                    color = BoostixDesignTokens.Success;
                 }
             }
-            homeChecksText.Text = checks;
-            homeChecksText.Foreground = BoostixDesignTokens.Brush(checksColor);
-            AutomationProperties.SetName(homeChecksText, checks);
+            homeChecksText.Text = verdict;
+            homeChecksDetail.Text = detail;
+            if (homeVerdictDot != null)
+            {
+                homeVerdictDot.Fill = BoostixDesignTokens.Brush(color);
+            }
+            AutomationProperties.SetName(homeChecksText, verdict + ". " + detail);
         }
 
-        private void AddHomeMeter(string label, long usedBytes, long totalBytes)
+        private static string LowerFirst(string text)
+        {
+            if (string.IsNullOrEmpty(text) || text.Length < 2 || char.IsUpper(text[1]))
+            {
+                return text ?? string.Empty;
+            }
+            return char.ToLower(text[0], CultureInfo.CurrentCulture) + text.Substring(1);
+        }
+
+        private void AddHomeMeter(
+            string label,
+            long freeBytes,
+            long totalBytes,
+            DiagnosticPressureLevel pressure)
         {
             double fraction = totalBytes > 0
-                ? Math.Max(0, Math.Min(1, (double)usedBytes / totalBytes))
+                ? Math.Max(0, Math.Min(1, (double)freeBytes / totalBytes))
                 : 0;
             var row = new Grid
             {
-                Margin = new Thickness(0, 0, 0, 13)
+                Margin = new Thickness(0, 0, 0, 12)
             };
             row.ColumnDefinitions.Add(new ColumnDefinition
             {
@@ -1345,18 +1309,18 @@ namespace Boostix
             var name = MakeText(
                 label,
                 BoostixDesignTokens.BodyTextSize,
-                "#FFC4BFD4",
+                "#FFB4BBC3",
                 FontWeights.Normal);
             name.SetResourceReference(
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.SecondaryTextBrushKey);
             row.Children.Add(name);
-            string valueText = FormatMemoryCompact(usedBytes) + " из " +
+            string valueText = FormatMemoryCompact(freeBytes) + " из " +
                 FormatMemoryCompact(totalBytes);
             var value = MakeText(
                 valueText,
                 BoostixDesignTokens.BodyTextSize,
-                "#FFF4F2FA",
+                "#FFEDEFF2",
                 FontWeights.SemiBold);
             value.SetResourceReference(
                 TextBlock.ForegroundProperty,
@@ -1365,12 +1329,12 @@ namespace Boostix
             Grid.SetColumn(value, 1);
             row.Children.Add(value);
 
-            Color fill = fraction >= 0.92
+            Color fill = pressure == DiagnosticPressureLevel.Critical
                 ? BoostixDesignTokens.Error
-                : (fraction >= 0.8
+                : (pressure == DiagnosticPressureLevel.Elevated
                     ? BoostixDesignTokens.Warning
-                    : BoostixDesignTokens.Accent);
-            Grid bar = BoostixUi.ProgressBar(fraction, fill, 6);
+                    : BoostixDesignTokens.SecondaryText);
+            Grid bar = BoostixUi.ProgressBar(fraction, fill, 4);
             bar.Margin = new Thickness(0, 7, 0, 0);
             Grid.SetRow(bar, 1);
             Grid.SetColumnSpan(bar, 2);
@@ -1409,71 +1373,42 @@ namespace Boostix
             }
         }
 
-        private TextBlock AddLiveMetric(
-            Grid host,
-            string iconData,
-            string label,
-            string value,
-            int column)
+        private TextBlock AddStatusRow(Panel host, string label, string value)
         {
-            var tile = BoostixUi.Card(new Thickness(14, 12, 14, 12));
-            tile.Margin = new Thickness(
-                column == 0 ? 0 : 7,
-                0,
-                column == 2 ? 0 : 7,
-                0);
-            var layout = new Grid();
-            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            layout.ColumnDefinitions.Add(new ColumnDefinition
+            var row = new Grid
+            {
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            row.ColumnDefinitions.Add(new ColumnDefinition
             {
                 Width = new GridLength(1, GridUnitType.Star)
             });
-
-            var badge = new Border
-            {
-                Width = 34,
-                Height = 34,
-                CornerRadius = new CornerRadius(10),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            badge.SetResourceReference(
-                Border.BackgroundProperty,
-                BoostixDesignTokens.SurfaceRaisedBrushKey);
-            FrameworkElement icon = BoostixIcons.Create(
-                iconData,
-                17,
-                BoostixDesignTokens.AccentText);
-            icon.HorizontalAlignment = HorizontalAlignment.Center;
-            icon.VerticalAlignment = VerticalAlignment.Center;
-            badge.Child = icon;
-            layout.Children.Add(badge);
-
-            var texts = new StackPanel
-            {
-                Margin = new Thickness(12, 0, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            texts.Children.Add(BoostixUi.Overline(label));
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var name = MakeText(
+                label,
+                BoostixDesignTokens.BodyTextSize,
+                "#FFB4BBC3",
+                FontWeights.Normal);
+            name.SetResourceReference(
+                TextBlock.ForegroundProperty,
+                BoostixDesignTokens.SecondaryTextBrushKey);
+            row.Children.Add(name);
             var valueText = MakeText(
                 value,
-                17,
-                "#FFF4F2FA",
+                BoostixDesignTokens.BodyTextSize,
+                "#FFEDEFF2",
                 FontWeights.SemiBold);
             valueText.SetResourceReference(
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.TextBrushKey);
             valueText.FontFamily = LoadAppSemiboldFontFamily();
-            valueText.Margin = new Thickness(0, 2, 0, 0);
             valueText.TextTrimming = TextTrimming.CharacterEllipsis;
             AutomationProperties.SetLiveSetting(
                 valueText,
                 AutomationLiveSetting.Polite);
-            texts.Children.Add(valueText);
-            Grid.SetColumn(texts, 1);
-            layout.Children.Add(texts);
-            tile.Child = layout;
-            Grid.SetColumn(tile, column);
-            host.Children.Add(tile);
+            Grid.SetColumn(valueText, 1);
+            row.Children.Add(valueText);
+            host.Children.Add(row);
             return valueText;
         }
 
@@ -1496,7 +1431,7 @@ namespace Boostix
                 FontSize = BoostixDesignTokens.BodyTextSize,
                 HasDropShadow = false
             };
-            AutomationProperties.SetName(menu, "Запущенные игры и приложения");
+            AutomationProperties.SetName(menu, "Запущенные игры и программы");
             Style itemStyle = BuildTargetMenuItemStyle();
 
             IList<GameTargetCandidate> candidates =
@@ -1504,9 +1439,9 @@ namespace Boostix
             if (candidates.Count == 0)
             {
                 var empty = MakeText(
-                    "Нет подходящих запущенных окон — запустите игру и откройте список снова.",
+                    "Запущенных игр не нашли. Запустите игру и откройте список снова.",
                     BoostixDesignTokens.BodyTextSize,
-                    "#FF928CAA",
+                    "#FF8A929C",
                     FontWeights.Normal);
                 empty.Foreground = BoostixDesignTokens.Brush(
                     BoostixDesignTokens.MutedText);
@@ -1543,18 +1478,17 @@ namespace Boostix
                     var name = MakeText(
                         selectedCandidate.DisplayName,
                         13.5,
-                        "#FFF4F2FA",
+                        "#FFEDEFF2",
                         FontWeights.SemiBold);
                     name.Foreground = BoostixDesignTokens.Brush(
                         BoostixDesignTokens.Text);
                     name.FontFamily = LoadAppSemiboldFontFamily();
                     texts.Children.Add(name);
                     var detail = MakeText(
-                        "PID " + selectedCandidate.Identity.ProcessId +
-                        " · " + System.IO.Path.GetFileName(
+                        System.IO.Path.GetFileName(
                             selectedCandidate.Identity.ExecutablePath),
                         BoostixDesignTokens.MetadataTextSize,
-                        "#FF928CAA",
+                        "#FF8A929C",
                         FontWeights.Normal);
                     detail.Foreground = BoostixDesignTokens.Brush(
                         BoostixDesignTokens.MutedText);
@@ -1583,7 +1517,7 @@ namespace Boostix
                                 out error))
                         {
                             ClearSelectedTarget(
-                                "Список устарел — откройте выбор игры снова");
+                                "Список устарел. Откройте выбор игры снова");
                             return;
                         }
                         SelectGameTarget(
@@ -1716,8 +1650,7 @@ namespace Boostix
                 ? identity.ProcessName
                 : displayName.Trim();
             targetNameText.Text = safeName;
-            targetDetailText.Text = "PID " + identity.ProcessId +
-                " · " + System.IO.Path.GetFileName(identity.ExecutablePath);
+            targetDetailText.Text = "Игра запущена";
             targetDetailText.ToolTip = identity.ExecutablePath;
             SetTargetIcon(identity.ExecutablePath);
             if (targetActionText != null)
@@ -1726,7 +1659,7 @@ namespace Boostix
             }
             AutomationProperties.SetName(
                 targetSelectorButton,
-                "Выбрана игра " + safeName + ", PID " + identity.ProcessId);
+                "Выбрана игра " + safeName);
             AutomationProperties.SetItemStatus(
                 targetSelectorButton,
                 "Выбрано");
@@ -1765,7 +1698,7 @@ namespace Boostix
             }
             targetNameText.Text = "Выберите игру";
             targetDetailText.Text = string.IsNullOrWhiteSpace(detail)
-                ? "Boostix привяжется к точному процессу и пути EXE"
+                ? "Запустите игру, затем выберите её здесь"
                 : detail;
             targetDetailText.ToolTip = null;
             SetTargetIcon(null);
@@ -1881,7 +1814,7 @@ namespace Boostix
             AutomationProperties.SetAutomationId(
                 minimize,
                 "Boostix.Minimize");
-            minimize.Click += delegate { WindowState = WindowState.Minimized; };
+            minimize.Click += delegate { MinimizeWindow(); };
             controls.Children.Add(minimize);
 
             closeButton = MakeWindowButton("Закрыть", true);
@@ -1896,217 +1829,46 @@ namespace Boostix
             return controls;
         }
 
-        private Grid BuildBoostButton()
+        private FrameworkElement BuildBoostButton()
         {
-            var stage = new Grid
-            {
-                Width = OrbSize + 24,
-                Height = OrbSize + 24,
-                ClipToBounds = false
-            };
-
-            orbGlow = new Ellipse
-            {
-                Width = OrbSize - 22,
-                Height = OrbSize - 22,
-                Opacity = 0,
-                IsHitTestVisible = false,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            if (!SystemParameters.HighContrast)
-            {
-                orbGlow.Effect = new BlurEffect { Radius = 34 };
-            }
-            stage.Children.Add(orbGlow);
-
+            boostGauge = new BoostGauge();
             boostButton = new Button();
-            boostButton.Width = OrbSize;
-            boostButton.Height = OrbSize;
+            boostButton.Width = BoostGauge.GaugeWidth;
+            boostButton.Height = BoostGauge.GaugeHeight;
             boostButton.HorizontalAlignment = HorizontalAlignment.Center;
             boostButton.VerticalAlignment = VerticalAlignment.Center;
             boostButton.BorderThickness = new Thickness(0);
             boostButton.Background = Brushes.Transparent;
             boostButton.Cursor = Cursors.Hand;
-            boostButton.Template = MakeTransparentButtonTemplate(OrbSize / 2);
-            boostButton.FocusVisualStyle = BoostixUi.FocusVisual(OrbSize / 2);
-            AutomationProperties.SetName(boostButton, "Активировать Boostix");
+            boostButton.Template = MakeTransparentButtonTemplate(BoostixDesignTokens.RadiusLarge);
+            boostButton.FocusVisualStyle = BoostixUi.FocusVisual(BoostixDesignTokens.RadiusLarge);
+            AutomationProperties.SetName(boostButton, "Активировать Boost производительности");
             AutomationProperties.SetHelpText(
                 boostButton,
-                "Применяет выбранную подготовку производительности без запуска сторонних программ.");
+                "Готовит Windows к игре. Все изменения отменяются при остановке.");
             AutomationProperties.SetAutomationId(
                 boostButton,
                 "Boostix.Activate");
             KeyboardNavigation.SetTabIndex(boostButton, 11);
-
-            var orb = new Grid
-            {
-                Width = OrbSize,
-                Height = OrbSize
-            };
-            var disk = new Ellipse
-            {
-                Margin = new Thickness(5)
-            };
-            if (SystemParameters.HighContrast)
-            {
-                disk.SetResourceReference(
-                    Shape.FillProperty,
-                    BoostixDesignTokens.SurfaceBrushKey);
-            }
-            else
-            {
-                var radial = new RadialGradientBrush(
-                    Color.FromRgb(44, 38, 66),
-                    Color.FromRgb(19, 17, 27))
-                {
-                    GradientOrigin = new Point(0.42, 0.32),
-                    Center = new Point(0.45, 0.4),
-                    RadiusX = 0.7,
-                    RadiusY = 0.7
-                };
-                radial.Freeze();
-                disk.Fill = radial;
-            }
-            orb.Children.Add(disk);
-
-            double inner = OrbSize - 12;
-            var viewport = new Grid
-            {
-                Width = inner,
-                Height = inner,
-                Background = Brushes.Transparent,
-                Clip = new EllipseGeometry(
-                    new Point(inner / 2, inner / 2),
-                    inner / 2,
-                    inner / 2)
-            };
-            starField = BuildStarField(inner);
-            viewport.Children.Add(starField);
-            rocket = BuildRocket();
-            viewport.Children.Add(rocket);
-            orb.Children.Add(viewport);
-
-            orbRing = new Ellipse
-            {
-                StrokeThickness = 2.5,
-                Margin = new Thickness(1.25),
-                IsHitTestVisible = false
-            };
-            orb.Children.Add(orbRing);
-
-            double radius = OrbSize / 2 - 1.5;
-            double center = OrbSize / 2;
-            double sweep = 110 * Math.PI / 180;
-            var arc = new PathFigure
-            {
-                StartPoint = new Point(center, center - radius),
-                IsClosed = false
-            };
-            arc.Segments.Add(new ArcSegment(
-                new Point(
-                    center + radius * Math.Sin(sweep),
-                    center - radius * Math.Cos(sweep)),
-                new Size(radius, radius),
-                0,
-                false,
-                SweepDirection.Clockwise,
-                true));
-            var arcGeometry = new PathGeometry();
-            arcGeometry.Figures.Add(arc);
-            arcGeometry.Freeze();
-            orbSpinnerRotation = new RotateTransform(0, center, center);
-            orbSpinner = new System.Windows.Shapes.Path
-            {
-                Data = arcGeometry,
-                StrokeThickness = 3.5,
-                StrokeStartLineCap = PenLineCap.Round,
-                StrokeEndLineCap = PenLineCap.Round,
-                Opacity = 0,
-                IsHitTestVisible = false,
-                RenderTransform = orbSpinnerRotation
-            };
-            orb.Children.Add(orbSpinner);
-
-            boostButton.Content = orb;
+            boostButton.Content = boostGauge;
             boostButton.Click += BoostButtonClick;
             boostButton.MouseEnter += BoostButtonMouseEnter;
             boostButton.MouseLeave += BoostButtonMouseLeave;
-            stage.Children.Add(boostButton);
-            SetOrbState(OrbState.Idle, false);
-            return stage;
+            SetGaugeState(BoostGaugeState.Idle);
+            return boostButton;
         }
 
-        /// <summary>
-        /// Ring colour, glow and progress arc of the Boost control. Idle uses
-        /// the brand gradient, Active the green "running" gradient, Working a
-        /// rotating arc while the session starts or stops.
-        /// </summary>
-        private void SetOrbState(OrbState state, bool animate)
+        private void SetGaugeState(BoostGaugeState state)
         {
-            orbState = state;
-            if (orbRing == null || orbSpinner == null || orbGlow == null)
+            if (boostGauge == null)
             {
                 return;
             }
-
-            bool active = state == OrbState.Active;
-            Color from = active
-                ? BoostixDesignTokens.Success
-                : BoostixDesignTokens.Accent;
-            Color to = active
-                ? BoostixDesignTokens.SuccessSecondary
-                : BoostixDesignTokens.AccentSecondary;
-            orbRing.Stroke = BoostixDesignTokens.Gradient(from, to);
-            orbRing.Opacity = state == OrbState.Idle ? 0.8 : 1.0;
-            orbGlow.Fill = BoostixDesignTokens.Brush(from);
-            orbSpinner.Stroke = BoostixDesignTokens.Gradient(
-                BoostixDesignTokens.AccentText,
-                BoostixDesignTokens.AccentSecondary);
-
-            bool spinning = state == OrbState.Working;
-            orbSpinner.BeginAnimation(UIElement.OpacityProperty, null);
-            orbSpinner.Opacity = spinning ? 1 : 0;
-            orbSpinnerRotation.BeginAnimation(RotateTransform.AngleProperty, null);
-            orbSpinnerRotation.Angle = 0;
-            if (spinning && SystemParameters.ClientAreaAnimation)
+            boostGauge.SetState(state);
+            if (state == BoostGaugeState.Idle)
             {
-                orbSpinnerRotation.BeginAnimation(
-                    RotateTransform.AngleProperty,
-                    new DoubleAnimation(0, 360, TimeSpan.FromMilliseconds(900))
-                    {
-                        RepeatBehavior = RepeatBehavior.Forever
-                    });
+                boostGauge.SetReadout("Пуск", string.Empty);
             }
-
-            double glow = SystemParameters.HighContrast
-                ? 0
-                : (active ? 0.32 : (boostButton != null && boostButton.IsMouseOver ? 0.42 : 0));
-            AnimateOrbGlow(glow, animate);
-        }
-
-        private void AnimateOrbGlow(double target, bool animate)
-        {
-            if (orbGlow == null)
-            {
-                return;
-            }
-            if (SystemParameters.HighContrast)
-            {
-                target = 0;
-            }
-            if (!animate || !SystemParameters.ClientAreaAnimation)
-            {
-                orbGlow.BeginAnimation(UIElement.OpacityProperty, null);
-                orbGlow.Opacity = target;
-                return;
-            }
-            orbGlow.BeginAnimation(
-                UIElement.OpacityProperty,
-                new DoubleAnimation(target, TimeSpan.FromMilliseconds(260))
-                {
-                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-                });
         }
 
         /// <summary>
@@ -2204,6 +1966,9 @@ namespace Boostix
                 GetPreference(values, "KeepWallpaper");
             centerSettings.KeepNvidiaOverlay = !values.ContainsKey("KeepNvidiaOverlay") ||
                 GetPreference(values, "KeepNvidiaOverlay");
+            centerSettings.GlobalHotkey = !values.ContainsKey("GlobalHotkey") ||
+                GetPreference(values, "GlobalHotkey");
+            centerSettings.MinimizeToTray = GetPreference(values, "MinimizeToTray");
         }
 
         private void SaveBoostPreferences()
@@ -2222,7 +1987,9 @@ namespace Boostix
                         "KeepOneDrive=" + centerSettings.KeepOneDrive,
                         "KeepTeams=" + centerSettings.KeepTeams,
                         "KeepWallpaper=" + centerSettings.KeepWallpaper,
-                        "KeepNvidiaOverlay=" + centerSettings.KeepNvidiaOverlay
+                        "KeepNvidiaOverlay=" + centerSettings.KeepNvidiaOverlay,
+                        "GlobalHotkey=" + centerSettings.GlobalHotkey,
+                        "MinimizeToTray=" + centerSettings.MinimizeToTray
                     }) + Environment.NewLine;
                 BoostSessionReportStore.WriteAllTextAtomic(
                     path,
@@ -2248,200 +2015,19 @@ namespace Boostix
                 "boost-preferences.ini");
         }
 
-        private Canvas BuildStarField(double size)
-        {
-            var canvas = new Canvas();
-            canvas.Width = size;
-            canvas.Height = size;
-            canvas.Opacity = 0;
-            canvas.IsHitTestVisible = false;
-
-            var random = new Random(2407);
-            for (int index = 0; index < 18; index++)
-            {
-                var star = new Rectangle();
-                star.Width = 3 + random.NextDouble() * 8;
-                star.Height = index % 4 == 0 ? 1.7 : 1.15;
-                star.RadiusX = star.Height / 2;
-                star.RadiusY = star.Height / 2;
-                star.Fill = index % 3 == 0
-                    ? BrushFrom(ProductBrand.AccentVisualHex)
-                    : BrushFrom(ProductBrand.AccentTextHex);
-                star.Opacity = 0.28 + random.NextDouble() * 0.58;
-                star.RenderTransformOrigin = new Point(0.5, 0.5);
-                var transforms = new TransformGroup();
-                transforms.Children.Add(new RotateTransform(-31));
-                transforms.Children.Add(new TranslateTransform());
-                star.RenderTransform = transforms;
-                Canvas.SetLeft(star, size * 0.08 + random.NextDouble() * size * 0.86);
-                Canvas.SetTop(star, size * 0.03 + random.NextDouble() * size * 0.86);
-                canvas.Children.Add(star);
-                stars.Add(star);
-            }
-            return canvas;
-        }
-
-        private Grid BuildRocket()
-        {
-            var host = new Grid();
-            host.Width = 106;
-            host.Height = 112;
-            host.HorizontalAlignment = HorizontalAlignment.Center;
-            host.VerticalAlignment = VerticalAlignment.Center;
-            host.RenderTransformOrigin = new Point(0.5, 0.5);
-            host.LayoutTransform = new ScaleTransform(0.86, 0.86);
-
-            rocketScale = new ScaleTransform(1, 1);
-            flightTranslation = new TranslateTransform(0, 0);
-            floatTranslation = new TranslateTransform(0, 0);
-            var transforms = new TransformGroup();
-            transforms.Children.Add(rocketScale);
-            transforms.Children.Add(new RotateTransform(43));
-            transforms.Children.Add(flightTranslation);
-            transforms.Children.Add(floatTranslation);
-            host.RenderTransform = transforms;
-
-            flameLayer = BuildStaticFlame();
-            flameLayer.Opacity = 0;
-            host.Children.Add(flameLayer);
-
-            grayRocketLayer = BuildRocketLayer(false);
-            grayRocketLayer.Opacity = 1;
-            host.Children.Add(grayRocketLayer);
-
-            colorRocketLayer = BuildRocketLayer(true);
-            colorRocketLayer.Opacity = 0;
-            host.Children.Add(colorRocketLayer);
-            return host;
-        }
-
-        private Grid BuildStaticFlame()
-        {
-            var grid = new Grid();
-            grid.Width = 72;
-            grid.Height = 103;
-            grid.HorizontalAlignment = HorizontalAlignment.Center;
-            grid.VerticalAlignment = VerticalAlignment.Center;
-            grid.IsHitTestVisible = false;
-
-            var outer = new System.Windows.Shapes.Path();
-            outer.Data = Geometry.Parse("M 24,68 C 18,82 24,96 36,102 C 48,96 54,82 48,68 Z");
-            outer.Fill = MakeLinearBrush("#FFFFD166", "#FFFF4D5A", 90);
-            outer.Effect = new DropShadowEffect
-            {
-                BlurRadius = 13,
-                ShadowDepth = 0,
-                Opacity = 0.88,
-                Color = Color.FromRgb(255, 83, 70)
-            };
-            grid.Children.Add(outer);
-
-            var inner = new System.Windows.Shapes.Path();
-            inner.Data = Geometry.Parse("M 30,71 C 27,82 31,91 36,96 C 41,91 45,82 42,71 Z");
-            inner.Fill = MakeLinearBrush("#FFFFFFFF", "#FFFFBE45", 90);
-            grid.Children.Add(inner);
-            return grid;
-        }
-
-        private Canvas BuildRocketLayer(bool useColor)
-        {
-            var canvas = new Canvas();
-            canvas.Width = 72;
-            canvas.Height = 103;
-            canvas.HorizontalAlignment = HorizontalAlignment.Center;
-            canvas.VerticalAlignment = VerticalAlignment.Center;
-            canvas.IsHitTestVisible = false;
-
-            var leftFin = new System.Windows.Shapes.Path();
-            leftFin.Data = Geometry.Parse("M 19,51 L 7,70 L 22,65 Z");
-            leftFin.Fill = useColor
-                ? MakeLinearBrush("#FFB794F4", "#FF6D28D9", 90)
-                : MakeLinearBrush("#FF9AA1AB", "#FF606873", 90);
-            canvas.Children.Add(leftFin);
-
-            var rightFin = new System.Windows.Shapes.Path();
-            rightFin.Data = Geometry.Parse("M 53,51 L 65,70 L 50,65 Z");
-            rightFin.Fill = useColor
-                ? MakeLinearBrush(ProductBrand.AccentVisualHex, "#FF5B21B6", 90)
-                : MakeLinearBrush("#FF9AA1AB", "#FF59616D", 90);
-            canvas.Children.Add(rightFin);
-
-            var body = new System.Windows.Shapes.Path();
-            body.Data = Geometry.Parse("M 36,3 C 22,15 18,35 18,57 C 18,67 25,74 36,79 C 47,74 54,67 54,57 C 54,35 50,15 36,3 Z");
-            body.Fill = useColor
-                ? MakeLinearBrush("#FFFFFFFF", "#FFD9C6CD", 32)
-                : MakeLinearBrush("#FFD1D5DB", "#FF737B87", 32);
-            body.Stroke = useColor ? BrushFrom("#D9FFFFFF") : BrushFrom("#FFBBC0C8");
-            body.StrokeThickness = 1;
-            canvas.Children.Add(body);
-
-            var bodyShade = new System.Windows.Shapes.Path();
-            bodyShade.Data = Geometry.Parse("M 36,3 C 48,17 51,36 50,58 C 48,66 43,72 36,79 C 47,74 54,67 54,57 C 54,35 50,15 36,3 Z");
-            bodyShade.Fill = useColor ? BrushFrom("#503C1722") : BrushFrom("#35545A64");
-            canvas.Children.Add(bodyShade);
-
-            var window = new Ellipse();
-            window.Width = 18;
-            window.Height = 18;
-            Canvas.SetLeft(window, 27);
-            Canvas.SetTop(window, 27);
-            window.Fill = useColor
-                ? MakeLinearBrush("#FFD8B4FE", ProductBrand.AccentVisualHex, 45)
-                : MakeLinearBrush("#FFB5BBC3", "#FF68717C", 45);
-            window.Stroke = useColor ? BrushFrom("#FFFFFFFF") : BrushFrom("#FFD4D7DC");
-            window.StrokeThickness = 2;
-            if (useColor)
-            {
-                window.Effect = new DropShadowEffect
-                {
-                    BlurRadius = 9,
-                    ShadowDepth = 0,
-                    Opacity = 0.7,
-                    Color = Color.FromRgb(
-                        ProductBrand.AccentRed,
-                        ProductBrand.AccentGreen,
-                        ProductBrand.AccentBlue)
-                };
-            }
-            canvas.Children.Add(window);
-
-            var seam = new Line();
-            seam.X1 = 23;
-            seam.Y1 = 57;
-            seam.X2 = 49;
-            seam.Y2 = 57;
-            seam.Stroke = useColor ? BrushFrom("#668C4A61") : BrushFrom("#66656D78");
-            seam.StrokeThickness = 1;
-            canvas.Children.Add(seam);
-            return canvas;
-        }
-
         private void BoostButtonMouseEnter(object sender, MouseEventArgs e)
         {
-            if (animationRunning)
+            if (boostGauge != null)
             {
-                return;
-            }
-            AnimateRocketScale(1.08, 155);
-            if (!boostActive)
-            {
-                AnimateRocketColor(true, 180);
-                AnimateOrbGlow(0.42, true);
+                boostGauge.SetHover(true);
             }
         }
 
         private void BoostButtonMouseLeave(object sender, MouseEventArgs e)
         {
-            if (animationRunning)
+            if (boostGauge != null)
             {
-                return;
-            }
-            AnimateRocketScale(1, 180);
-            if (!boostActive)
-            {
-                AnimateRocketColor(false, 210);
-                flameLayer.Opacity = 0;
-                AnimateOrbGlow(0, true);
+                boostGauge.SetHover(false);
             }
         }
 
@@ -2566,6 +2152,11 @@ namespace Boostix
                 }
                 StartBoost();
             }
+            else if (!IsVisible || WindowState == WindowState.Minimized)
+            {
+                Notify("Перед запуском Boost есть замечания. Откройте Boostix.");
+                RestoreWindow();
+            }
         }
 
         private void StartBoost()
@@ -2585,7 +2176,7 @@ namespace Boostix
                         out targetError))
                 {
                     ClearSelectedTarget(
-                        "Выберите снова: процесс больше не совпадает с профилем");
+                        "Игра перезапустилась. Выберите её снова");
                     caption.Text = "Игра недоступна";
                     caption.SetResourceReference(
                         TextBlock.ForegroundProperty,
@@ -2606,11 +2197,9 @@ namespace Boostix
             departureFinished = false;
             boostReady = false;
             boostButton.IsEnabled = false;
-            AnimateRocketColor(true, 110);
-            AnimateRocketScale(1.08, 100);
-            flameLayer.Opacity = 1;
             caption.Text = "Запускаю Boost…";
-            SetOrbState(OrbState.Working, true);
+            SetGaugeState(BoostGaugeState.Working);
+            boostGauge.SetReadout(string.Empty, "подготовка");
             caption.SetResourceReference(
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.AccentTextBrushKey);
@@ -2752,35 +2341,20 @@ namespace Boostix
             }
         }
 
+        /// <summary>
+        /// Ignition sweep: the needle runs to the end stop while the session
+        /// script prepares Windows, then settles once both have finished.
+        /// </summary>
         private void PlayDeparture()
         {
-            if (!SystemParameters.ClientAreaAnimation)
+            boostGauge.SweepToEndStop(delegate
             {
                 departureFinished = true;
                 if (boostReady)
                 {
                     PlayReturn();
                 }
-                return;
-            }
-
-            var duration = TimeSpan.FromMilliseconds(620);
-            var x = MakeEaseAnimation(0, 152, duration, EasingMode.EaseIn);
-            var y = MakeEaseAnimation(0, -108, duration, EasingMode.EaseIn);
-            var opacity = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(560));
-            opacity.BeginTime = TimeSpan.FromMilliseconds(60);
-            opacity.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn };
-            x.Completed += delegate
-            {
-                departureFinished = true;
-                if (boostReady)
-                {
-                    PlayReturn();
-                }
-            };
-            flightTranslation.BeginAnimation(TranslateTransform.XProperty, x);
-            flightTranslation.BeginAnimation(TranslateTransform.YProperty, y);
-            rocket.BeginAnimation(UIElement.OpacityProperty, opacity);
+            });
         }
 
         private void MarkBoostReady()
@@ -2795,13 +2369,12 @@ namespace Boostix
                 currentSession.Status = "Active";
                 currentSession.AddAction(
                     "ОДНОРАЗОВАЯ ПОДГОТОВКА",
-                    "Фоновые приложения обработаны один раз по выбранным переключателям.",
+                    "Закрыли программы, отмеченные в настройках.",
                     BoostActionOutcome.Changed);
                 ImportBoostScriptResult(currentSession);
                 SaveCurrentSession();
             }
-            StartStarfield();
-            caption.Text = "Boost активен";
+            caption.Text = "Boost включён";
             caption.SetResourceReference(
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.SuccessBrushKey);
@@ -2813,50 +2386,21 @@ namespace Boostix
 
         private void PlayReturn()
         {
-            flightTranslation.BeginAnimation(TranslateTransform.XProperty, null);
-            flightTranslation.BeginAnimation(TranslateTransform.YProperty, null);
-            rocket.BeginAnimation(UIElement.OpacityProperty, null);
-            if (!SystemParameters.ClientAreaAnimation)
-            {
-                CompleteBoostActivation();
-                return;
-            }
-
-            flightTranslation.X = -152;
-            flightTranslation.Y = 104;
-            rocket.Opacity = 0;
-
-            var duration = TimeSpan.FromMilliseconds(760);
-            var x = MakeEaseAnimation(-152, 0, duration, EasingMode.EaseOut);
-            var y = MakeEaseAnimation(104, 0, duration, EasingMode.EaseOut);
-            var opacity = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(470));
-            opacity.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
-            x.Completed += delegate { CompleteBoostActivation(); };
-            flightTranslation.BeginAnimation(TranslateTransform.XProperty, x);
-            flightTranslation.BeginAnimation(TranslateTransform.YProperty, y);
-            rocket.BeginAnimation(UIElement.OpacityProperty, opacity);
+            boostGauge.SettleInBoostZone(CompleteBoostActivation);
         }
 
         private void CompleteBoostActivation()
         {
-            flightTranslation.BeginAnimation(TranslateTransform.XProperty, null);
-            flightTranslation.BeginAnimation(TranslateTransform.YProperty, null);
-            rocket.BeginAnimation(UIElement.OpacityProperty, null);
-            flightTranslation.X = 0;
-            flightTranslation.Y = 0;
-            rocket.Opacity = 1;
-            SetRocketScaleImmediately(boostButton.IsMouseOver ? 1.08 : 1);
             boostActive = true;
             animationRunning = false;
             boostButton.IsEnabled = true;
-            SetOrbState(OrbState.Active, true);
+            SetGaugeState(BoostGaugeState.Active);
             if (targetSelectorButton != null)
             {
                 targetSelectorButton.IsEnabled = false;
             }
             SetBoostAutomationState(true);
             StartActiveBoostMaintenance();
-            StartRocketFloat();
             UpdateLiveSessionSummary();
         }
 
@@ -2871,20 +2415,13 @@ namespace Boostix
             StopBoostProcess();
             boostReady = false;
             departureFinished = false;
-            flightTranslation.BeginAnimation(TranslateTransform.XProperty, null);
-            flightTranslation.BeginAnimation(TranslateTransform.YProperty, null);
-            rocket.BeginAnimation(UIElement.OpacityProperty, null);
-            flightTranslation.X = 0;
-            flightTranslation.Y = 0;
-            rocket.Opacity = 1;
-            flameLayer.Opacity = 0;
-            AnimateRocketColor(false, 180);
-            AnimateRocketScale(1, 160);
+            boostGauge.SnapNeedle(false);
+            Notify(message);
             caption.Text = message;
             caption.SetResourceReference(
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.ErrorBrushKey);
-            SetOrbState(OrbState.Idle, true);
+            SetGaugeState(BoostGaugeState.Idle);
             animationRunning = false;
             boostButton.IsEnabled = true;
             if (targetSelectorButton != null)
@@ -2908,71 +2445,17 @@ namespace Boostix
             boostActive = false;
             StopActiveBoostMaintenance();
             StopBoostProcess();
-            StopRocketFloat();
-            caption.Text = "Отключаю Boost…";
-            SetOrbState(OrbState.Working, true);
+            caption.Text = "Останавливаю Boost…";
+            SetGaugeState(BoostGaugeState.Working);
+            boostGauge.SetReadout(string.Empty, "остановка");
             caption.SetResourceReference(
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.AccentTextBrushKey);
-            flameLayer.Opacity = 1;
-            AnimateRocketColor(true, 100);
-            AnimateRocketScale(1.08, 100);
-
-            if (!SystemParameters.ClientAreaAnimation)
-            {
-                PlayDeactivationReturn();
-                return;
-            }
-
-            var duration = TimeSpan.FromMilliseconds(620);
-            var x = MakeEaseAnimation(0, 152, duration, EasingMode.EaseIn);
-            var y = MakeEaseAnimation(0, -108, duration, EasingMode.EaseIn);
-            var opacity = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(560));
-            opacity.BeginTime = TimeSpan.FromMilliseconds(60);
-            opacity.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn };
-            x.Completed += delegate { PlayDeactivationReturn(); };
-            flightTranslation.BeginAnimation(TranslateTransform.XProperty, x);
-            flightTranslation.BeginAnimation(TranslateTransform.YProperty, y);
-            rocket.BeginAnimation(UIElement.OpacityProperty, opacity);
-        }
-
-        private void PlayDeactivationReturn()
-        {
-            flightTranslation.BeginAnimation(TranslateTransform.XProperty, null);
-            flightTranslation.BeginAnimation(TranslateTransform.YProperty, null);
-            rocket.BeginAnimation(UIElement.OpacityProperty, null);
-            flightTranslation.X = -152;
-            flightTranslation.Y = 104;
-            rocket.Opacity = 0;
-            flameLayer.Opacity = 0;
-            SetRocketColorImmediately(false);
-            StopStarfield();
-
-            if (!SystemParameters.ClientAreaAnimation)
-            {
-                CompleteBoostDeactivation();
-                return;
-            }
-
-            var duration = TimeSpan.FromMilliseconds(760);
-            var x = MakeEaseAnimation(-152, 0, duration, EasingMode.EaseOut);
-            var y = MakeEaseAnimation(104, 0, duration, EasingMode.EaseOut);
-            var opacity = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(470));
-            opacity.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
-            x.Completed += delegate { CompleteBoostDeactivation(); };
-            flightTranslation.BeginAnimation(TranslateTransform.XProperty, x);
-            flightTranslation.BeginAnimation(TranslateTransform.YProperty, y);
-            rocket.BeginAnimation(UIElement.OpacityProperty, opacity);
+            boostGauge.SweepToRest(CompleteBoostDeactivation);
         }
 
         private void CompleteBoostDeactivation()
         {
-            flightTranslation.BeginAnimation(TranslateTransform.XProperty, null);
-            flightTranslation.BeginAnimation(TranslateTransform.YProperty, null);
-            rocket.BeginAnimation(UIElement.OpacityProperty, null);
-            flightTranslation.X = 0;
-            flightTranslation.Y = 0;
-            rocket.Opacity = 1;
             boostActive = false;
             boostReady = false;
             departureFinished = false;
@@ -2982,11 +2465,11 @@ namespace Boostix
             {
                 targetSelectorButton.IsEnabled = true;
             }
-            caption.Text = "Нажмите, чтобы запустить";
+            caption.Text = "Boost выключен";
             caption.SetResourceReference(
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.SecondaryTextBrushKey);
-            SetOrbState(OrbState.Idle, true);
+            SetGaugeState(BoostGaugeState.Idle);
             SetBoostAutomationState(false);
             UpdateLiveSessionSummary();
             bool showCrashReport = string.Equals(
@@ -3000,9 +2483,6 @@ namespace Boostix
             deactivationSessionReason = "Boost остановлен пользователем.";
             preflightAccepted = false;
 
-            bool isHovered = boostButton.IsMouseOver;
-            SetRocketScaleImmediately(isHovered ? 1.08 : 1);
-            AnimateRocketColor(isHovered, 180);
             if (showCrashReport && boostCenterOverlay != null)
             {
                 boostCenterOverlay.SetSessionReport(lastSession);
@@ -3012,111 +2492,6 @@ namespace Boostix
                 RememberBoostCenterFocusReturn(boostButton);
                 boostCenterOverlay.OpenReport();
             }
-        }
-
-        private void StartStarfield()
-        {
-            if (!SystemParameters.ClientAreaAnimation)
-            {
-                starField.BeginAnimation(UIElement.OpacityProperty, null);
-                starField.Opacity = 0;
-                return;
-            }
-            if (starField.Opacity > 0.5)
-            {
-                return;
-            }
-            var appear = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(320));
-            starField.BeginAnimation(UIElement.OpacityProperty, appear);
-
-            for (int index = 0; index < stars.Count; index++)
-            {
-                var transforms = (TransformGroup)stars[index].RenderTransform;
-                var translation = (TranslateTransform)transforms.Children[1];
-                double durationMs = 1050 + (index % 6) * 180;
-                var x = new DoubleAnimation(66, -112, TimeSpan.FromMilliseconds(durationMs));
-                var y = new DoubleAnimation(-44, 74, TimeSpan.FromMilliseconds(durationMs));
-                x.BeginTime = TimeSpan.FromMilliseconds((index % 9) * 115);
-                y.BeginTime = x.BeginTime;
-                x.RepeatBehavior = RepeatBehavior.Forever;
-                y.RepeatBehavior = RepeatBehavior.Forever;
-                translation.BeginAnimation(TranslateTransform.XProperty, x);
-                translation.BeginAnimation(TranslateTransform.YProperty, y);
-            }
-        }
-
-        private void StopStarfield()
-        {
-            if (!SystemParameters.ClientAreaAnimation)
-            {
-                ResetStarfield();
-                return;
-            }
-            var disappear = new DoubleAnimation(0, TimeSpan.FromMilliseconds(220));
-            disappear.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
-            disappear.Completed += delegate
-            {
-                ResetStarfield();
-            };
-            starField.BeginAnimation(UIElement.OpacityProperty, disappear);
-        }
-
-        private void ResetStarfield()
-        {
-            starField.BeginAnimation(UIElement.OpacityProperty, null);
-            starField.Opacity = 0;
-            foreach (FrameworkElement star in stars)
-            {
-                var transforms = (TransformGroup)star.RenderTransform;
-                var translation = (TranslateTransform)transforms.Children[1];
-                translation.BeginAnimation(TranslateTransform.XProperty, null);
-                translation.BeginAnimation(TranslateTransform.YProperty, null);
-                translation.X = 0;
-                translation.Y = 0;
-            }
-        }
-
-        private void StartRocketFloat()
-        {
-            if (!SystemParameters.ClientAreaAnimation)
-            {
-                StopRocketFloat();
-                return;
-            }
-            var y = new DoubleAnimation(-3.5, 3.5, TimeSpan.FromMilliseconds(1250));
-            y.AutoReverse = true;
-            y.RepeatBehavior = RepeatBehavior.Forever;
-            y.EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut };
-            var x = new DoubleAnimation(-1.6, 1.6, TimeSpan.FromMilliseconds(1650));
-            x.AutoReverse = true;
-            x.RepeatBehavior = RepeatBehavior.Forever;
-            x.EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut };
-            floatTranslation.BeginAnimation(TranslateTransform.YProperty, y);
-            floatTranslation.BeginAnimation(TranslateTransform.XProperty, x);
-        }
-
-        private void StopRocketFloat()
-        {
-            floatTranslation.BeginAnimation(TranslateTransform.XProperty, null);
-            floatTranslation.BeginAnimation(TranslateTransform.YProperty, null);
-            floatTranslation.X = 0;
-            floatTranslation.Y = 0;
-        }
-
-        private void SetRocketColorImmediately(bool colorized)
-        {
-            colorRocketLayer.BeginAnimation(UIElement.OpacityProperty, null);
-            grayRocketLayer.BeginAnimation(UIElement.OpacityProperty, null);
-            colorRocketLayer.Opacity = colorized ? 1 : 0;
-            grayRocketLayer.Opacity = colorized ? 0 : 1;
-        }
-
-        private void SetRocketScaleImmediately(double scale)
-        {
-            rocketScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-            rocketScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-            rocketScale.ScaleX = scale;
-            rocketScale.ScaleY = scale;
         }
 
         private void StartActiveBoostMaintenance()
@@ -3397,9 +2772,9 @@ namespace Boostix
             {
                 RecordSessionAction(
                     "SESSION GUARD — ДАВЛЕНИЕ ПАМЯТИ",
-                    "Устойчиво мал доступный запас RAM или commit. " +
-                    "Boostix ничего не очищает принудительно; проверьте файл " +
-                    "подкачки и закройте выбранные фоновые приложения.",
+                    "Памяти долго не хватает. " +
+                    "Закройте лишние программы или увеличьте " +
+                    "файл подкачки.",
                     BoostActionOutcome.Skipped);
             }
             UpdateLiveSessionSummaryOnDispatcher();
@@ -3533,9 +2908,7 @@ namespace Boostix
 
         private void UpdateLiveSessionSummary()
         {
-            if (liveStateText == null ||
-                liveMemoryText == null ||
-                liveTimerText == null)
+            if (liveStateText == null || liveTimerText == null)
             {
                 return;
             }
@@ -3549,10 +2922,10 @@ namespace Boostix
                     sessionGuardPressureState.CriticalAlertActive;
             }
             string state = selectedTarget == null
-                ? "Нет цели"
+                ? "Игра не выбрана"
                 : (boostActive
-                    ? (pressure ? "Нехватка памяти" : "Активен")
-                    : "Готов");
+                    ? (pressure ? "Мало памяти" : "Boost включён")
+                    : "Готов к запуску");
             liveStateText.Text = state;
             liveStateText.Foreground = BoostixDesignTokens.Brush(
                 pressure
@@ -3560,9 +2933,6 @@ namespace Boostix
                     : (boostActive
                         ? BoostixDesignTokens.Success
                         : BoostixDesignTokens.SecondaryText));
-            liveMemoryText.Text = sample != null && sample.SystemMetricsAvailable
-                ? FormatMemoryCompact(sample.CommitHeadroomBytes)
-                : "—";
             TimeSpan duration = currentSession == null
                 ? TimeSpan.Zero
                 : DateTime.UtcNow - currentSession.StartedUtc;
@@ -3571,15 +2941,16 @@ namespace Boostix
                 "{0:00}:{1:00}",
                 Math.Min(99, (int)duration.TotalMinutes),
                 duration.Seconds);
+            if (boostGauge != null && boostActive && !animationRunning)
+            {
+                boostGauge.SetReadout(liveTimerText.Text, "остановить");
+            }
             AutomationProperties.SetName(
                 liveStateText,
                 "Состояние сеанса: " + state);
             AutomationProperties.SetName(
-                liveMemoryText,
-                "Запас виртуальной памяти: " + liveMemoryText.Text);
-            AutomationProperties.SetName(
                 liveTimerText,
-                "Длительность сеанса: " + liveTimerText.Text);
+                "Время в игре: " + liveTimerText.Text);
             UpdateBoostCenterSessionData();
         }
 
@@ -3649,7 +3020,7 @@ namespace Boostix
             impactScanCancellation = cancellation;
             boostCenterOverlay.SetImpactResults(
                 null,
-                "Измеряем влияние фоновых приложений…",
+                "Проверяем фоновые программы…",
                 true);
             try
             {
@@ -3665,15 +3036,15 @@ namespace Boostix
                 boostCenterOverlay.SetImpactResults(
                     lastImpactResults,
                     lastImpactResults.Count == 0
-                        ? "За время замера заметная фоновая нагрузка не обнаружена."
-                        : "Показаны прямые измерения. Закрытие — только по вашему выбору и без принуждения.",
+                        ? "Заметной фоновой нагрузки нет."
+                        : "Закрыть программу можно кнопкой в её строке.",
                     false);
             }
             catch (OperationCanceledException)
             {
                 boostCenterOverlay.SetImpactResults(
                     null,
-                    "Измерение отменено.",
+                    "Проверка отменена.",
                     false);
             }
             catch (Exception ex)
@@ -3681,7 +3052,7 @@ namespace Boostix
                 CrashLog.Write("Background impact scan failed.", ex);
                 boostCenterOverlay.SetImpactResults(
                     null,
-                    "Не удалось завершить измерение. Откройте диагностику и повторите.",
+                    "Проверка не завершилась. Попробуйте ещё раз.",
                     false);
             }
             finally
@@ -3713,7 +3084,7 @@ namespace Boostix
             {
                 boostCenterOverlay.SetImpactResults(
                     lastImpactResults,
-                    "Не удалось отправить запрос закрытия.",
+                    "Программа не закрылась.",
                     false);
                 return;
             }
@@ -4079,7 +3450,7 @@ namespace Boostix
                             "Выбранная игра завершилась. Boostix проверяет журнал Windows.");
                     }
                     ClearSelectedTarget(
-                        "Игра завершилась — выберите её после следующего запуска");
+                        "Игра закрылась. Выберите её снова после запуска");
                 }));
             }
             catch (InvalidOperationException)
@@ -4207,7 +3578,7 @@ namespace Boostix
                 report.TargetCrashUtc = null;
                 report.Status = "TargetExited";
                 report.StopReason =
-                    "Игра завершилась; подтверждённое событие сбоя не найдено.";
+                    "Игра закрылась. Сбоя Windows не зафиксировала.";
                 report.AddAction(
                     "ЗАВЕРШЕНИЕ ИГРЫ",
                     (correlation == null
@@ -5105,7 +4476,7 @@ namespace Boostix
                 FormatMemory(currentSession.AvailableMemoryEndBytes) +
                 " доступно. Минимум за сессию: " +
                 FormatMemory(currentSession.MinimumAvailableMemoryBytes) +
-                "; минимальный запас commit: " +
+                "; минимальный резерв памяти: " +
                 FormatMemory(currentSession.MinimumCommitHeadroomBytes) + ".",
                 BoostActionOutcome.AlreadyOptimal);
             try { BoostSessionReportStore.Save(currentSession); }
@@ -5301,7 +4672,7 @@ namespace Boostix
                                     CultureInfo.CurrentCulture) + "/" +
                                 issuedStep.TotalSteps.ToString(
                                     CultureInfo.CurrentCulture),
-                        item == null ? "Подготовка измерения." : item.Message,
+                        item == null ? "Готовим замер." : item.Message,
                         item == null ? 0 : item.Percent);
                 }
             });
@@ -5322,7 +4693,7 @@ namespace Boostix
                 {
                     boostCenterOverlay.SetBenchmarkMessage(
                         "СНАЧАЛА ВЫБЕРИТЕ ИГРУ",
-                        "Proof Mode работает только с точным запущенным процессом игры.",
+                        "Для замера FPS выберите запущенную игру.",
                         true);
                     return;
                 }
@@ -5397,7 +4768,7 @@ namespace Boostix
                         StringComparison.Ordinal))
                 {
                     PerformanceProofTransition cancelled = proofCoordinator.Cancel(
-                        "Игра, монитор или параметры сценария изменились. Начните новый Proof Mode.");
+                        "Игра, монитор или настройки изменились. Начните новый замер FPS.");
                     string ignoredSaveError;
                     proofCheckpointStore.TrySave(
                         proofCoordinator,
@@ -5581,7 +4952,7 @@ namespace Boostix
                 CrashLog.Write("Proof Mode capture failed.", ex);
                 boostCenterOverlay.SetBenchmarkMessage(
                     "ЗАМЕР НЕ ВЫПОЛНЕН",
-                    "Непредвиденная ошибка измерения записана в журнал. Повторите текущий этап.",
+                    "Замер не получился. Повторите этот проход.",
                     true);
             }
             finally
@@ -5821,15 +5192,142 @@ namespace Boostix
             }
         }
 
+        /// <summary>
+        /// Tray icon and Ctrl+Alt+B exist for real use; demo/test launches
+        /// opt in with --demo-tray so test runs leave no tray icons behind.
+        /// </summary>
+        private bool TrayAndHotkeyEnabled
+        {
+            get
+            {
+                return !updateHealthProbe &&
+                    (!demoMode || HasLaunchArgument(launchArguments, "--demo-tray"));
+            }
+        }
+
+        private void StartTrayAndHotkey()
+        {
+            if (!TrayAndHotkeyEnabled)
+            {
+                return;
+            }
+            try
+            {
+                trayIcon = new BoostixTrayIcon(Assembly.GetExecutingAssembly().Location);
+                trayIcon.OpenRequested += delegate { RestoreWindow(); };
+                trayIcon.BoostToggleRequested += delegate { ToggleBoostFromOutside(); };
+                trayIcon.ExitRequested += delegate { Close(); };
+                trayIcon.SetBoostState(boostActive);
+            }
+            catch (Exception ex)
+            {
+                trayIcon = null;
+                CrashLog.Write("Could not create the notification-area icon.", ex);
+            }
+            ApplyHotkeyPreference();
+        }
+
+        private void ApplyHotkeyPreference()
+        {
+            if (!TrayAndHotkeyEnabled || windowHandle == IntPtr.Zero)
+            {
+                return;
+            }
+            if (centerSettings.GlobalHotkey && !hotkeyRegistered)
+            {
+                hotkeyRegistered = BoostHotkey.Register(windowHandle);
+                if (!hotkeyRegistered)
+                {
+                    CrashLog.Write(
+                        "The Boost hotkey " + BoostHotkey.DisplayText + " is used by another program.",
+                        null);
+                }
+            }
+            else if (!centerSettings.GlobalHotkey && hotkeyRegistered)
+            {
+                BoostHotkey.Unregister(windowHandle);
+                hotkeyRegistered = false;
+            }
+        }
+
+        private IntPtr HotkeyMessageHook(
+            IntPtr window,
+            int message,
+            IntPtr wordParameter,
+            IntPtr longParameter,
+            ref bool handled)
+        {
+            if (message == BoostHotkey.WmHotkey && wordParameter.ToInt32() == BoostHotkey.Id)
+            {
+                handled = true;
+                Dispatcher.BeginInvoke(new Action(ToggleBoostFromOutside));
+            }
+            return IntPtr.Zero;
+        }
+
+        /// <summary>
+        /// Boost toggled from the hotkey or the tray while the window may be
+        /// hidden behind a game: say what happened, or bring the window back
+        /// when Boostix needs the user.
+        /// </summary>
+        private void ToggleBoostFromOutside()
+        {
+            if (!boostActive && !animationRunning && selectedTarget == null && !demoMode)
+            {
+                Notify("Сначала выберите игру в Boostix");
+                RestoreWindow();
+                OpenTargetSelector();
+                return;
+            }
+            ToggleBoost();
+        }
+
+        private void Notify(string text)
+        {
+            if (trayIcon != null && (!IsVisible || WindowState == WindowState.Minimized || !IsActive))
+            {
+                trayIcon.Notify(text);
+            }
+        }
+
+        private void MinimizeWindow()
+        {
+            if (centerSettings.MinimizeToTray && trayIcon != null)
+            {
+                Hide();
+                trayIcon.Notify("Boostix работает в трее. " + BoostHotkey.DisplayText + " включает Boost.");
+                return;
+            }
+            WindowState = WindowState.Minimized;
+        }
+
+        private void RestoreWindow()
+        {
+            if (!IsVisible)
+            {
+                Show();
+            }
+            if (WindowState == WindowState.Minimized)
+            {
+                WindowState = WindowState.Normal;
+            }
+            Activate();
+        }
+
         private void SetBoostAutomationState(bool active)
         {
+            if (trayIcon != null)
+            {
+                trayIcon.SetBoostState(active);
+            }
+            Notify(active ? "Boost включён" : "Boost выключен");
             AutomationProperties.SetName(
                 boostButton,
                 active ? "Отключить Boost производительности" : "Активировать Boost производительности");
             AutomationProperties.SetHelpText(
                 boostButton,
                 active
-                    ? "Останавливает активный контроль фоновых процессов. Применённые системные изменения не откатываются."
+                    ? "Останавливает Boost и возвращает план электропитания."
                     : "Подготавливает Windows к высокой нагрузке и поддерживает приоритет активного полноэкранного приложения.");
         }
 
@@ -5960,7 +5458,7 @@ namespace Boostix
                         SolidColorBrush.ColorProperty,
                         null);
                     border.Color = targetSelectorButton.IsMouseOver
-                        ? BoostixDesignTokens.Accent
+                        ? BoostixDesignTokens.SecondaryText
                         : BoostixDesignTokens.Border;
                 }
                 if (targetSelectorButton.ContextMenu != null)
@@ -5970,7 +5468,10 @@ namespace Boostix
             }
 
             UpdateHomeSystemCard();
-            SetOrbState(orbState, false);
+            if (boostGauge != null)
+            {
+                boostGauge.RefreshTheme();
+            }
             UpdateLiveSessionSummary();
 
             if (boostCenterOverlay != null)
@@ -6018,41 +5519,6 @@ namespace Boostix
             visuals.GlyphBrush.Color = hovered
                 ? BoostixDesignTokens.AccentForeground
                 : BoostixDesignTokens.ChromeGlyph;
-        }
-
-        private void AnimateRocketColor(bool colorized, int milliseconds)
-        {
-            double colorTarget = colorized ? 1 : 0;
-            double grayTarget = colorized ? 0 : 1;
-            if (!SystemParameters.ClientAreaAnimation)
-            {
-                colorRocketLayer.BeginAnimation(UIElement.OpacityProperty, null);
-                grayRocketLayer.BeginAnimation(UIElement.OpacityProperty, null);
-                colorRocketLayer.Opacity = colorTarget;
-                grayRocketLayer.Opacity = grayTarget;
-                return;
-            }
-            var colorAnimation = new DoubleAnimation(colorTarget, TimeSpan.FromMilliseconds(milliseconds));
-            var grayAnimation = new DoubleAnimation(grayTarget, TimeSpan.FromMilliseconds(milliseconds));
-            colorAnimation.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
-            grayAnimation.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
-            colorRocketLayer.BeginAnimation(UIElement.OpacityProperty, colorAnimation);
-            grayRocketLayer.BeginAnimation(UIElement.OpacityProperty, grayAnimation);
-        }
-
-        private void AnimateRocketScale(double target, int milliseconds)
-        {
-            if (!SystemParameters.ClientAreaAnimation)
-            {
-                SetRocketScaleImmediately(target);
-                return;
-            }
-            var x = new DoubleAnimation(target, TimeSpan.FromMilliseconds(milliseconds));
-            var y = new DoubleAnimation(target, TimeSpan.FromMilliseconds(milliseconds));
-            x.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
-            y.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
-            rocketScale.BeginAnimation(ScaleTransform.ScaleXProperty, x);
-            rocketScale.BeginAnimation(ScaleTransform.ScaleYProperty, y);
         }
 
         private static DoubleAnimation MakeEaseAnimation(double from, double to, TimeSpan duration, EasingMode mode)
@@ -6132,6 +5598,14 @@ namespace Boostix
             }
 
             ApplyNativeWindowAppearance();
+            if (TrayAndHotkeyEnabled)
+            {
+                hotkeySource = HwndSource.FromHwnd(windowHandle);
+                if (hotkeySource != null)
+                {
+                    hotkeySource.AddHook(HotkeyMessageHook);
+                }
+            }
             if (demoMode)
             {
                 return;
@@ -6491,6 +5965,7 @@ namespace Boostix
             }
 
             ShowWhatsNewIfUpdated();
+            StartTrayAndHotkey();
 
             if (!demoMode && sessionPowerPlanManager != null)
             {
@@ -6541,14 +6016,14 @@ namespace Boostix
                     "Boostix недоступен в безопасном режиме");
                 AutomationProperties.SetHelpText(
                     boostButton,
-                    "В безопасном режиме системные изменения и Boost не запускаются.");
+                    "В безопасном режиме Boost не запускается и Windows не меняется.");
             }
             lastSession = BoostSessionReportStore.LoadLast();
             if (lastSession != null && !lastSession.EndedUtc.HasValue)
             {
                 lastSession.AddAction(
                     "ПРЕДЫДУЩАЯ СЕССИЯ",
-                    "Отчёт был безопасно завершён при следующем запуске приложения.",
+                    "Сеанс завершён при следующем запуске Boostix.",
                     BoostActionOutcome.Skipped);
                 lastSession.Complete(
                     "Interrupted",
@@ -6745,6 +6220,21 @@ namespace Boostix
             {
                 windowSource.RemoveHook(WindowMessageHook);
                 windowSource = null;
+            }
+            if (hotkeyRegistered)
+            {
+                BoostHotkey.Unregister(windowHandle);
+                hotkeyRegistered = false;
+            }
+            if (hotkeySource != null)
+            {
+                hotkeySource.RemoveHook(HotkeyMessageHook);
+                hotkeySource = null;
+            }
+            if (trayIcon != null)
+            {
+                trayIcon.Dispose();
+                trayIcon = null;
             }
             windowHandle = IntPtr.Zero;
             bool sessionWasRunning =
@@ -7074,25 +6564,62 @@ namespace Boostix
             return brush;
         }
 
+        /// <summary>
+        /// Window/taskbar icon: the Boostix gauge mark on a graphite tile.
+        /// </summary>
         private static ImageSource BuildWindowIcon()
         {
             var group = new DrawingGroup();
             group.Children.Add(new GeometryDrawing(
-                MakeLinearBrush(ProductBrand.AccentHex, "#FFC026D3", 45),
-                null,
-                new RectangleGeometry(new Rect(1, 1, 30, 30), 9, 9)));
+                BrushFrom("#FF22272D"),
+                new Pen(BrushFrom("#FF353C44"), 1),
+                new RectangleGeometry(new Rect(1, 1, 30, 30), 8, 8)));
+            var center = new Point(16, 18.5);
             group.Children.Add(new GeometryDrawing(
                 null,
-                new Pen(BrushFrom("#FFFFFFFF"), 2.2)
-                {
-                    StartLineCap = PenLineCap.Round,
-                    EndLineCap = PenLineCap.Round,
-                    LineJoin = PenLineJoin.Round
-                },
-                Geometry.Parse("M 17.3,6 L 9,17 H 15.5 L 14.7,26 L 23,15 H 16.5 Z")));
+                new Pen(BrushFrom("#FF8A929C"), 2.2) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round },
+                IconArc(center, 9.5, -120, 55)));
+            group.Children.Add(new GeometryDrawing(
+                null,
+                new Pen(BrushFrom(ProductBrand.AccentHex), 2.8) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round },
+                IconArc(center, 9.5, 62, 120)));
+            double needle = 78 * Math.PI / 180;
+            group.Children.Add(new GeometryDrawing(
+                null,
+                new Pen(BrushFrom("#FFEDEFF2"), 2.2) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round },
+                new LineGeometry(
+                    center,
+                    new Point(center.X + 8.7 * Math.Sin(needle), center.Y - 8.7 * Math.Cos(needle)))));
+            group.Children.Add(new GeometryDrawing(
+                BrushFrom(ProductBrand.AccentHex),
+                null,
+                new EllipseGeometry(center, 2.4, 2.4)));
             var image = new DrawingImage(group);
             image.Freeze();
             return image;
+        }
+
+        private static Geometry IconArc(Point center, double radius, double fromAngle, double toAngle)
+        {
+            Func<double, Point> at = delegate(double angle)
+            {
+                double radians = angle * Math.PI / 180;
+                return new Point(
+                    center.X + radius * Math.Sin(radians),
+                    center.Y - radius * Math.Cos(radians));
+            };
+            var figure = new PathFigure { StartPoint = at(fromAngle), IsClosed = false };
+            figure.Segments.Add(new ArcSegment(
+                at(toAngle),
+                new Size(radius, radius),
+                0,
+                toAngle - fromAngle > 180,
+                SweepDirection.Clockwise,
+                true));
+            var geometry = new PathGeometry();
+            geometry.Figures.Add(figure);
+            geometry.Freeze();
+            return geometry;
         }
 
     }
