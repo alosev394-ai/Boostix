@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -56,7 +57,7 @@ namespace Boostix
         private static readonly Color ErrorColor = BoostixDesignTokens.Error;
         private const int ElevatedScriptTimeoutMilliseconds = 10 * 60 * 1000;
         private const string ApplyScriptSha256 =
-            "1EE21B44F27FC2904F4CF479F029CA69EBD269D85039857AC4CFF5EC35F3B1B5";
+            "27CE23AD18B12C025FA5079AAC06680652A0B0D03555B39554825891E6711C3E";
         private const string RestoreScriptSha256 =
             "BFE02A3B3C4DBC58F215A62ABFA80EBD7B3CCC40C7A2C488A62ED06D0F1C0D76";
 
@@ -525,6 +526,12 @@ namespace Boostix
                 {
                     await RestoreAfterFailedApplyAsync();
                 }
+                else if (HasArgument("--demo-setup-notes"))
+                {
+                    ShowRebootRequired(OptimizationApplyNotes.Describe(
+                        new[] { @"HKLM:\SOFTWARE\Policies\Microsoft\Dsh::AllowNewsAndInterests" },
+                        false));
+                }
                 else
                 {
                     ShowRebootRequired();
@@ -598,6 +605,10 @@ namespace Boostix
                 return;
             }
 
+            string resultJson = TryReadAllText(resultPath);
+            IList<string> applyNotes = OptimizationApplyNotes.Describe(
+                OptimizationApplyNotes.ReadSkippedSettings(resultJson),
+                OptimizationApplyNotes.ReadRestorePointCreated(resultJson));
             TryDeleteFile(resultPath);
             pendingStatePath = statePath;
             bool pendingMarkerWritten = true;
@@ -624,11 +635,17 @@ namespace Boostix
                 return;
             }
 
-            ShowRebootRequired();
+            ShowRebootRequired(applyNotes);
         }
 
         private void ShowRebootRequired()
         {
+            ShowRebootRequired(null);
+        }
+
+        private void ShowRebootRequired(IList<string> notes)
+        {
+            bool hasNotes = notes != null && notes.Count > 0;
             state = FlowState.RebootRequired;
             Visibility = Visibility.Visible;
             cardContent.Children.Clear();
@@ -647,7 +664,7 @@ namespace Boostix
             {
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                Width = 308,
+                Width = hasNotes ? 400 : 308,
                 Margin = new Thickness(0, 0, 0, 12)
             };
 
@@ -688,6 +705,31 @@ namespace Boostix
             description.TextAlignment = TextAlignment.Center;
             description.Margin = new Thickness(0, 8, 0, 0);
             body.Children.Add(description);
+
+            if (hasNotes)
+            {
+                // What Windows refused or skipped, so it is not only in the log.
+                var notesStack = new StackPanel();
+                foreach (string note in notes)
+                {
+                    var noteText = MakeText(note, 10.5, TextColor, regularFont, FontWeights.Normal);
+                    if (notesStack.Children.Count > 0)
+                    {
+                        noteText.Margin = new Thickness(0, 6, 0, 0);
+                    }
+                    notesStack.Children.Add(noteText);
+                }
+                body.Children.Add(new Border
+                {
+                    Background = new SolidColorBrush(BoostixDesignTokens.SurfaceRaised),
+                    BorderBrush = new SolidColorBrush(BoostixDesignTokens.Warning),
+                    BorderThickness = new Thickness(3, 0, 0, 0),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(12, 10, 12, 10),
+                    Margin = new Thickness(0, 14, 0, 0),
+                    Child = notesStack
+                });
+            }
 
             Grid.SetRow(body, 1);
             cardContent.Children.Add(body);
@@ -1529,6 +1571,18 @@ namespace Boostix
                 "Boostix-" + operation + "-" + Guid.NewGuid().ToString("N") + ".json");
         }
 
+        private static string TryReadAllText(string path)
+        {
+            try
+            {
+                return File.Exists(path) ? File.ReadAllText(path, Encoding.UTF8) : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static bool TryReadStatePath(string resultPath, out string statePath)
         {
             statePath = null;
@@ -2105,6 +2159,178 @@ namespace Boostix
                 if (nested != null)
                 {
                     return nested;
+                }
+            }
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Turns the apply script's SkippedSettings and RestorePointCreated result
+    /// fields into plain-language notes for the "reboot required" card.
+    /// </summary>
+    internal static class OptimizationApplyNotes
+    {
+        private static readonly Dictionary<string, string> FriendlyNames =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "AllowNewsAndInterests", "фоновые виджеты" },
+                { "IsPrelaunchEnabled", "фоновые виджеты" },
+                { "EnableTransparency", "прозрачность окон" },
+                { "VisualFXSetting", "быстрые визуальные эффекты" },
+                { "AppCaptureEnabled", "отключение записи игр (Game DVR)" },
+                { "HistoricalCaptureEnabled", "отключение записи игр (Game DVR)" },
+                { "GameDVR_Enabled", "отключение записи игр (Game DVR)" },
+                { "AutoGameModeEnabled", "игровой режим" },
+                { "AllowAutoGameMode", "игровой режим" }
+            };
+
+        internal static string[] ReadSkippedSettings(string resultJson)
+        {
+            var values = new List<string>();
+            if (string.IsNullOrEmpty(resultJson))
+            {
+                return values.ToArray();
+            }
+            Match field = Regex.Match(
+                resultJson,
+                "\"SkippedSettings\"\\s*:\\s*",
+                RegexOptions.CultureInvariant);
+            if (!field.Success)
+            {
+                return values.ToArray();
+            }
+            int index = field.Index + field.Length;
+            if (index < resultJson.Length && resultJson[index] == '"')
+            {
+                string single = ReadJsonString(resultJson, ref index);
+                if (!string.IsNullOrEmpty(single))
+                {
+                    values.Add(single);
+                }
+                return values.ToArray();
+            }
+            if (index >= resultJson.Length || resultJson[index] != '[')
+            {
+                return values.ToArray();
+            }
+            index++;
+            while (index < resultJson.Length)
+            {
+                char current = resultJson[index];
+                if (current == ']')
+                {
+                    break;
+                }
+                if (current == '"')
+                {
+                    string item = ReadJsonString(resultJson, ref index);
+                    if (item == null)
+                    {
+                        break;
+                    }
+                    if (item.Length > 0)
+                    {
+                        values.Add(item);
+                    }
+                    continue;
+                }
+                index++;
+            }
+            return values.ToArray();
+        }
+
+        internal static bool ReadRestorePointCreated(string resultJson)
+        {
+            if (string.IsNullOrEmpty(resultJson))
+            {
+                return true;
+            }
+            Match match = Regex.Match(
+                resultJson,
+                "\"RestorePointCreated\"\\s*:\\s*(?<value>true|false)",
+                RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+            return !match.Success ||
+                !string.Equals(match.Groups["value"].Value, "false", StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static IList<string> Describe(IEnumerable<string> skippedSettings, bool restorePointCreated)
+        {
+            var notes = new List<string>();
+            var names = new List<string>();
+            foreach (string setting in skippedSettings ?? new string[0])
+            {
+                if (string.IsNullOrWhiteSpace(setting))
+                {
+                    continue;
+                }
+                int separator = setting.LastIndexOf("::", StringComparison.Ordinal);
+                string valueName = separator >= 0 ? setting.Substring(separator + 2) : setting;
+                string friendly;
+                if (!FriendlyNames.TryGetValue(valueName, out friendly))
+                {
+                    friendly = "параметр Windows «" + valueName + "»";
+                }
+                if (!names.Contains(friendly))
+                {
+                    names.Add(friendly);
+                }
+            }
+            if (names.Count > 0)
+            {
+                notes.Add(
+                    "Windows не разрешила изменить: " + string.Join(", ", names) +
+                    ". Этот пункт пропущен, остальные настройки применены.");
+            }
+            if (!restorePointCreated)
+            {
+                notes.Add(
+                    "Точка восстановления Windows не создана: обычно Windows делает " +
+                    "её не чаще раза в сутки. Откат Boostix работает и без неё.");
+            }
+            return notes;
+        }
+
+        private static string ReadJsonString(string json, ref int index)
+        {
+            var builder = new StringBuilder();
+            index++;
+            while (index < json.Length)
+            {
+                char current = json[index++];
+                if (current == '"')
+                {
+                    return builder.ToString();
+                }
+                if (current != '\\' || index >= json.Length)
+                {
+                    builder.Append(current);
+                    continue;
+                }
+                char escape = json[index++];
+                switch (escape)
+                {
+                    case 'n': builder.Append('\n'); break;
+                    case 'r': builder.Append('\r'); break;
+                    case 't': builder.Append('\t'); break;
+                    case 'b': builder.Append('\b'); break;
+                    case 'f': builder.Append('\f'); break;
+                    case 'u':
+                        if (index + 4 <= json.Length)
+                        {
+                            int code;
+                            if (int.TryParse(
+                                json.Substring(index, 4),
+                                NumberStyles.HexNumber,
+                                CultureInfo.InvariantCulture,
+                                out code))
+                            {
+                                builder.Append((char)code);
+                            }
+                            index += 4;
+                        }
+                        break;
+                    default: builder.Append(escape); break;
                 }
             }
             return null;

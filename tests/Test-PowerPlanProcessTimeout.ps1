@@ -49,6 +49,7 @@ try {
         "/out:$fixturePath",
         '/reference:System.dll',
         '/reference:System.Core.dll',
+        '/reference:System.IO.Compression.dll',
         (Join-Path $projectRoot 'ProductBrand.cs'),
         $featuresPath,
         $diagnosticsPath

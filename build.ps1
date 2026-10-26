@@ -174,12 +174,14 @@ $appArguments = @(
     '/reference:System.dll',
     '/reference:System.Core.dll',
     '/reference:System.Management.dll',
+    '/reference:System.IO.Compression.dll',
     "/reference:$frameworkRoot\System.Xaml.dll",
     "/reference:$wpfRoot\WindowsBase.dll",
     "/reference:$wpfRoot\PresentationCore.dll",
     "/reference:$wpfRoot\PresentationFramework.dll",
     "/reference:$wpfRoot\UIAutomationProvider.dll",
     "/reference:$wpfRoot\UIAutomationTypes.dll",
+    "/resource:$projectRoot\CHANGELOG.md,Boostix.Changelog.md",
     "/out:$appOutput",
     "$projectRoot\ProductBrand.cs",
     "$projectRoot\Boostix\DesignTokens.cs",
@@ -197,7 +199,8 @@ $appArguments = @(
     "$projectRoot\Boostix\BoostCenterOverlay.cs",
     "$projectRoot\Boostix\PerformanceCapture.cs",
     "$projectRoot\Boostix\OptimizationFlow.cs",
-    "$projectRoot\Boostix\UpdateFlow.cs"
+    "$projectRoot\Boostix\UpdateFlow.cs",
+    "$projectRoot\Boostix\WhatsNew.cs"
 )
 
 & $compiler @appArguments

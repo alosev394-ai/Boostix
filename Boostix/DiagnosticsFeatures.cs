@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Management;
 using System.Runtime.InteropServices;
@@ -950,6 +951,13 @@ namespace Boostix
             @"(?i)\b(token|secret|password|passwd|authorization|cookie|api[_-]?key)" +
             @"\b\s*[:=]\s*[^\r\n]+",
             RegexOptions.CultureInvariant);
+        // Unlike WindowsPathPattern this does not treat "HKLM:\" as a drive.
+        private static readonly Regex LogPathPattern = new Regex(
+            @"(?i)(?<![a-z0-9])(?:[a-z]:[\\/]|\\\\)[^\r\n\t<>""|?*]+",
+            RegexOptions.CultureInvariant);
+        private static readonly Regex AccountSidPattern = new Regex(
+            @"(?i)\bS-1-5-21(?:-\d+){3,4}\b",
+            RegexOptions.CultureInvariant);
 
         public static string BuildSafeReport(
             DiagnosticSnapshot snapshot,
@@ -1086,6 +1094,92 @@ namespace Boostix
                 }
             }
             return sanitized.ToString();
+        }
+
+        /// <summary>
+        /// Redacts a Boostix log for the support archive. Personal folders,
+        /// the user and computer names, account SIDs, e-mail addresses and
+        /// secrets are replaced; Windows, Program Files, ProgramData and
+        /// registry paths stay, because they are what makes a log useful.
+        /// </summary>
+        internal static string SanitizeLogText(string value)
+        {
+            string safe = value ?? string.Empty;
+            safe = ReplaceKnownPath(safe, Path.GetTempPath(), "<temp>");
+            safe = ReplaceKnownPath(
+                safe,
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "<local-app-data>");
+            safe = ReplaceKnownPath(
+                safe,
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "<app-data>");
+            safe = ReplaceKnownPath(
+                safe,
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "<user-profile>");
+            safe = LogPathPattern.Replace(
+                safe,
+                delegate(Match match)
+                {
+                    return IsSystemOwnedPath(match.Value) ? match.Value : "<path>";
+                });
+            safe = ReplaceStandaloneWord(safe, Environment.UserName, "<user>");
+            safe = ReplaceStandaloneWord(safe, Environment.MachineName, "<computer>");
+            safe = AccountSidPattern.Replace(safe, "<sid>");
+            safe = EmailPattern.Replace(safe, "<email>");
+            safe = SecretPattern.Replace(safe, "$1=<redacted>");
+
+            var sanitized = new StringBuilder(safe.Length);
+            foreach (char character in safe)
+            {
+                sanitized.Append(
+                    character == '\r' ||
+                    character == '\n' ||
+                    character == '\t' ||
+                    !char.IsControl(character)
+                        ? character
+                        : '?');
+            }
+            return sanitized.ToString();
+        }
+
+        private static bool IsSystemOwnedPath(string path)
+        {
+            foreach (string root in new[]
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                Environment.GetFolderPath(Environment.SpecialFolder.Windows)
+            })
+            {
+                if (!string.IsNullOrWhiteSpace(root) &&
+                    path.StartsWith(
+                        root.TrimEnd('\\', '/') + "\\",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static string ReplaceStandaloneWord(
+            string input,
+            string word,
+            string replacement)
+        {
+            if (string.IsNullOrWhiteSpace(word))
+            {
+                return input;
+            }
+            return Regex.Replace(
+                input,
+                @"(?<![\p{L}\p{Nd}_.-])" + Regex.Escape(word) +
+                @"(?![\p{L}\p{Nd}_.-])",
+                replacement,
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
         private static void AppendSnapshot(
@@ -1264,6 +1358,347 @@ namespace Boostix
         private static string Format(long value)
         {
             return Math.Max(0, value).ToString(CultureInfo.InvariantCulture);
+        }
+    }
+
+    internal sealed class DiagnosticBundleSource
+    {
+        public DiagnosticBundleSource(string entryName, string filePath)
+        {
+            EntryName = entryName;
+            FilePath = filePath;
+        }
+
+        public string EntryName { get; private set; }
+
+        public string FilePath { get; private set; }
+    }
+
+    /// <summary>
+    /// Builds the support archive: the safe report, a short system summary
+    /// and the most recent part of each Boostix log, redacted before it is
+    /// written. Missing or unreadable logs are listed in manifest.txt.
+    /// </summary>
+    internal static class DiagnosticBundleBuilder
+    {
+        public const int MaximumLogCharacters = 256 * 1024;
+        private const int MaximumSetupTransactions = 3;
+        private const int MaximumInstallerLogs = 3;
+        private const string OmittedMarker = "[EARLIER LINES OMITTED]";
+        private static readonly Regex SafeEntryNamePattern = new Regex(
+            @"^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$",
+            RegexOptions.CultureInvariant);
+
+        public static List<DiagnosticBundleSource> CollectDefaultSources()
+        {
+            var sources = new List<DiagnosticBundleSource>();
+            string localData = Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData);
+            if (!string.IsNullOrWhiteSpace(localData))
+            {
+                string productData = Path.Combine(
+                    localData,
+                    ProductBrand.DataDirectoryName);
+                sources.Add(new DiagnosticBundleSource(
+                    "logs/crash.log",
+                    Path.Combine(productData, "crash.log")));
+                sources.Add(new DiagnosticBundleSource(
+                    "logs/update.log",
+                    Path.Combine(productData, "update.log")));
+            }
+
+            string programData = Environment.GetFolderPath(
+                Environment.SpecialFolder.CommonApplicationData);
+            if (string.IsNullOrWhiteSpace(programData))
+            {
+                return sources;
+            }
+            foreach (FileSystemInfo transaction in EnumerateNewest(
+                Path.Combine(programData, "BoostixOptimization", "Backups"),
+                true,
+                null,
+                MaximumSetupTransactions))
+            {
+                foreach (string fileName in new[] { "apply.log", "restore.log", "state.json" })
+                {
+                    sources.Add(new DiagnosticBundleSource(
+                        "setup/" + transaction.Name + "/" + fileName,
+                        Path.Combine(transaction.FullName, fileName)));
+                }
+            }
+            foreach (FileSystemInfo log in EnumerateNewest(
+                Path.Combine(programData, ProductBrand.DataDirectoryName, "Logs"),
+                false,
+                "setup-*.log",
+                MaximumInstallerLogs))
+            {
+                sources.Add(new DiagnosticBundleSource(
+                    "installer/" + log.Name,
+                    log.FullName));
+            }
+            return sources;
+        }
+
+        public static string BuildSystemSummary(string applicationVersion)
+        {
+            var builder = new StringBuilder(1024);
+            builder.AppendLine(ProductBrand.ProductName + "=" + (applicationVersion ?? string.Empty));
+            string productName = null;
+            string displayVersion = null;
+            string currentBuild = null;
+            object revision = null;
+            try
+            {
+                using (var machine = Microsoft.Win32.RegistryKey.OpenBaseKey(
+                    Microsoft.Win32.RegistryHive.LocalMachine,
+                    Microsoft.Win32.RegistryView.Registry64))
+                using (var version = machine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+                {
+                    if (version != null)
+                    {
+                        productName = version.GetValue("ProductName") as string;
+                        displayVersion = version.GetValue("DisplayVersion") as string;
+                        currentBuild = version.GetValue("CurrentBuild") as string;
+                        revision = version.GetValue("UBR");
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+            builder.AppendLine("Windows=" + (productName ?? "unknown") +
+                (string.IsNullOrWhiteSpace(displayVersion) ? string.Empty : " " + displayVersion));
+            builder.AppendLine("WindowsBuild=" + (currentBuild ?? Environment.OSVersion.Version.Build.ToString(CultureInfo.InvariantCulture)) +
+                (revision == null ? string.Empty : "." + Convert.ToString(revision, CultureInfo.InvariantCulture)));
+            builder.AppendLine("OperatingSystem64Bit=" + Environment.Is64BitOperatingSystem);
+            builder.AppendLine("Process64Bit=" + Environment.Is64BitProcess);
+            builder.AppendLine("ClrVersion=" + Environment.Version);
+            builder.AppendLine("ProcessorCount=" + Environment.ProcessorCount.ToString(CultureInfo.InvariantCulture));
+            builder.AppendLine("Culture=" + CultureInfo.CurrentCulture.Name);
+            builder.AppendLine("UiCulture=" + CultureInfo.CurrentUICulture.Name);
+            builder.AppendLine("GeneratedUtc=" + DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
+            return builder.ToString();
+        }
+
+        public static void WriteBundle(
+            string destinationPath,
+            string safeReport,
+            string systemSummary,
+            IEnumerable<DiagnosticBundleSource> sources)
+        {
+            if (string.IsNullOrWhiteSpace(destinationPath))
+            {
+                throw new ArgumentException(
+                    "A diagnostic archive destination is required.",
+                    "destinationPath");
+            }
+            string fullPath = Path.GetFullPath(destinationPath);
+            string directory = Path.GetDirectoryName(fullPath);
+            if (string.IsNullOrEmpty(Path.GetFileName(fullPath)) ||
+                string.IsNullOrEmpty(directory))
+            {
+                throw new ArgumentException(
+                    "The diagnostic archive destination must be a file.",
+                    "destinationPath");
+            }
+
+            var manifest = new StringBuilder(2048);
+            manifest.AppendLine(
+                ProductBrand.ProductName.ToUpperInvariant() + " DIAGNOSTIC ARCHIVE");
+            manifest.AppendLine("GeneratedUtc=" + DateTime.UtcNow.ToString(
+                "o",
+                CultureInfo.InvariantCulture));
+            manifest.AppendLine("report.txt: safe report");
+            manifest.AppendLine("system.txt: system summary");
+
+            string temporaryPath = Path.Combine(
+                directory,
+                "." + Path.GetFileName(fullPath) + "." +
+                    Guid.NewGuid().ToString("N") + ".tmp");
+            try
+            {
+                using (var stream = new FileStream(
+                    temporaryPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None))
+                using (var archive = new ZipArchive(stream, ZipArchiveMode.Create))
+                {
+                    WriteEntry(archive, "report.txt", safeReport ?? string.Empty);
+                    WriteEntry(
+                        archive,
+                        "system.txt",
+                        DiagnosticExportBuilder.SanitizeLogText(systemSummary));
+                    var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        "report.txt",
+                        "system.txt",
+                        "manifest.txt"
+                    };
+                    foreach (DiagnosticBundleSource source in
+                        sources ?? Enumerable.Empty<DiagnosticBundleSource>())
+                    {
+                        if (source == null ||
+                            string.IsNullOrWhiteSpace(source.EntryName) ||
+                            !SafeEntryNamePattern.IsMatch(source.EntryName) ||
+                            source.EntryName.Contains("..") ||
+                            !usedNames.Add(source.EntryName))
+                        {
+                            continue;
+                        }
+                        string text;
+                        bool truncated;
+                        string error;
+                        if (!TryReadLogTail(source.FilePath, out text, out truncated, out error))
+                        {
+                            manifest.AppendLine(source.EntryName + ": " + error);
+                            continue;
+                        }
+                        string safe = DiagnosticExportBuilder.SanitizeLogText(text);
+                        WriteEntry(
+                            archive,
+                            source.EntryName,
+                            truncated ? OmittedMarker + "\r\n" + safe : safe);
+                        manifest.AppendLine(
+                            source.EntryName + ": included" +
+                            (truncated ? " (most recent part)" : string.Empty));
+                    }
+                    WriteEntry(archive, "manifest.txt", manifest.ToString());
+                }
+                if (File.Exists(fullPath))
+                {
+                    File.Delete(fullPath);
+                }
+                File.Move(temporaryPath, fullPath);
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(temporaryPath))
+                    {
+                        File.Delete(temporaryPath);
+                    }
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
+        private static IEnumerable<FileSystemInfo> EnumerateNewest(
+            string directory,
+            bool directories,
+            string pattern,
+            int count)
+        {
+            try
+            {
+                var root = new DirectoryInfo(directory);
+                if (!root.Exists ||
+                    (root.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    return new FileSystemInfo[0];
+                }
+                IEnumerable<FileSystemInfo> items = directories
+                    ? (IEnumerable<FileSystemInfo>)root.GetDirectories()
+                    : root.GetFiles(pattern ?? "*");
+                return items
+                    .Where(item => (item.Attributes & FileAttributes.ReparsePoint) == 0)
+                    .OrderByDescending(item => item.LastWriteTimeUtc)
+                    .Take(count)
+                    .ToList();
+            }
+            catch (Exception)
+            {
+                return new FileSystemInfo[0];
+            }
+        }
+
+        private static bool TryReadLogTail(
+            string path,
+            out string text,
+            out bool truncated,
+            out string error)
+        {
+            text = null;
+            truncated = false;
+            error = null;
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    error = "not available";
+                    return false;
+                }
+                var info = new FileInfo(path);
+                if (!info.Exists)
+                {
+                    error = "not found";
+                    return false;
+                }
+                if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    error = "skipped (reparse point)";
+                    return false;
+                }
+                using (var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete))
+                {
+                    // UTF-8 needs at most four bytes per character.
+                    long maximumBytes = MaximumLogCharacters * 4L;
+                    if (stream.Length > maximumBytes)
+                    {
+                        stream.Seek(-maximumBytes, SeekOrigin.End);
+                        truncated = true;
+                    }
+                    using (var reader = new StreamReader(stream, Encoding.UTF8, true))
+                    {
+                        text = reader.ReadToEnd();
+                    }
+                }
+                if (text.Length > MaximumLogCharacters)
+                {
+                    text = text.Substring(text.Length - MaximumLogCharacters);
+                    truncated = true;
+                }
+                if (truncated)
+                {
+                    // Drop the partial first line left by the cut.
+                    int lineEnd = text.IndexOf('\n');
+                    if (lineEnd >= 0 && lineEnd + 1 < text.Length)
+                    {
+                        text = text.Substring(lineEnd + 1);
+                    }
+                }
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                error = "access denied";
+            }
+            catch (System.Security.SecurityException)
+            {
+                error = "access denied";
+            }
+            catch (IOException)
+            {
+                error = "unreadable";
+            }
+            return false;
+        }
+
+        private static void WriteEntry(ZipArchive archive, string name, string text)
+        {
+            ZipArchiveEntry entry = archive.CreateEntry(name, CompressionLevel.Optimal);
+            using (var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false)))
+            {
+                writer.Write(text ?? string.Empty);
+            }
         }
     }
 }

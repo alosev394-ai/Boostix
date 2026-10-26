@@ -901,7 +901,8 @@ namespace Boostix
             exportMessageDetail = detail ?? string.Empty;
             exportMessageError = isError;
             if (IsOpen &&
-                currentPage == CenterPage.Report)
+                (currentPage == CenterPage.Report ||
+                 currentPage == CenterPage.Settings))
             {
                 RenderCurrentPage();
             }
@@ -2481,14 +2482,14 @@ namespace Boostix
             }
 
             var export = MakeActionButton(
-                "Экспорт",
+                "Диагностика",
                 BoostixButtonKind.Secondary,
                 BoostixIcons.Export);
             export.Margin = new Thickness(0, 0, 10, 0);
             export.Click += delegate { Raise(ExportDiagnosticsRequested); };
             AutomationProperties.SetName(
                 export,
-                "Сохранить безопасный диагностический отчёт");
+                "Собрать диагностику: отчёт и журналы Boostix в zip-архиве");
             AutomationProperties.SetAutomationId(
                 export,
                 "Boostix.Center.ExportDiagnostics");
@@ -3382,6 +3383,12 @@ namespace Boostix
                 "Настройки сеанса применяются сразу, без перезагрузки.";
             settingsLoading = true;
             int settingIndex = 0;
+            if (!string.IsNullOrWhiteSpace(exportMessageTitle))
+            {
+                FrameworkElement exportNotice = BuildExportNotice();
+                exportNotice.Margin = new Thickness(0, 0, 0, 16);
+                pageContent.Children.Add(exportNotice);
+            }
             try
             {
                 pageContent.Children.Add(MakeSectionHeading("Запуск", null));
@@ -3458,6 +3465,11 @@ namespace Boostix
                 settingsLoading = false;
             }
 
+            pageContent.Children.Add(MakeSectionHeading("Поддержка", null));
+            var support = MakeListCard();
+            AddListRow(support, BuildDiagnosticsRow());
+            pageContent.Children.Add(support);
+
             var restore = MakeActionButton(
                 "Восстановить Windows",
                 BoostixButtonKind.Destructive,
@@ -3488,6 +3500,56 @@ namespace Boostix
                 pagefile,
                 "Boostix.Center.PagefileSettings");
             footerButtons.Children.Add(pagefile);
+        }
+
+        private FrameworkElement BuildDiagnosticsRow()
+        {
+            var row = new Grid { Margin = new Thickness(0, 12, 0, 12) };
+            row.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star)
+            });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var text = new StackPanel
+            {
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 14, 0)
+            };
+            text.Children.Add(MakeText(
+                "Диагностика для поддержки",
+                BoostixDesignTokens.BodyTextSize + 0.5,
+                TextColor,
+                semiboldFont,
+                FontWeights.SemiBold));
+            var detail = MakeText(
+                "Один zip-архив с отчётом и журналами Boostix. Имя пользователя, " +
+                "личные папки и секреты удаляются перед сохранением.",
+                BoostixDesignTokens.MetadataTextSize,
+                MutedColor,
+                regularFont,
+                FontWeights.Normal);
+            detail.TextWrapping = TextWrapping.Wrap;
+            detail.TextTrimming = TextTrimming.None;
+            detail.Margin = new Thickness(0, 3, 0, 0);
+            text.Children.Add(detail);
+            row.Children.Add(text);
+
+            var collect = MakeActionButton(
+                "Собрать диагностику",
+                BoostixButtonKind.Secondary,
+                BoostixIcons.Export);
+            collect.VerticalAlignment = VerticalAlignment.Center;
+            collect.Click += delegate { Raise(ExportDiagnosticsRequested); };
+            AutomationProperties.SetName(
+                collect,
+                "Собрать диагностику: отчёт и журналы Boostix в zip-архиве");
+            AutomationProperties.SetAutomationId(
+                collect,
+                "Boostix.Center.CollectDiagnostics");
+            Grid.SetColumn(collect, 1);
+            row.Children.Add(collect);
+            return row;
         }
 
         private FrameworkElement BuildSettingToggle(

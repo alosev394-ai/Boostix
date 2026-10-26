@@ -393,6 +393,7 @@ namespace Boostix
         private TextBlock liveTimerText;
         private OptimizationFlowOverlay optimizationOverlay;
         private UpdateFlowOverlay updateOverlay;
+        private WhatsNewOverlay whatsNewOverlay;
         private BoostCenterOverlay boostCenterOverlay;
         private ScaleTransform rocketScale;
         private TranslateTransform flightTranslation;
@@ -757,6 +758,12 @@ namespace Boostix
             FrameworkElement controls = BuildWindowControls();
             Panel.SetZIndex(controls, 60);
             root.Children.Add(controls);
+
+            // Below the setup and update flows: when either is open it covers
+            // this card, which then shows once they close.
+            whatsNewOverlay = new WhatsNewOverlay();
+            Panel.SetZIndex(whatsNewOverlay, 90);
+            root.Children.Add(whatsNewOverlay);
 
             optimizationOverlay = new OptimizationFlowOverlay(
                 this,
@@ -2100,6 +2107,59 @@ namespace Boostix
                 {
                     EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
                 });
+        }
+
+        /// <summary>
+        /// Shows "What's new" once after an update. Demo launches never read or
+        /// write the per-user marker, and an elevated process does not write
+        /// to LocalAppData (same rule as the crash log).
+        /// </summary>
+        private void ShowWhatsNewIfUpdated()
+        {
+            string version = ProductBrand.ProductVersion;
+            if (demoMode)
+            {
+                if (HasLaunchArgument(launchArguments, "--demo-whats-new"))
+                {
+                    whatsNewOverlay.Show(version, WhatsNewContent.LoadHighlights(version));
+                }
+                return;
+            }
+            if (CrashLog.IsCurrentProcessElevated())
+            {
+                return;
+            }
+            try
+            {
+                string directory = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    ProductBrand.DataDirectoryName);
+                string markerPath = System.IO.Path.Combine(directory, "last-run-version.txt");
+                string lastSeen = File.Exists(markerPath)
+                    ? File.ReadAllText(markerPath, Encoding.UTF8).Trim()
+                    : null;
+                bool show = WhatsNewContent.ShouldShow(
+                    lastSeen,
+                    version,
+                    WhatsNewContent.HasEarlierData(directory));
+                if (!string.Equals(lastSeen, version, StringComparison.Ordinal))
+                {
+                    Directory.CreateDirectory(directory);
+                    BoostSessionReportStore.WriteAllTextAtomic(markerPath, version);
+                }
+                if (show)
+                {
+                    IList<string> highlights = WhatsNewContent.LoadHighlights(version);
+                    if (highlights.Count > 0)
+                    {
+                        whatsNewOverlay.Show(version, highlights);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not check the last run version.", ex);
+            }
         }
 
         private void LoadBoostPreferences()
@@ -5083,14 +5143,14 @@ namespace Boostix
             var dialog = new Microsoft.Win32.SaveFileDialog
             {
                 Title = "Сохранить диагностику Boostix",
-                Filter = "Текстовый отчёт (*.txt)|*.txt",
-                DefaultExt = ".txt",
+                Filter = "Архив диагностики (*.zip)|*.zip",
+                DefaultExt = ".zip",
                 AddExtension = true,
                 OverwritePrompt = true,
                 FileName = ProductBrand.ProductFileName + "-Diagnostic-" +
                     DateTime.Now.ToString(
                         "yyyyMMdd-HHmmss",
-                        CultureInfo.InvariantCulture) + ".txt"
+                        CultureInfo.InvariantCulture) + ".zip"
             };
             bool? accepted = dialog.ShowDialog(this);
             if (accepted != true)
@@ -5099,8 +5159,8 @@ namespace Boostix
             }
 
             boostCenterOverlay.SetDiagnosticExportMessage(
-                "СОБИРАЕМ ДИАГНОСТИКУ",
-                "Получаем показатели Windows и удаляем персональные пути и секреты.",
+                "Собираем диагностику",
+                "Получаем показатели Windows и журналы Boostix, удаляем личные данные.",
                 false);
             try
             {
@@ -5124,13 +5184,17 @@ namespace Boostix
                         currentSession);
                 }
                 string destination = dialog.FileName;
+                string applicationVersion = GetApplicationVersion();
                 await Task.Run(delegate
                 {
-                    DiagnosticExportBuilder.WriteSafeReport(
+                    DiagnosticBundleBuilder.WriteBundle(
                         destination,
-                        snapshot,
-                        reports,
-                        "ApplicationVersion=" + GetApplicationVersion());
+                        DiagnosticExportBuilder.BuildSafeReport(
+                            snapshot,
+                            reports,
+                            "ApplicationVersion=" + applicationVersion),
+                        DiagnosticBundleBuilder.BuildSystemSummary(applicationVersion),
+                        DiagnosticBundleBuilder.CollectDefaultSources());
                 });
 
                 latestDiagnosticSnapshot = snapshot;
@@ -5138,19 +5202,40 @@ namespace Boostix
                 boostCenterOverlay.SetDiagnosticSnapshot(snapshot);
                 boostCenterOverlay.SetSessionHistory(reports);
                 boostCenterOverlay.SetDiagnosticExportMessage(
-                    "ОТЧЁТ СОХРАНЁН",
-                    "Файл " + System.IO.Path.GetFileName(destination) +
-                        " готов — персональные пути и секреты удалены.",
+                    "Диагностика сохранена",
+                    "Архив " + System.IO.Path.GetFileName(destination) +
+                        " готов: отчёт и журналы Boostix без имени пользователя, " +
+                        "личных папок и секретов. Его можно отправить в поддержку.",
                     false);
+                ShowFileInExplorer(destination);
             }
             catch (Exception ex)
             {
                 CrashLog.Write("Diagnostic export failed.", ex);
                 boostCenterOverlay.SetDiagnosticExportMessage(
-                    "НЕ УДАЛОСЬ СОХРАНИТЬ ОТЧЁТ",
+                    "Не удалось сохранить диагностику",
                     "Windows вернул ошибку " + ex.GetType().Name +
                         ". Выберите другую доступную папку и повторите.",
                     true);
+            }
+        }
+
+        private static void ShowFileInExplorer(string path)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = System.IO.Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                        "explorer.exe"),
+                    Arguments = "/select,\"" + path + "\"",
+                    UseShellExecute = false
+                });
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not show the diagnostic archive in Explorer.", ex);
             }
         }
 
@@ -5999,6 +6084,16 @@ namespace Boostix
                 return;
             }
 
+            if (whatsNewOverlay != null && whatsNewOverlay.IsShown)
+            {
+                if (e.Key == Key.Escape)
+                {
+                    whatsNewOverlay.Hide();
+                }
+                e.Handled = true;
+                return;
+            }
+
             if (boostCenterOverlay != null &&
                 (boostCenterOverlay.ConsumesApplicationInput ||
                  (e.Key == Key.Tab &&
@@ -6394,6 +6489,8 @@ namespace Boostix
                 Application.Current.Shutdown(0);
                 return;
             }
+
+            ShowWhatsNewIfUpdated();
 
             if (!demoMode && sessionPowerPlanManager != null)
             {
@@ -7084,7 +7181,7 @@ namespace Boostix
             return entry.ToString();
         }
 
-        private static bool IsCurrentProcessElevated()
+        internal static bool IsCurrentProcessElevated()
         {
             try
             {

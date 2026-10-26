@@ -99,6 +99,7 @@ try {
         '/reference:System.dll',
         '/reference:System.Core.dll',
         '/reference:System.Management.dll',
+        '/reference:System.IO.Compression.dll',
         "/out:$harness",
         (Join-Path $projectRoot 'ProductBrand.cs'),
         (Join-Path $projectRoot 'Boostix\BoostFeatures.cs'),

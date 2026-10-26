@@ -741,6 +741,17 @@ function Test-RegistrySnapshotEqual {
         (Test-ValueEqual -Left $Left.Value -Right $Right.Value)
 }
 
+# Settings Windows refused to change (see Set-TrackedRegistryValue); the app
+# lists them on its "reboot required" card.
+function Get-SkippedRegistrySettings {
+    param([Parameter(Mandatory = $true)]$State)
+    return @(@($State.Registry) | Where-Object {
+        $_ -and
+            ($_.PSObject.Properties.Name -contains 'Conflict') -and
+            [string]$_.Conflict -ceq 'AccessDenied'
+    } | ForEach-Object { [string]$_.Path + '::' + [string]$_.Name })
+}
+
 function Test-StateActive {
     param([Parameter(Mandatory = $true)]$CandidateState)
     if (($CandidateState.PSObject.Properties.Name -contains 'MutationsStarted') -and -not [bool]$CandidateState.MutationsStarted) {
@@ -1303,8 +1314,10 @@ try {
         $state.Phase = 'ApplyingSettings'
         Save-State
 
+        $restorePointCreated = $false
         try {
             Microsoft.PowerShell.Management\Checkpoint-Computer -Description 'Before Boostix performance optimization' -RestorePointType MODIFY_SETTINGS | Out-Null
+            $restorePointCreated = $true
         }
         catch {
             Add-Warning -Message "Restore point was not created: $($_.Exception.Message)"
@@ -1371,6 +1384,8 @@ try {
             RebootRecommended = $true
             Warnings = @($state.Warnings)
             Conflicts = @($state.Conflicts)
+            SkippedSettings = @(Get-SkippedRegistrySettings -State $state)
+            RestorePointCreated = $restorePointCreated
         }
         Write-ResultJson -Value $result -Depth 10
     }
