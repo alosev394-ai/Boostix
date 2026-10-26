@@ -3,6 +3,8 @@ update.json -text
 update.json.sig -text
 update-v2.json -text
 update-v2.json.sig -text
+update-v3.json -text
+update-v3.json.sig -text
 
 # Hash-pinned and installer-embedded assets must also keep exact bytes.
 outputs/*.ps1 -text

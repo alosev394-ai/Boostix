@@ -18,8 +18,10 @@ $canaryWorkflowPath = Join-Path $projectRoot (
 $dependabotPath = Join-Path $projectRoot '.github\dependabot.yml'
 $runAllPath = Join-Path $PSScriptRoot 'Run-All.ps1'
 $releaseChannelTestPath = Join-Path $PSScriptRoot 'Test-ReleaseUpdateChannel.ps1'
+$gitAttributesPath = Join-Path $projectRoot '.gitattributes'
 foreach ($requiredPath in @(
     $brandPath,
+    $gitAttributesPath,
     $signingPath,
     $workflowPath,
     $canaryWorkflowPath,
@@ -75,6 +77,7 @@ if (-not [regex]::IsMatch(
 }
 
 $workflow = [IO.File]::ReadAllText($workflowPath)
+$gitAttributes = [IO.File]::ReadAllText($gitAttributesPath)
 $canaryWorkflow = [IO.File]::ReadAllText($canaryWorkflowPath)
 foreach ($requiredWorkflowContract in @(
     'ProductBrand.cs',
@@ -101,6 +104,11 @@ foreach ($signedSnapshotFile in @(
 )) {
     if (-not $workflow.Contains("'$signedSnapshotFile'")) {
         throw "CI does not preserve signed channel file '$signedSnapshotFile'."
+    }
+    # A CRLF checkout (autocrlf on Windows runners) changes the signed bytes.
+    $exactBytesRule = '(?m)^' + [regex]::Escape($signedSnapshotFile) + '[ \t]+-text[ \t]*\r?$'
+    if (-not [regex]::IsMatch($gitAttributes, $exactBytesRule)) {
+        throw ".gitattributes does not keep signed channel file '$signedSnapshotFile' byte-for-byte (-text)."
     }
 }
 foreach ($hardCodedReleasePattern in @(
