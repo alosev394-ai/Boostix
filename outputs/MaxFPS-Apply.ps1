@@ -1174,10 +1174,38 @@ try {
                     Save-State
                     return
                 }
-                if (-not (Test-Path -LiteralPath $Path)) {
-                    New-Item -Path $Path -Force | Out-Null
+                try {
+                    if (-not (Test-Path -LiteralPath $Path)) {
+                        New-Item -Path $Path -Force | Out-Null
+                    }
+                    New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType $Kind -Force | Out-Null
                 }
-                New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType $Kind -Force | Out-Null
+                catch {
+                    # Windows can refuse a single allowlisted value even to an
+                    # elevated administrator (protected policy keys). Skip that
+                    # setting instead of rolling back the whole profile; any
+                    # other failure still aborts the transaction.
+                    $refusal = $_.Exception
+                    while ($refusal -and
+                        -not ($refusal -is [System.UnauthorizedAccessException]) -and
+                        -not ($refusal -is [System.Security.SecurityException])) {
+                        $refusal = $refusal.InnerException
+                    }
+                    if (-not $refusal) {
+                        throw
+                    }
+                    if (-not [bool]$before.KeyExists -and (Test-Path -LiteralPath $Path)) {
+                        $createdKey = Get-Item -LiteralPath $Path
+                        if ($createdKey.ValueCount -eq 0 -and $createdKey.SubKeyCount -eq 0) {
+                            Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+                        }
+                    }
+                    $entry.ChangedByUs = $false
+                    $entry.Applied = $false
+                    Set-ObjectProperty -Object $entry -Name 'Conflict' -Value 'AccessDenied'
+                    Add-Warning -Message "Windows refused to change ${Path}::$Name; this setting was skipped."
+                    return
+                }
                 $after = Get-RegistrySnapshot -Path $Path -Name $Name
                 if (-not (Test-RegistrySnapshotEqual -Left $after -Right $target)) {
                     throw "Registry write verification failed for $Path::$Name"

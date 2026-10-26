@@ -37,6 +37,7 @@ $requiredTests = @(
     'Test-InstallerLifecycleSafety.ps1',
     'Test-MemoryPressureRelief.ps1',
     'Test-OptimizationElevationSafety.ps1',
+    'Test-OptimizationFailureRecovery.ps1',
     'Test-PerformanceCapture.ps1',
     'Test-PerformanceProofAndCrash.ps1',
     'Test-PerformanceProofCoordinator.ps1',

@@ -56,7 +56,7 @@ namespace Boostix
         private static readonly Color ErrorColor = BoostixDesignTokens.Error;
         private const int ElevatedScriptTimeoutMilliseconds = 10 * 60 * 1000;
         private const string ApplyScriptSha256 =
-            "58A7E8E4C709CAADCB6D1B808DCDCBA18B85B6EB3201ECFCB2B37474391187BC";
+            "1EE21B44F27FC2904F4CF479F029CA69EBD269D85039857AC4CFF5EC35F3B1B5";
         private const string RestoreScriptSha256 =
             "BFE02A3B3C4DBC58F215A62ABFA80EBD7B3CCC40C7A2C488A62ED06D0F1C0D76";
 
@@ -521,6 +521,10 @@ namespace Boostix
                 {
                     await RestoreAndCloseAsync();
                 }
+                else if (HasArgument("--demo-apply-failure"))
+                {
+                    await RestoreAfterFailedApplyAsync();
+                }
                 else
                 {
                     ShowRebootRequired();
@@ -570,7 +574,7 @@ namespace Boostix
                     catch
                     {
                     }
-                    await RestoreAndCloseAsync();
+                    await RestoreAfterFailedApplyAsync();
                     return;
                 }
                 ShowFailure(
@@ -929,6 +933,29 @@ namespace Boostix
 
         private async Task RestoreAndCloseAsync()
         {
+            if (await RestoreAsync())
+            {
+                CloseApplication();
+            }
+        }
+
+        // A failed apply is rolled back automatically. Closing afterwards
+        // looked like a crash, so keep Boostix open and say what happened.
+        private async Task RestoreAfterFailedApplyAsync()
+        {
+            if (await RestoreAsync())
+            {
+                ShowFailure(
+                    "Не удалось применить настройки, поэтому Boostix отменил все изменения. " +
+                    "Система в исходном состоянии: можно продолжить без настройки или попробовать ещё раз.",
+                    false);
+            }
+        }
+
+        // Returns true once the original settings are back; otherwise the
+        // failure card explaining the rollback problem is already shown.
+        private async Task<bool> RestoreAsync()
+        {
             state = FlowState.Restoring;
             ShowWorking(
                 "Восстанавливаем настройки",
@@ -938,8 +965,7 @@ namespace Boostix
             if (demoMode)
             {
                 await Task.Delay(700);
-                CloseApplication();
-                return;
+                return true;
             }
 
             string validatedStatePath;
@@ -948,7 +974,7 @@ namespace Boostix
                 ShowFailure(
                     "Файл резервной копии не найден. Автоматический откат остановлен, чтобы не менять систему вслепую.",
                     true);
-                return;
+                return false;
             }
             pendingStatePath = validatedStatePath;
 
@@ -956,7 +982,7 @@ namespace Boostix
             if (!File.Exists(scriptPath))
             {
                 ShowFailure("Файл MaxFPS-Restore.ps1 не найден рядом с программой.", true);
-                return;
+                return false;
             }
 
             string resultPath = MakeTemporaryResultPath("restore");
@@ -975,7 +1001,7 @@ namespace Boostix
                 ShowFailure(
                     "Откат отменён в запросе прав администратора. Настройки пока остаются применёнными.",
                     true);
-                return;
+                return false;
             }
 
             if (execution.Error != null || execution.ExitCode != 0)
@@ -988,7 +1014,7 @@ namespace Boostix
                         : "Не удалось полностью восстановить исходные настройки. " +
                           "Резервная копия сохранена для повторной попытки.",
                     true);
-                return;
+                return false;
             }
 
             TryDeleteFile(resultPath);
@@ -996,7 +1022,7 @@ namespace Boostix
             TryDeleteFile(completedMarkerPath);
             TryDeleteFile(legacyPendingMarkerPath);
             TryDeleteFile(legacyCompletedMarkerPath);
-            CloseApplication();
+            return true;
         }
 
         private void ShowWorking(string title, string description, string cancelText)
@@ -1150,6 +1176,14 @@ namespace Boostix
                 var closeButton = MakeActionButton("Закрыть", false);
                 closeButton.Click += delegate { CloseApplication(); };
                 buttons.Children.Add(closeButton);
+
+                var skipButton = MakeActionButton("Без настройки", false);
+                skipButton.Margin = new Thickness(10, 0, 0, 0);
+                skipButton.Click += delegate { HideFlow(); };
+                AutomationProperties.SetName(
+                    skipButton,
+                    "Продолжить без системной оптимизации");
+                buttons.Children.Add(skipButton);
 
                 var retryButton = MakeActionButton("Повторить", true);
                 retryButton.Margin = new Thickness(10, 0, 0, 0);
