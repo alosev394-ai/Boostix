@@ -356,7 +356,7 @@ $providerFailureState = [string]$formatUnavailablePageFile.Invoke(
     [object[]]@($providerFailureSnapshot))
 if ([Convert]::ToBase64String(
         [Text.Encoding]::UTF8.GetBytes($providerFailureState)) -cne
-    '0J3QldCU0J7QodCi0KPQn9Cd0J4=') {
+    '0J3QtdC00L7RgdGC0YPQv9C90L4=') {
     throw 'A page-file provider failure was incorrectly shown as an inactive page file.'
 }
 $inactivePageFileSnapshot = New-Snapshot $true (16 * $gib) (8 * $gib) (8 * $gib) (32 * $gib)
@@ -367,7 +367,7 @@ $inactivePageFileState = [string]$formatUnavailablePageFile.Invoke(
     [object[]]@($inactivePageFileSnapshot))
 if ([Convert]::ToBase64String(
         [Text.Encoding]::UTF8.GetBytes($inactivePageFileState)) -cne
-    '0J3QlSDQkNCa0KLQmNCS0JXQnQ==') {
+    '0J3QtSDQsNC60YLQuNCy0LXQvQ==') {
     throw 'A genuinely inactive page file was not labelled as inactive.'
 }
 

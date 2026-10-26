@@ -111,8 +111,9 @@ try {
         -TimeoutMilliseconds 20000
 
     $bounds = $window.Current.BoundingRectangle
+    # Fixed 880x560 DIP shell (landscape, sidebar + content).
     $aspectRatio = $bounds.Height / $bounds.Width
-    if ($aspectRatio -lt 1.18 -or $aspectRatio -gt 1.22) {
+    if ($aspectRatio -lt 0.62 -or $aspectRatio -gt 0.65) {
         throw "Unexpected main-window aspect ratio: $aspectRatio ($($bounds.Width)x$($bounds.Height))."
     }
     $dpi = [BoostixUiStateTest.NativeMethods]::GetDpiForWindow(
@@ -120,7 +121,7 @@ try {
     if ($dpi -lt 96) { $dpi = 96 }
     $normalizedWidth = $bounds.Width * $dpi / 96.0
     $normalizedHeight = $bounds.Height * $dpi / 96.0
-    if ($normalizedWidth -lt 456 -or $normalizedHeight -lt 548) {
+    if ($normalizedWidth -lt 876 -or $normalizedHeight -lt 556) {
         throw "Main window is too small for the responsive safe areas: $($bounds.Width)x$($bounds.Height)."
     }
 

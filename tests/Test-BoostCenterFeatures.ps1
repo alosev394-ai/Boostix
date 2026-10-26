@@ -31,10 +31,7 @@ foreach ($forbiddenLauncherContract in @(
 foreach ($required in @(
     'AssemblyVersion(ProductBrand.AssemblyVersion)',
     'AssemblyCompany(ProductBrand.CompanyName)',
-    'GetApplicationVersion() + "  " + ProductBrand.ReleaseLabel',
     'MakeText(',
-    '"by Silas Suspect"',
-    'Panel.SetZIndex(watermark, 400)',
     'ProcessPriorityClass.AboveNormal',
     'OriginalPriority = originalPriority',
     'process.StartTime.ToUniversalTime() != item.StartTimeUtc',
@@ -48,9 +45,10 @@ foreach ($required in @(
     '"Interrupted"',
     'BoostSessionReportStore.Save',
     'PerformanceCaptureService.CaptureTargetAsync',
-    'private const double BaseWindowWidth = 460',
-    'private const double CenterWindowWidth = 620',
-    'preferenceSection = BuildSessionSummaryPanel();',
+    'private const double BaseWindowWidth = BoostixDesignTokens.WindowWidth',
+    'private const double BaseWindowHeight = BoostixDesignTokens.WindowHeight',
+    'FrameworkElement home = BuildHomePage();',
+    'boostCenterOverlay.SetHomeContent(home);',
     '"Boostix.Target.Select"',
     'gameTargetService.EnumerateCandidates()',
     'gameTargetService.TryResolve(',
@@ -126,91 +124,69 @@ function Find-SubMinimumTextLiterals {
     return $violations.ToArray()
 }
 
+# The sidebar is the navigation; the caption row keeps only minimize/close at
+# the top right of the content column. The retired gear opener is gone.
 $windowControlsStart = $program.IndexOf(
-    'private Grid BuildWindowControls',
+    'private StackPanel BuildWindowControls()',
     [StringComparison]::Ordinal)
-$titleStart = $program.IndexOf(
-    'private StackPanel BuildTitle',
+$windowControlsEnd = $program.IndexOf(
+    'private Grid BuildBoostButton()',
     $windowControlsStart,
     [StringComparison]::Ordinal)
-if ($windowControlsStart -lt 0 -or $titleStart -le $windowControlsStart) {
+if ($windowControlsStart -lt 0 -or $windowControlsEnd -le $windowControlsStart) {
     throw 'The main-window chrome composition could not be located.'
 }
 $windowControls = $program.Substring(
     $windowControlsStart,
-    $titleStart - $windowControlsStart)
+    $windowControlsEnd - $windowControlsStart)
 foreach ($required in @(
-    'Margin = new Thickness(0),',
-    'center.HorizontalAlignment = HorizontalAlignment.Left',
-    'center.VerticalAlignment = VerticalAlignment.Top',
-    'header.Children.Add(center);',
-    'controls.HorizontalAlignment = HorizontalAlignment.Right',
-    'controls.VerticalAlignment = VerticalAlignment.Top'
+    'HorizontalAlignment = HorizontalAlignment.Right',
+    'VerticalAlignment = VerticalAlignment.Top',
+    '"Boostix.TitleBar"',
+    '"Boostix.Minimize"',
+    '"Boostix.Close"'
 )) {
     if (-not $windowControls.Contains($required)) {
-        throw "The split left/right window-chrome contract is missing: $required"
+        throw "The window-chrome contract is missing: $required"
     }
 }
-if ($windowControls.Contains('controls.Children.Add(center)')) {
-    throw 'The settings button is still grouped with the right-side caption controls.'
+if ($program.Contains('private static Button MakeCenterButton') -or
+    $program.Contains('"Boostix.OpenCenter"')) {
+    throw 'The retired gear opener returned beside the sidebar navigation.'
 }
 
-$centerButtonStart = $program.IndexOf(
-    'private static Button MakeCenterButton',
-    [StringComparison]::Ordinal)
 $windowButtonStart = $program.IndexOf(
     'private static Button MakeWindowButton',
-    $centerButtonStart,
-    [StringComparison]::Ordinal)
-$transparentButtonTemplateStart = $program.IndexOf(
-    'private static ControlTemplate MakeTransparentButtonTemplate',
-    $windowButtonStart,
     [StringComparison]::Ordinal)
 $chromeButtonTemplateStart = $program.IndexOf(
     'private static ControlTemplate MakeChromeButtonTemplate',
-    $transparentButtonTemplateStart,
     [StringComparison]::Ordinal)
 $makeTextStart = $program.IndexOf(
     'private static TextBlock MakeText',
     $chromeButtonTemplateStart,
     [StringComparison]::Ordinal)
-if ($centerButtonStart -lt 0 -or
-    $windowButtonStart -le $centerButtonStart -or
-    $transparentButtonTemplateStart -le $windowButtonStart -or
-    $chromeButtonTemplateStart -le $transparentButtonTemplateStart -or
+if ($windowButtonStart -lt 0 -or
+    $chromeButtonTemplateStart -lt 0 -or
     $makeTextStart -le $chromeButtonTemplateStart) {
     throw 'The window chrome geometry sections could not be located.'
 }
-$centerButton = $program.Substring(
-    $centerButtonStart,
-    $windowButtonStart - $centerButtonStart)
 $windowButton = $program.Substring(
     $windowButtonStart,
-    $transparentButtonTemplateStart - $windowButtonStart)
+    $program.IndexOf('}', $program.IndexOf('return button;', $windowButtonStart)) - $windowButtonStart)
+foreach ($required in @(
+    'button.Height = TitleControlSize',
+    'BoostixIcons.Close',
+    'BoostixIcons.Minimize',
+    'BoostixDesignTokens.Destructive',
+    'FocusVisualStyle = BoostixUi.FocusVisual('
+)) {
+    if (-not $windowButton.Contains($required)) {
+        throw "The caption button contract is missing: $required"
+    }
+}
 $chromeButtonTemplate = $program.Substring(
     $chromeButtonTemplateStart,
     $makeTextStart - $chromeButtonTemplateStart)
-foreach ($required in @(
-    'FontSize = 19',
-    'HorizontalAlignment = HorizontalAlignment.Center',
-    'VerticalAlignment = VerticalAlignment.Center'
-)) {
-    if (-not $centerButton.Contains($required)) {
-        throw "The centered settings glyph contract is missing: $required"
-    }
-}
-foreach ($required in @(
-    'glyphCanvas.Width = TitleControlSize',
-    'glyphCanvas.Height = TitleControlSize',
-    'Geometry.Parse("M 11,11 L 21,21 M 21,11 L 11,21")',
-    'minimizeGlyph.Width = 16',
-    'Canvas.SetLeft(minimizeGlyph, 8)',
-    'Canvas.SetTop(minimizeGlyph, 19)'
-)) {
-    if (-not $windowButton.Contains($required)) {
-        throw "The centered caption glyph contract is missing: $required"
-    }
-}
 if (-not $chromeButtonTemplate.Contains(
         'BorderThicknessProperty, new Thickness(0)')) {
     throw 'The window chrome template still insets its glyph content.'
@@ -269,6 +245,17 @@ foreach ($forbidden in @(
 }
 
 foreach ($required in @(
+    'CenterPage.Home',
+    'AddTab(tabs, CenterPage.Home',
+    'SetHomeContent(',
+    'BuildSidebar()',
+    '"Boostix.Sidebar"',
+    '"Boostix.Watermark"',
+    '"by Silas Suspect"',
+    'GetApplicationVersion() + "  " + ProductBrand.ReleaseLabel',
+    'Raise(PageOpening);',
+    'Raise(preserveTabFocus ? HomeNavigated : CloseRequested);',
+    'footerBar.Visibility',
     'CenterPage.Readiness',
     'CenterPage.Impact',
     'CenterPage.Report',
@@ -295,26 +282,24 @@ foreach ($required in @(
     'using Boostix.Branding;',
     'BoostixDesignTokens.Accent',
     'BoostixDesignTokens.AccentText',
-    'Color targetColor = selected ? AccentTextColor : MutedColor;',
     'MakeBoostixVerticalScrollBarStyle',
     'ProductBrand.AccentVisualHex',
-    'ProductBrand.AccentTextHex',
     'ProductBrand.AccentHex',
     'CanContentScroll = false',
     'PageScrollerPreviewMouseWheel',
     'CalculateSmoothScrollTarget',
     'Thumb.DragStartedEvent',
-    'BeginPageTransition(previousPage, page);',
+    'BeginPageTransition(previousPage, page, preserveTabFocus);',
     'FinishPageTransitionImmediately();',
     'generation != pageTransitionGeneration',
     '-direction * 18',
     'direction * 18',
     'TimeSpan.FromMilliseconds(milliseconds)',
-    'AnimateTabColor(foreground, targetColor, animate);',
+    'AnimateTabColor(visuals.Background, background, animate);',
     'AnimateTabIndicator(',
     'FillBehavior = FillBehavior.Stop',
     'MakeKeyboardFocusVisualStyle',
-    'FocusVisualStyle = MakeKeyboardFocusVisualStyle(6)',
+    'FocusVisualStyle = MakeKeyboardFocusVisualStyle(BoostixDesignTokens.RadiusSmall)',
     '"Boostix.Center"',
     '"Boostix.Center.Tab." + page',
     'Raise(RestoreRequested)'
@@ -334,10 +319,9 @@ if ($addTabStart -lt 0 -or $openCenterStart -le $addTabStart) {
     throw 'The Boost Center tab construction section could not be isolated.'
 }
 $addTab = $center.Substring($addTabStart, $openCenterStart - $addTabStart)
-if (-not $addTab.Contains('Height = new GridLength(40)') -and
-    -not $addTab.Contains(
-        'Height = new GridLength(BoostixDesignTokens.MinimumActionHeight)')) {
-    throw 'Boost Center tab hit targets are not 40 DIP.'
+if (-not $center.Contains('private const double NavigationItemHeight = 42;') -or
+    -not $addTab.Contains('Height = NavigationItemHeight')) {
+    throw 'Sidebar navigation hit targets are not 42 DIP.'
 }
 foreach ($forbiddenPublicUi in @(
     '"Majestic',
@@ -366,8 +350,8 @@ foreach ($requiredPublicUi in @(
         throw "The Boostix Center public copy is missing: $requiredPublicUi"
     }
 }
-if ($center -notmatch '(?s)AnimatePageVisual\(\s*pageScroller,.*?PageTransitionExitMilliseconds,\s*EasingMode\.EaseIn' -or
-    $center -notmatch '(?s)AnimatePageVisual\(\s*pageScroller,.*?PageTransitionEnterMilliseconds,\s*EasingMode\.EaseOut' -or
+if ($center -notmatch '(?s)AnimatePageVisual\(\s*pageArea,.*?PageTransitionExitMilliseconds,\s*EasingMode\.EaseIn' -or
+    $center -notmatch '(?s)AnimatePageVisual\(\s*pageArea,.*?PageTransitionEnterMilliseconds,\s*EasingMode\.EaseOut' -or
     -not $center.Contains('PageTransitionTotalMilliseconds =')) {
     throw 'The Boost Center page transition timing contract is missing.'
 }
@@ -392,63 +376,69 @@ foreach ($required in @(
 }
 
 foreach ($required in @(
-    'public const double BodyTextSize = 12',
-    'public const double MetadataTextSize = 11',
+    'public const double BodyTextSize = 13',
+    'public const double MetadataTextSize = 11.5',
+    'public const double OverlineTextSize = 11',
+    'public const double WindowWidth = 880',
+    'public const double WindowHeight = 560',
     'public const double MinimumActionHeight = 40',
     'public const double PreferredActionHeight = 44'
 )) {
     if (-not $tokens.Contains($required)) {
-        throw "The Boostix 2.0 typography/hit-target token is missing: $required"
+        throw "The Boostix typography/hit-target token is missing: $required"
     }
 }
 
 $mainCompositionStart = $program.IndexOf(
     'private Grid BuildShell()',
     [StringComparison]::Ordinal)
-$sessionPanelStart = $program.IndexOf(
-    'private Grid BuildSessionSummaryPanel()',
+$mainCompositionEnd = $program.IndexOf(
+    'private TextBlock AddLiveMetric(',
     $mainCompositionStart,
     [StringComparison]::Ordinal)
-if ($mainCompositionStart -lt 0 -or $sessionPanelStart -le $mainCompositionStart) {
-    throw 'The main Boostix 2.0 composition could not be located.'
+if ($mainCompositionStart -lt 0 -or $mainCompositionEnd -le $mainCompositionStart) {
+    throw 'The main Boostix composition could not be located.'
 }
 $mainComposition = $program.Substring(
     $mainCompositionStart,
-    $sessionPanelStart - $mainCompositionStart)
-if (-not $mainComposition.Contains(
-        'preferenceSection = BuildSessionSummaryPanel();')) {
-    throw 'The main window does not compose the exact-target session summary.'
+    $mainCompositionEnd - $mainCompositionStart)
+foreach ($required in @(
+    'private Grid BuildHomePage()',
+    'private Button BuildTargetSelector()',
+    'private Border BuildBoostCard()',
+    'private Border BuildHomeSystemCard()',
+    'Grid orb = BuildBoostButton();'
+)) {
+    if (-not $mainComposition.Contains($required)) {
+        throw "The Home composition contract is missing: $required"
+    }
 }
-if ($mainComposition.Contains('BuildPreferencePanel()') -or
-    $mainComposition.Contains('BuildPreferenceToggle(') -or
-    $mainComposition.Contains('Boostix.Keep.')) {
+if ($program.Contains('BuildPreferencePanel()') -or
+    $program.Contains('BuildPreferenceToggle(') -or
+    $program.Contains('Boostix.Keep.')) {
     throw 'The main window still composes the obsolete keep-toggle panel.'
 }
 
-$sessionPanelEnd = $program.IndexOf(
-    'private TextBlock AddLiveMetric(',
-    $sessionPanelStart,
+$targetStart = $program.IndexOf(
+    'private Button BuildTargetSelector()',
     [StringComparison]::Ordinal)
-if ($sessionPanelEnd -le $sessionPanelStart) {
-    throw 'The exact-target session summary section could not be isolated.'
+$targetEnd = $program.IndexOf(
+    'private void SetTargetIcon(',
+    $targetStart,
+    [StringComparison]::Ordinal)
+if ($targetEnd -le $targetStart) {
+    throw 'The exact-target selector section could not be isolated.'
 }
-$sessionPanel = $program.Substring(
-    $sessionPanelStart,
-    $sessionPanelEnd - $sessionPanelStart)
+$targetSelector = $program.Substring($targetStart, $targetEnd - $targetStart)
 foreach ($required in @(
     '"Boostix.Target.Select"',
-    'BoostixDesignTokens.BodyTextSize',
     'BoostixDesignTokens.MetadataTextSize',
-    'KeyboardNavigation.SetTabIndex(targetSelectorButton, 11)'
+    'KeyboardNavigation.SetTabIndex(targetSelectorButton, 10)',
+    'MinHeight = 74'
 )) {
-    if (-not $sessionPanel.Contains($required)) {
+    if (-not $targetSelector.Contains($required)) {
         throw "The exact-target selector layout contract is missing: $required"
     }
-}
-if (-not $sessionPanel.Contains('Height = 44') -and
-    -not $sessionPanel.Contains(
-        'Height = BoostixDesignTokens.PreferredActionHeight')) {
-    throw 'The exact-target selector is not a 44 DIP preferred action.'
 }
 
 $minimumTextViolations = @(
@@ -458,18 +448,16 @@ $minimumTextViolations = @(
 if ($minimumTextViolations.Count -gt 0) {
     $preview = ($minimumTextViolations | Select-Object -First 12) -join '; '
     throw (
-        'Boostix 2.0 exposes text below the 11 DIP minimum: ' + $preview)
+        'Boostix exposes text below the 11 DIP minimum: ' + $preview)
 }
 foreach ($required in @(
-    'Width = new GridLength(36 + ToggleSafeGutter)',
-    'HorizontalAlignment = HorizontalAlignment.Center',
-    'Margin = new Thickness(0)',
-    'Margin = new Thickness(3, 0, 0, 0)',
-    'new TranslateTransform(isChecked ? 14 : 0, 0)',
-    'double targetX = active ? 14 : 0',
+    'Width = new GridLength(44 + ToggleSafeGutter)',
+    'Margin = new Thickness(2, 0, 0, 0)',
+    'new TranslateTransform(isChecked ? 20 : 0, 0)',
+    'double targetX = active ? 20 : 0',
     'UseLayoutRounding = true',
     'ClipToBounds = false',
-    'Margin = new Thickness(0, 8, ScrollSafeInset, 8)'
+    'visible ? ScrollSafeInset - ScrollBarWidth : ScrollSafeInset'
 )) {
     if (-not $center.Contains($required)) {
         throw "The Boost Center toggle anti-clipping contract is missing: $required"

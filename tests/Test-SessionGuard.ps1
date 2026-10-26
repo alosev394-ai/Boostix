@@ -21,12 +21,35 @@ foreach ($forbidden in @(
     'MemoryPurgeStandbyList',
     'SetSystemFileCacheSize',
     'EmptyWorkingSet',
-    'OpenProcess(',
     'AdjustTokenPrivileges',
     'SeDebugPrivilege'
 )) {
     if ($source.Contains($forbidden)) {
         throw "Session Guard contains a forbidden memory-mutation API: $forbidden"
+    }
+}
+
+# Session Guard may open the exact target only with the read-only
+# PROCESS_QUERY_LIMITED_INFORMATION right (0x1000). That right cannot trim a
+# working set or change quotas, and it is the only right an elevated or
+# anti-cheat protected game grants to a standard Boostix process.
+$openProcessCalls = [regex]::Matches(
+    $source,
+    '(?<![A-Za-z_])OpenProcess\(\s*(?<access>[A-Za-z_0-9]+)\s*,')
+foreach ($call in $openProcessCalls) {
+    $access = $call.Groups['access'].Value
+    if ($access -cne 'ProcessQueryLimitedInformation' -and
+        $access -cne 'desiredAccess') {
+        throw "Session Guard opens a process with a non-read-only right: $access"
+    }
+}
+if ($openProcessCalls.Count -gt 0 -and
+    -not $source.Contains('private const uint ProcessQueryLimitedInformation = 0x1000;')) {
+    throw 'Session Guard redefined the limited process access right.'
+}
+foreach ($forbiddenRight in @('0x1F0FFF', '0x001F0FFF', '0x0100', 'PROCESS_ALL_ACCESS', 'PROCESS_SET_QUOTA')) {
+    if ($source.IndexOf($forbiddenRight, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        throw "Session Guard references a mutation-capable process right: $forbiddenRight"
     }
 }
 

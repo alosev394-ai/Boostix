@@ -1523,6 +1523,42 @@ namespace Boostix
             IntPtr processHandle,
             out IoCountersNative counters);
 
+        private const uint ProcessQueryLimitedInformation = 0x1000;
+        private const uint StillActive = 259;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(
+            uint desiredAccess,
+            [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
+            int processId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetExitCodeProcess(
+            IntPtr processHandle,
+            out uint exitCode);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryFullProcessImageName(
+            IntPtr processHandle,
+            int flags,
+            System.Text.StringBuilder exeName,
+            ref int size);
+
+        private static string QueryImagePath(IntPtr processHandle)
+        {
+            var buffer = new System.Text.StringBuilder(1024);
+            int size = buffer.Capacity;
+            return QueryFullProcessImageName(processHandle, 0, buffer, ref size)
+                ? buffer.ToString(0, size)
+                : String.Empty;
+        }
+
         private readonly object syncRoot = new object();
         private TargetMetricPoint previousTarget;
         private bool disposed;
@@ -1637,107 +1673,128 @@ namespace Boostix
             {
                 using (Process process = Process.GetProcessById(target.ProcessId))
                 {
-                    if (process.HasExited)
+                    // An elevated or anti-cheat protected game denies the
+                    // PROCESS_QUERY_INFORMATION/VM_READ handles behind
+                    // Process.HasExited, MainModule and Handle; every
+                    // per-target query here uses one limited handle instead.
+                    IntPtr limitedHandle = OpenProcess(
+                        ProcessQueryLimitedInformation,
+                        false,
+                        target.ProcessId);
+                    if (limitedHandle == IntPtr.Zero)
                     {
-                        unavailableReason = "The selected process has exited.";
-                        return false;
+                        throw new System.ComponentModel.Win32Exception(
+                            Marshal.GetLastWin32Error());
                     }
+                    try
+                    {
+                        uint exitCode;
+                        if (!GetExitCodeProcess(limitedHandle, out exitCode) ||
+                            exitCode != StillActive)
+                        {
+                            unavailableReason = "The selected process has exited.";
+                            return false;
+                        }
 
-                    DateTime processStartUtc = process.StartTime.ToUniversalTime();
-                    if (processStartUtc != target.ProcessStartTimeUtc)
-                    {
-                        ResetPreviousTarget();
-                        unavailableReason =
-                            "The selected PID was reused by a different process instance.";
-                        return false;
-                    }
-
-                    TargetMetricPoint previous;
-                    lock (syncRoot)
-                    {
-                        previous = previousTarget;
-                    }
-                    bool previousIdentityVerified =
-                        previous != null &&
-                        previous.ProcessId == target.ProcessId &&
-                        previous.ProcessStartUtc == target.ProcessStartTimeUtc &&
-                        previous.ExecutablePathVerified &&
-                        String.Equals(
-                            previous.ExecutablePath,
-                            target.ExecutablePath,
-                            StringComparison.OrdinalIgnoreCase);
-                    if (target.HasExecutablePath && !previousIdentityVerified)
-                    {
-                        string actualExecutablePath = process.MainModule == null
-                            ? String.Empty
-                            : process.MainModule.FileName;
-                        if (!target.Matches(
-                                process.Id,
-                                processStartUtc,
-                                actualExecutablePath))
+                        DateTime processStartUtc = process.StartTime.ToUniversalTime();
+                        if (processStartUtc != target.ProcessStartTimeUtc)
                         {
                             ResetPreviousTarget();
                             unavailableReason =
-                                "The selected PID no longer matches the expected executable path.";
+                                "The selected PID was reused by a different process instance.";
                             return false;
                         }
-                    }
 
-                    TimeSpan processorTime = process.TotalProcessorTime;
-                    privateBytes = Math.Max(0L, process.PrivateMemorySize64);
-                    workingSet = Math.Max(0L, process.WorkingSet64);
-
-                    IoCountersNative io;
-                    bool ioAvailable = GetProcessIoCounters(
-                        process.Handle,
-                        out io);
-                    ulong readBytes = ioAvailable ? io.ReadTransferCount : 0UL;
-                    ulong writeBytes = ioAvailable ? io.WriteTransferCount : 0UL;
-
-                    lock (syncRoot)
-                    {
-                        previous = previousTarget;
-                        if (previous != null &&
-                            previous.ProcessId == target.ProcessId &&
-                            previous.ProcessStartUtc == processStartUtc &&
-                            timestamp > previous.Timestamp)
+                        TargetMetricPoint previous;
+                        lock (syncRoot)
                         {
-                            double elapsedSeconds =
-                                (timestamp - previous.Timestamp) /
-                                (double)Stopwatch.Frequency;
-                            double processorSeconds =
-                                (processorTime - previous.ProcessorTime).TotalSeconds;
-                            if (elapsedSeconds > 0.0 && processorSeconds >= 0.0)
+                            previous = previousTarget;
+                        }
+                        bool previousIdentityVerified =
+                            previous != null &&
+                            previous.ProcessId == target.ProcessId &&
+                            previous.ProcessStartUtc == target.ProcessStartTimeUtc &&
+                            previous.ExecutablePathVerified &&
+                            String.Equals(
+                                previous.ExecutablePath,
+                                target.ExecutablePath,
+                                StringComparison.OrdinalIgnoreCase);
+                        if (target.HasExecutablePath && !previousIdentityVerified)
+                        {
+                            string actualExecutablePath =
+                                QueryImagePath(limitedHandle);
+                            if (!target.Matches(
+                                    process.Id,
+                                    processStartUtc,
+                                    actualExecutablePath))
                             {
-                                cpuPercent = ClampPercentage(
-                                    processorSeconds /
-                                    elapsedSeconds /
-                                    Math.Max(1, Environment.ProcessorCount) *
-                                    100.0);
-                            }
-
-                            if (ioAvailable)
-                            {
-                                readDelta = UnsignedDeltaToLong(
-                                    readBytes,
-                                    previous.ReadBytes);
-                                writeDelta = UnsignedDeltaToLong(
-                                    writeBytes,
-                                    previous.WriteBytes);
+                                ResetPreviousTarget();
+                                unavailableReason =
+                                    "The selected PID no longer matches the expected executable path.";
+                                return false;
                             }
                         }
 
-                        previousTarget = new TargetMetricPoint
+                        TimeSpan processorTime = process.TotalProcessorTime;
+                        privateBytes = Math.Max(0L, process.PrivateMemorySize64);
+                        workingSet = Math.Max(0L, process.WorkingSet64);
+
+                        IoCountersNative io;
+                        bool ioAvailable = GetProcessIoCounters(
+                            limitedHandle,
+                            out io);
+                        ulong readBytes = ioAvailable ? io.ReadTransferCount : 0UL;
+                        ulong writeBytes = ioAvailable ? io.WriteTransferCount : 0UL;
+
+                        lock (syncRoot)
                         {
-                            ProcessId = target.ProcessId,
-                            ProcessStartUtc = processStartUtc,
-                            ExecutablePathVerified = true,
-                            ExecutablePath = target.ExecutablePath,
-                            Timestamp = timestamp,
-                            ProcessorTime = processorTime,
-                            ReadBytes = readBytes,
-                            WriteBytes = writeBytes
-                        };
+                            previous = previousTarget;
+                            if (previous != null &&
+                                previous.ProcessId == target.ProcessId &&
+                                previous.ProcessStartUtc == processStartUtc &&
+                                timestamp > previous.Timestamp)
+                            {
+                                double elapsedSeconds =
+                                    (timestamp - previous.Timestamp) /
+                                    (double)Stopwatch.Frequency;
+                                double processorSeconds =
+                                    (processorTime - previous.ProcessorTime).TotalSeconds;
+                                if (elapsedSeconds > 0.0 && processorSeconds >= 0.0)
+                                {
+                                    cpuPercent = ClampPercentage(
+                                        processorSeconds /
+                                        elapsedSeconds /
+                                        Math.Max(1, Environment.ProcessorCount) *
+                                        100.0);
+                                }
+
+                                if (ioAvailable)
+                                {
+                                    readDelta = UnsignedDeltaToLong(
+                                        readBytes,
+                                        previous.ReadBytes);
+                                    writeDelta = UnsignedDeltaToLong(
+                                        writeBytes,
+                                        previous.WriteBytes);
+                                }
+                            }
+
+                            previousTarget = new TargetMetricPoint
+                            {
+                                ProcessId = target.ProcessId,
+                                ProcessStartUtc = processStartUtc,
+                                ExecutablePathVerified = true,
+                                ExecutablePath = target.ExecutablePath,
+                                Timestamp = timestamp,
+                                ProcessorTime = processorTime,
+                                ReadBytes = readBytes,
+                                WriteBytes = writeBytes
+                            };
+                        }
+                    }
+                    finally
+                    {
+                        CloseHandle(limitedHandle);
                     }
                 }
 

@@ -42,6 +42,40 @@ foreach ($required in @(
     }
 }
 
+# An elevated game denies priority queries on every 1 s maintenance tick.
+# The failure must reach the session report once per exact target; otherwise
+# a two-hour session collects thousands of identical actions and disk writes.
+$maintenanceStart = $program.IndexOf(
+    'private void RunActiveBoostMaintenance(int generation)',
+    [StringComparison]::Ordinal)
+$maintenanceEnd = $program.IndexOf(
+    'private static bool IsExactTargetForeground(',
+    [StringComparison]::Ordinal)
+if ($maintenanceStart -lt 0 -or $maintenanceEnd -le $maintenanceStart) {
+    throw 'The active maintenance source boundary was not found.'
+}
+$maintenance = $program.Substring(
+    $maintenanceStart,
+    $maintenanceEnd - $maintenanceStart)
+$priorityCatch = $maintenance.IndexOf('catch (Exception ex)', [StringComparison]::Ordinal)
+if ($priorityCatch -lt 0 -or
+    -not $maintenance.Substring($priorityCatch).Contains(
+        'priorityFailureTargetKey')) {
+    throw 'A denied target priority is recorded on every maintenance tick instead of once per target.'
+}
+
+# A daylight-saving shift must not expire or extend the Boost start window,
+# and a failed script launch must leave a diagnosable crash-log entry.
+foreach ($required in @(
+    'readinessDeadline = DateTime.UtcNow.AddSeconds(20);',
+    'DateTime.UtcNow >= readinessDeadline',
+    'CrashLog.Write("Could not launch the Boost preparation script.", ex);'
+)) {
+    if (-not $program.Contains($required)) {
+        throw "Boost launch reliability contract is missing: $required"
+    }
+}
+
 foreach ($required in @(
     'public int MemorySamples;',
     'public long MemoryReliefBytes;',

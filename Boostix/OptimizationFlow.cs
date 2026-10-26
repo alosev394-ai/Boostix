@@ -108,7 +108,9 @@ namespace Boostix
 
             HorizontalAlignment = HorizontalAlignment.Stretch;
             VerticalAlignment = VerticalAlignment.Stretch;
-            Background = new SolidColorBrush(BackgroundColor);
+            Background = new SolidColorBrush(SystemParameters.HighContrast
+                ? BackgroundColor
+                : BoostixDesignTokens.WithAlpha(BoostixDesignTokens.Sidebar, 222));
             Visibility = Visibility.Collapsed;
             Focusable = true;
             KeyboardNavigation.SetTabNavigation(this, KeyboardNavigationMode.Cycle);
@@ -117,15 +119,26 @@ namespace Boostix
 
             card = new Border
             {
-                Width = 386,
-                Height = 410,
+                Width = 500,
+                MaxHeight = 520,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0),
-                CornerRadius = new CornerRadius(0),
-                Padding = new Thickness(24)
+                Background = new SolidColorBrush(BoostixDesignTokens.Surface),
+                BorderBrush = new SolidColorBrush(BoostixDesignTokens.Border),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(30, 28, 30, 26)
             };
+            if (!SystemParameters.HighContrast)
+            {
+                card.Effect = new System.Windows.Media.Effects.DropShadowEffect
+                {
+                    Color = Colors.Black,
+                    BlurRadius = 40,
+                    ShadowDepth = 8,
+                    Opacity = 0.55
+                };
+            }
             Children.Add(card);
 
             cardContent = new Grid();
@@ -417,12 +430,12 @@ namespace Boostix
             Visibility = Visibility.Visible;
             cardContent.Children.Clear();
             cardContent.RowDefinitions.Clear();
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(56) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(50) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var header = BuildHeader(
-                "ПЕРЕД ПРОДОЛЖЕНИЕМ",
+                "Перед первым запуском",
                 "Boostix применит обратимый профиль производительности Windows.");
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
@@ -460,24 +473,21 @@ namespace Boostix
             cardContent.Children.Add(body);
 
             var buttons = BuildButtonRow();
-            var cancelButton = MakeActionButton("ЗАКРЫТЬ", false);
-            cancelButton.Width = 84;
+            var cancelButton = MakeActionButton("Закрыть", false);
             cancelButton.Click += delegate { CloseApplication(); };
             AutomationProperties.SetName(cancelButton, "Отменить первоначальную настройку и закрыть программу");
             buttons.Children.Add(cancelButton);
 
-            var skipButton = MakeActionButton("БЕЗ НАСТРОЙКИ", false);
-            skipButton.Width = 124;
-            skipButton.Margin = new Thickness(8, 0, 0, 0);
+            var skipButton = MakeActionButton("Без настройки", false);
+            skipButton.Margin = new Thickness(10, 0, 0, 0);
             skipButton.Click += delegate { HideFlow(); };
             AutomationProperties.SetName(
                 skipButton,
                 "Продолжить без системной оптимизации");
             buttons.Children.Add(skipButton);
 
-            var continueButton = MakeActionButton("ПРИМЕНИТЬ", true);
-            continueButton.Width = 112;
-            continueButton.Margin = new Thickness(8, 0, 0, 0);
+            var continueButton = MakeActionButton("Применить", true);
+            continueButton.Margin = new Thickness(10, 0, 0, 0);
             continueButton.IsDefault = true;
             continueButton.Click += ContinueButtonClick;
             AutomationProperties.SetName(continueButton, "Продолжить и применить оптимизацию производительности");
@@ -499,9 +509,9 @@ namespace Boostix
             state = FlowState.Applying;
             rollbackRequested = false;
             ShowWorking(
-                "ПРИМЕНЯЕМ НАСТРОЙКИ",
+                "Применяем настройки",
                 "Windows запросит права администратора. Не закрывайте это окно до завершения.",
-                "ОТМЕНИТЬ");
+                "Отменить");
 
             if (demoMode)
             {
@@ -619,12 +629,12 @@ namespace Boostix
             Visibility = Visibility.Visible;
             cardContent.Children.Clear();
             cardContent.RowDefinitions.Clear();
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(50) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var header = BuildHeader(
-                "ОПТИМИЗАЦИЯ ГОТОВА",
+                "Оптимизация готова",
                 "Настройки применены и сохранены для безопасного отката.");
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
@@ -657,7 +667,7 @@ namespace Boostix
             body.Children.Add(rebootBadge);
 
             var title = MakeText(
-                "ТРЕБУЕТСЯ ПЕРЕЗАГРУЗКА",
+                "Нужна перезагрузка",
                 14,
                 TextColor,
                 semiboldFont,
@@ -679,14 +689,12 @@ namespace Boostix
             cardContent.Children.Add(body);
 
             var buttons = BuildButtonRow();
-            var cancelButton = MakeActionButton("ОТМЕНИТЬ", false);
-            cancelButton.Width = 112;
+            var cancelButton = MakeActionButton("Отменить", false);
             cancelButton.Click += delegate { BeginRestoreAndClose(); };
             AutomationProperties.SetName(cancelButton, "Отменить оптимизацию, восстановить настройки и закрыть программу");
             buttons.Children.Add(cancelButton);
 
-            var restartButton = MakeActionButton("ПЕРЕЗАГРУЗИТЬ СЕЙЧАС", true);
-            restartButton.Width = 194;
+            var restartButton = MakeActionButton("Перезагрузить сейчас", true);
             restartButton.Margin = new Thickness(10, 0, 0, 0);
             restartButton.IsDefault = true;
             restartButton.Click += RestartButtonClick;
@@ -705,12 +713,12 @@ namespace Boostix
             Visibility = Visibility.Visible;
             cardContent.Children.Clear();
             cardContent.RowDefinitions.Clear();
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(50) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var header = BuildHeader(
-                "НУЖНО ВОССТАНОВЛЕНИЕ",
+                "Нужно восстановление",
                 "Найдена незавершённая системная транзакция.");
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
@@ -761,7 +769,7 @@ namespace Boostix
             body.Children.Add(recoveryBadge);
 
             var title = MakeText(
-                "ТРЕБУЕТСЯ БЕЗОПАСНЫЙ ОТКАТ",
+                "Нужен безопасный откат",
                 13.5,
                 TextColor,
                 semiboldFont,
@@ -788,8 +796,7 @@ namespace Boostix
             cardContent.Children.Add(body);
 
             var buttons = BuildButtonRow();
-            var restoreButton = MakeActionButton("ВОССТАНОВИТЬ", true);
-            restoreButton.Width = 174;
+            var restoreButton = MakeActionButton("Восстановить", true);
             restoreButton.IsDefault = true;
             restoreButton.Click += delegate { BeginRestoreAndClose(); };
             AutomationProperties.SetName(restoreButton, "Восстановить исходные настройки из найденной резервной копии");
@@ -807,9 +814,9 @@ namespace Boostix
             Visibility = Visibility.Visible;
             cardContent.Children.Clear();
             cardContent.RowDefinitions.Clear();
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(50) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var header = BuildHeader(
                 "ВОССТАНОВИТЬ WINDOWS",
@@ -826,7 +833,7 @@ namespace Boostix
             };
 
             var title = MakeText(
-                "ОТКАТ СИСТЕМНОЙ ОПТИМИЗАЦИИ",
+                "Откат системной оптимизации",
                 13.5,
                 TextColor,
                 semiboldFont,
@@ -858,14 +865,12 @@ namespace Boostix
             cardContent.Children.Add(body);
 
             var buttons = BuildButtonRow();
-            var cancelButton = MakeActionButton("ОТМЕНА", false);
-            cancelButton.Width = 112;
+            var cancelButton = MakeActionButton("Отмена", false);
             cancelButton.Click += delegate { CancelManualRestore(); };
             AutomationProperties.SetName(cancelButton, "Отменить ручное восстановление");
             buttons.Children.Add(cancelButton);
 
-            var restoreButton = MakeActionButton("ВОССТАНОВИТЬ", true);
-            restoreButton.Width = 174;
+            var restoreButton = MakeActionButton("Восстановить", true);
             restoreButton.Margin = new Thickness(10, 0, 0, 0);
             restoreButton.IsDefault = true;
             restoreButton.Click += delegate { BeginRestoreAndClose(); };
@@ -926,7 +931,7 @@ namespace Boostix
         {
             state = FlowState.Restoring;
             ShowWorking(
-                "ВОССТАНАВЛИВАЕМ НАСТРОЙКИ",
+                "Восстанавливаем настройки",
                 "Возвращаем только те параметры, которые Boostix изменил при настройке.",
                 null);
 
@@ -999,9 +1004,9 @@ namespace Boostix
             Visibility = Visibility.Visible;
             cardContent.Children.Clear();
             cardContent.RowDefinitions.Clear();
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(50) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var header = BuildHeader(title, description);
             Grid.SetRow(header, 0);
@@ -1075,7 +1080,6 @@ namespace Boostix
             {
                 var buttons = BuildButtonRow();
                 var cancelButton = MakeActionButton(cancelText, false);
-                cancelButton.Width = 132;
                 cancelButton.Click += delegate
                 {
                     if (state == FlowState.Applying)
@@ -1116,11 +1120,11 @@ namespace Boostix
             Visibility = Visibility.Visible;
             cardContent.Children.Clear();
             cardContent.RowDefinitions.Clear();
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(50) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            var header = BuildHeader("НУЖНО ВНИМАНИЕ", "Boostix остановил операцию безопасно.");
+            var header = BuildHeader("Нужно ваше внимание", "Boostix остановил операцию безопасно.");
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
@@ -1134,8 +1138,7 @@ namespace Boostix
             var buttons = BuildButtonRow();
             if (canRetryRestore)
             {
-                var retryButton = MakeActionButton("ПОВТОРИТЬ ОТКАТ", true);
-                retryButton.Width = 170;
+                var retryButton = MakeActionButton("Повторить откат", true);
                 retryButton.IsDefault = true;
                 retryButton.Click += delegate { BeginRestoreAndClose(); };
                 AutomationProperties.SetName(retryButton, "Повторить восстановление исходных настроек");
@@ -1144,13 +1147,11 @@ namespace Boostix
             }
             else
             {
-                var closeButton = MakeActionButton("ЗАКРЫТЬ", false);
-                closeButton.Width = 118;
+                var closeButton = MakeActionButton("Закрыть", false);
                 closeButton.Click += delegate { CloseApplication(); };
                 buttons.Children.Add(closeButton);
 
-                var retryButton = MakeActionButton("ПОВТОРИТЬ", true);
-                retryButton.Width = 140;
+                var retryButton = MakeActionButton("Повторить", true);
                 retryButton.Margin = new Thickness(10, 0, 0, 0);
                 retryButton.IsDefault = true;
                 retryButton.Click += ContinueButtonClick;
@@ -1165,29 +1166,48 @@ namespace Boostix
 
         private StackPanel BuildHeader(string title, string subtitle)
         {
-            var header = new StackPanel();
-            var titleText = MakeText(title, 18, TextColor, semiboldFont, FontWeights.Bold);
+            var header = new StackPanel
+            {
+                Margin = new Thickness(0, 0, 0, 16)
+            };
+            var badge = new Border
+            {
+                Width = 44,
+                Height = 44,
+                CornerRadius = new CornerRadius(13),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Background = BoostixDesignTokens.Gradient(
+                    BoostixDesignTokens.Accent,
+                    BoostixDesignTokens.AccentSecondary),
+                Margin = new Thickness(0, 0, 0, 14)
+            };
+            FrameworkElement icon = BoostixIcons.Create(
+                BoostixIcons.Zap,
+                22,
+                new SolidColorBrush(BoostixDesignTokens.AccentForeground),
+                2);
+            icon.HorizontalAlignment = HorizontalAlignment.Center;
+            icon.VerticalAlignment = VerticalAlignment.Center;
+            badge.Child = icon;
+            header.Children.Add(badge);
+            TextBlock titleText = MakeText(title, 22, TextColor, semiboldFont, FontWeights.SemiBold);
+            AutomationProperties.SetHeadingLevel(titleText, AutomationHeadingLevel.Level1);
             header.Children.Add(titleText);
-
-            var subtitleText = MakeText(subtitle, 10.5, MutedColor, regularFont, FontWeights.Normal);
-            subtitleText.Margin = new Thickness(0, 5, 0, 0);
+            TextBlock subtitleText = MakeText(
+                subtitle,
+                12.5,
+                MutedColor,
+                regularFont,
+                FontWeights.Normal);
+            subtitleText.Margin = new Thickness(0, 6, 0, 0);
             header.Children.Add(subtitleText);
             return header;
         }
 
-        private TextBlock MakeBullet(string text)
-        {
-            var bullet = MakeText("•  " + text, 11, TextColor, regularFont, FontWeights.Normal);
-            bullet.Margin = new Thickness(0, 9, 0, 0);
-            return bullet;
-        }
-
         private TextBlock MakeConsentBullet(string text)
         {
-            var bullet = MakeText("•  " + text, 9.5, TextColor, regularFont, FontWeights.Normal);
-            bullet.Margin = new Thickness(0, 4, 0, 0);
-            bullet.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
-            bullet.LineHeight = 11.5;
+            var bullet = MakeText("•  " + text, 10.5, TextColor, regularFont, FontWeights.Normal);
+            bullet.Margin = new Thickness(0, 5, 0, 0);
             return bullet;
         }
 
@@ -1198,15 +1218,19 @@ namespace Boostix
             FontFamily font,
             FontWeight weight)
         {
+            // Dialog copy is set slightly larger than the old compact card.
+            double readable = size < 12.5 ? Math.Max(11.5, size + 1.5) : size;
             return new TextBlock
             {
                 Text = text,
-                FontSize = size,
+                FontSize = readable,
                 FontFamily = font,
                 FontWeight = weight,
                 Foreground = new SolidColorBrush(color),
                 TextWrapping = TextWrapping.Wrap,
-                TextTrimming = TextTrimming.None
+                TextTrimming = TextTrimming.None,
+                LineHeight = Math.Round(readable * 1.42),
+                LineStackingStrategy = LineStackingStrategy.BlockLineHeight
             };
         }
 
@@ -1216,113 +1240,19 @@ namespace Boostix
             {
                 Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Bottom
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(0, 20, 0, 0)
             };
         }
 
         private Button MakeActionButton(string text, bool accentOnHover)
         {
-            var baseColor = BoostixDesignTokens.SurfaceRaised;
-            var hoverColor = accentOnHover
-                ? AccentColor
-                : BoostixDesignTokens.Hover;
-            var background = new SolidColorBrush(baseColor);
-            var translate = new TranslateTransform();
-
-            var button = new Button
-            {
-                Content = text,
-                Height = 38,
-                Padding = new Thickness(13, 0, 13, 0),
-                Background = background,
-                Foreground = new SolidColorBrush(TextColor),
-                BorderThickness = new Thickness(0),
-                FontFamily = semiboldFont,
-                FontSize = 11,
-                FontWeight = FontWeights.Bold,
-                Cursor = Cursors.Hand,
-                Focusable = true,
-                RenderTransform = translate,
-                RenderTransformOrigin = new Point(0.5, 0.5),
-                Template = BuildRoundedButtonTemplate()
-            };
-
-            button.MouseEnter += delegate
-            {
-                if (!button.IsEnabled)
-                {
-                    return;
-                }
-                AnimateBrush(background, hoverColor, 210);
-                AnimateLift(translate, -1, 240);
-            };
-            button.MouseLeave += delegate
-            {
-                AnimateBrush(background, baseColor, 260);
-                AnimateLift(translate, 0, 300);
-            };
-            button.IsEnabledChanged += delegate
-            {
-                button.Opacity = button.IsEnabled ? 1.0 : 0.45;
-            };
-            return button;
-        }
-
-        private static ControlTemplate BuildRoundedButtonTemplate()
-        {
-            var template = new ControlTemplate(typeof(Button));
-            var border = new FrameworkElementFactory(typeof(Border));
-            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(6));
-            border.SetBinding(Border.BackgroundProperty, new Binding("Background")
-            {
-                RelativeSource = new RelativeSource(RelativeSourceMode.TemplatedParent)
-            });
-            border.SetBinding(Border.PaddingProperty, new Binding("Padding")
-            {
-                RelativeSource = new RelativeSource(RelativeSourceMode.TemplatedParent)
-            });
-
-            var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
-            presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-            presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
-            presenter.SetValue(ContentPresenter.RecognizesAccessKeyProperty, true);
-            border.AppendChild(presenter);
-            template.VisualTree = border;
-            return template;
-        }
-
-        private static void AnimateBrush(SolidColorBrush brush, Color target, int milliseconds)
-        {
-            if (!SystemParameters.ClientAreaAnimation)
-            {
-                brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
-                brush.Color = target;
-                return;
-            }
-            var animation = new ColorAnimation
-            {
-                To = target,
-                Duration = TimeSpan.FromMilliseconds(milliseconds),
-                EasingFunction = new SineEase { EasingMode = EasingMode.EaseOut }
-            };
-            brush.BeginAnimation(SolidColorBrush.ColorProperty, animation, HandoffBehavior.SnapshotAndReplace);
-        }
-
-        private static void AnimateLift(TranslateTransform transform, double target, int milliseconds)
-        {
-            if (!SystemParameters.ClientAreaAnimation)
-            {
-                transform.BeginAnimation(TranslateTransform.YProperty, null);
-                transform.Y = target;
-                return;
-            }
-            var animation = new DoubleAnimation
-            {
-                To = target,
-                Duration = TimeSpan.FromMilliseconds(milliseconds),
-                EasingFunction = new SineEase { EasingMode = EasingMode.EaseOut }
-            };
-            transform.BeginAnimation(TranslateTransform.YProperty, animation, HandoffBehavior.SnapshotAndReplace);
+            return BoostixUi.ActionButton(
+                text,
+                accentOnHover
+                    ? BoostixButtonKind.Primary
+                    : BoostixButtonKind.Secondary,
+                null);
         }
 
         private void OverlayPreviewKeyDown(object sender, KeyEventArgs e)

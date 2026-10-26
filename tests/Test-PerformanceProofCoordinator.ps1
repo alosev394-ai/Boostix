@@ -41,7 +41,7 @@ foreach ($contract in @(
 }
 foreach ($contract in @(
     'BuildPerformanceProofCard(',
-    'string proofButtonText = "PROOF MODE',
+    'string proofButtonText = "',
     'Boostix.Center.CancelProof'
 )) {
     if (-not $centerText.Contains($contract)) {

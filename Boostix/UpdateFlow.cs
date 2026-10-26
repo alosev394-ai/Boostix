@@ -1148,7 +1148,9 @@ namespace Boostix
 
             HorizontalAlignment = HorizontalAlignment.Stretch;
             VerticalAlignment = VerticalAlignment.Stretch;
-            Background = new SolidColorBrush(BackgroundColor);
+            Background = new SolidColorBrush(SystemParameters.HighContrast
+                ? BackgroundColor
+                : BoostixDesignTokens.WithAlpha(BoostixDesignTokens.Sidebar, 222));
             Visibility = Visibility.Collapsed;
             Focusable = true;
             KeyboardNavigation.SetTabNavigation(this, KeyboardNavigationMode.Cycle);
@@ -1157,14 +1159,26 @@ namespace Boostix
 
             card = new Border
             {
-                Width = 386,
-                Height = 410,
+                Width = 460,
+                MaxHeight = 520,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0),
-                Padding = new Thickness(24)
+                Background = new SolidColorBrush(BoostixDesignTokens.Surface),
+                BorderBrush = new SolidColorBrush(BoostixDesignTokens.Border),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(30, 28, 30, 26)
             };
+            if (!SystemParameters.HighContrast)
+            {
+                card.Effect = new System.Windows.Media.Effects.DropShadowEffect
+                {
+                    Color = Colors.Black,
+                    BlurRadius = 40,
+                    ShadowDepth = 8,
+                    Opacity = 0.55
+                };
+            }
             Children.Add(card);
 
             cardContent = new Grid();
@@ -3578,7 +3592,7 @@ namespace Boostix
             state = UpdateState.Checking;
             Visibility = Visibility.Visible;
             BuildWorkingScreen(
-                "ПРОВЕРКА ОБНОВЛЕНИЙ",
+                "Проверка обновлений",
                 "Проверяем актуальную версию Boostix.",
                 "Подождите несколько секунд.");
         }
@@ -3595,7 +3609,7 @@ namespace Boostix
             ResetProgressReferences();
             cardContent.Children.Clear();
             cardContent.RowDefinitions.Clear();
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
             StackPanel header = BuildHeader(title, subtitle);
@@ -3666,11 +3680,11 @@ namespace Boostix
             ResetProgressReferences();
             cardContent.Children.Clear();
             cardContent.RowDefinitions.Clear();
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
             StackPanel header = BuildHeader(
-                "ЗАГРУЖАЕМ ОБНОВЛЕНИЕ",
+                "Загружаем обновление",
                 "Версия " + version + " будет проверена перед запуском.");
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
@@ -3814,12 +3828,12 @@ namespace Boostix
             ResetProgressReferences();
             cardContent.Children.Clear();
             cardContent.RowDefinitions.Clear();
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(50) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             StackPanel header = BuildHeader(
-                "ДОСТУПНО ОБНОВЛЕНИЕ",
+                "Доступно обновление",
                 "Для продолжения необходимо обновить Boostix.");
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
@@ -3854,8 +3868,7 @@ namespace Boostix
             cardContent.Children.Add(body);
 
             StackPanel buttons = BuildButtonRow();
-            Button continueButton = MakeActionButton("ПРОДОЛЖИТЬ", true);
-            continueButton.Width = 150;
+            Button continueButton = MakeActionButton("Обновить", true);
             continueButton.IsDefault = true;
             continueButton.Click += ContinueButtonClick;
             AutomationProperties.SetName(
@@ -3875,12 +3888,12 @@ namespace Boostix
             ResetProgressReferences();
             cardContent.Children.Clear();
             cardContent.RowDefinitions.Clear();
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(50) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             StackPanel header = BuildHeader(
-                "НУЖНО ОБНОВЛЕНИЕ",
+                "Нужно обновление",
                 "Текущая версия не будет запущена без обязательного обновления.");
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
@@ -3898,8 +3911,7 @@ namespace Boostix
             cardContent.Children.Add(messageText);
 
             StackPanel buttons = BuildButtonRow();
-            Button retryButton = MakeActionButton("ПОВТОРИТЬ", true);
-            retryButton.Width = 150;
+            Button retryButton = MakeActionButton("Повторить", true);
             retryButton.IsDefault = true;
             retryButton.Click += ContinueButtonClick;
             AutomationProperties.SetName(retryButton, "Повторить загрузку обязательного обновления");
@@ -3917,12 +3929,12 @@ namespace Boostix
             ResetProgressReferences();
             cardContent.Children.Clear();
             cardContent.RowDefinitions.Clear();
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(50) });
+            cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             StackPanel header = BuildHeader(
-                "ОБНОВЛЕНИЕ ГОТОВО",
+                "Обновление готово",
                 "Проверенный установщик передаётся отдельному окну обновления.");
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
@@ -3940,8 +3952,7 @@ namespace Boostix
             cardContent.Children.Add(messageText);
 
             StackPanel buttons = BuildButtonRow();
-            Button retryButton = MakeActionButton("ПОВТОРИТЬ ДЕМО", true);
-            retryButton.Width = 170;
+            Button retryButton = MakeActionButton("Повторить демо", true);
             retryButton.IsDefault = true;
             retryButton.Click += ContinueButtonClick;
             AutomationProperties.SetName(retryButton, "Повторить демонстрацию обновления");
@@ -3954,15 +3965,40 @@ namespace Boostix
 
         private StackPanel BuildHeader(string title, string subtitle)
         {
-            var header = new StackPanel();
-            header.Children.Add(MakeText(title, 18, TextColor, semiboldFont, FontWeights.Bold));
+            var header = new StackPanel
+            {
+                Margin = new Thickness(0, 0, 0, 16)
+            };
+            var badge = new Border
+            {
+                Width = 44,
+                Height = 44,
+                CornerRadius = new CornerRadius(13),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Background = BoostixDesignTokens.Gradient(
+                    BoostixDesignTokens.Accent,
+                    BoostixDesignTokens.AccentSecondary),
+                Margin = new Thickness(0, 0, 0, 14)
+            };
+            FrameworkElement icon = BoostixIcons.Create(
+                BoostixIcons.Download,
+                22,
+                new SolidColorBrush(BoostixDesignTokens.AccentForeground),
+                2);
+            icon.HorizontalAlignment = HorizontalAlignment.Center;
+            icon.VerticalAlignment = VerticalAlignment.Center;
+            badge.Child = icon;
+            header.Children.Add(badge);
+            TextBlock titleText = MakeText(title, 22, TextColor, semiboldFont, FontWeights.SemiBold);
+            AutomationProperties.SetHeadingLevel(titleText, AutomationHeadingLevel.Level1);
+            header.Children.Add(titleText);
             TextBlock subtitleText = MakeText(
                 subtitle,
-                10.5,
+                12.5,
                 MutedColor,
                 regularFont,
                 FontWeights.Normal);
-            subtitleText.Margin = new Thickness(0, 5, 0, 0);
+            subtitleText.Margin = new Thickness(0, 6, 0, 0);
             header.Children.Add(subtitleText);
             return header;
         }
@@ -3974,15 +4010,19 @@ namespace Boostix
             FontFamily font,
             FontWeight weight)
         {
+            // Dialog copy is set slightly larger than the old compact card.
+            double readable = size < 12.5 ? Math.Max(11.5, size + 1.5) : size;
             return new TextBlock
             {
                 Text = text,
-                FontSize = size,
+                FontSize = readable,
                 FontFamily = font,
                 FontWeight = weight,
                 Foreground = new SolidColorBrush(color),
                 TextWrapping = TextWrapping.Wrap,
-                TextTrimming = TextTrimming.None
+                TextTrimming = TextTrimming.None,
+                LineHeight = Math.Round(readable * 1.42),
+                LineStackingStrategy = LineStackingStrategy.BlockLineHeight
             };
         }
 
@@ -3992,110 +4032,19 @@ namespace Boostix
             {
                 Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Bottom
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(0, 20, 0, 0)
             };
         }
 
         private Button MakeActionButton(string text, bool accentOnHover)
         {
-            Color baseColor = BoostixDesignTokens.SurfaceRaised;
-            Color hoverColor = accentOnHover
-                ? AccentColor
-                : BoostixDesignTokens.Hover;
-            var background = new SolidColorBrush(baseColor);
-            var translate = new TranslateTransform();
-            var button = new Button
-            {
-                Content = text,
-                Height = 38,
-                Padding = new Thickness(13, 0, 13, 0),
-                Background = background,
-                Foreground = new SolidColorBrush(TextColor),
-                BorderThickness = new Thickness(0),
-                FontFamily = semiboldFont,
-                FontSize = 11,
-                FontWeight = FontWeights.Bold,
-                Cursor = Cursors.Hand,
-                Focusable = true,
-                RenderTransform = translate,
-                RenderTransformOrigin = new Point(0.5, 0.5),
-                Template = BuildRoundedButtonTemplate()
-            };
-            button.MouseEnter += delegate
-            {
-                if (!button.IsEnabled)
-                {
-                    return;
-                }
-                AnimateBrush(background, hoverColor, 210);
-                AnimateLift(translate, -1, 240);
-            };
-            button.MouseLeave += delegate
-            {
-                AnimateBrush(background, baseColor, 260);
-                AnimateLift(translate, 0, 300);
-            };
-            button.IsEnabledChanged += delegate
-            {
-                button.Opacity = button.IsEnabled ? 1.0 : 0.45;
-            };
-            return button;
-        }
-
-        private static ControlTemplate BuildRoundedButtonTemplate()
-        {
-            var template = new ControlTemplate(typeof(Button));
-            var border = new FrameworkElementFactory(typeof(Border));
-            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(6));
-            border.SetBinding(Border.BackgroundProperty, new Binding("Background")
-            {
-                RelativeSource = new RelativeSource(RelativeSourceMode.TemplatedParent)
-            });
-            border.SetBinding(Border.PaddingProperty, new Binding("Padding")
-            {
-                RelativeSource = new RelativeSource(RelativeSourceMode.TemplatedParent)
-            });
-            var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
-            presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-            presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
-            presenter.SetValue(ContentPresenter.RecognizesAccessKeyProperty, true);
-            border.AppendChild(presenter);
-            template.VisualTree = border;
-            return template;
-        }
-
-        private static void AnimateBrush(SolidColorBrush brush, Color target, int milliseconds)
-        {
-            if (!SystemParameters.ClientAreaAnimation)
-            {
-                brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
-                brush.Color = target;
-                return;
-            }
-            var animation = new ColorAnimation
-            {
-                To = target,
-                Duration = TimeSpan.FromMilliseconds(milliseconds),
-                EasingFunction = new SineEase { EasingMode = EasingMode.EaseOut }
-            };
-            brush.BeginAnimation(SolidColorBrush.ColorProperty, animation, HandoffBehavior.SnapshotAndReplace);
-        }
-
-        private static void AnimateLift(TranslateTransform transform, double target, int milliseconds)
-        {
-            if (!SystemParameters.ClientAreaAnimation)
-            {
-                transform.BeginAnimation(TranslateTransform.YProperty, null);
-                transform.Y = target;
-                return;
-            }
-            var animation = new DoubleAnimation
-            {
-                To = target,
-                Duration = TimeSpan.FromMilliseconds(milliseconds),
-                EasingFunction = new SineEase { EasingMode = EasingMode.EaseOut }
-            };
-            transform.BeginAnimation(TranslateTransform.YProperty, animation, HandoffBehavior.SnapshotAndReplace);
+            return BoostixUi.ActionButton(
+                text,
+                accentOnHover
+                    ? BoostixButtonKind.Primary
+                    : BoostixButtonKind.Secondary,
+                null);
         }
 
         private void OverlayPreviewKeyDown(object sender, KeyEventArgs e)

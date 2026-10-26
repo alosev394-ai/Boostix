@@ -6353,6 +6353,27 @@ namespace BoostixSetup
 
     internal static class BoostixFontProvider
     {
+        /// <summary>
+        /// Display face shared with the application (Bahnschrift ships with
+        /// Windows 10 1709+); falls back to Segoe UI.
+        /// </summary>
+        public static Font CreateDisplay(float size, FontStyle style)
+        {
+            try
+            {
+                var font = new Font("Bahnschrift", size, style, GraphicsUnit.Point);
+                if (string.Equals(font.Name, "Bahnschrift", StringComparison.OrdinalIgnoreCase))
+                {
+                    return font;
+                }
+                font.Dispose();
+            }
+            catch
+            {
+            }
+            return Create(size, style);
+        }
+
         public static Font Create(float size, FontStyle style)
         {
             try
@@ -6631,7 +6652,7 @@ namespace BoostixSetup
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            Color parentColor = Parent == null ? Color.FromArgb(22, 22, 22) : Parent.BackColor;
+            Color parentColor = Parent == null ? Color.FromArgb(14, 13, 21) : Parent.BackColor;
             using (var backgroundBrush = new SolidBrush(parentColor))
             {
                 e.Graphics.FillRectangle(backgroundBrush, ClientRectangle);
@@ -6752,7 +6773,7 @@ namespace BoostixSetup
             InitializeVisualState();
         }
 
-        protected override Color IdleFill { get { return Color.FromArgb(37, 37, 37); } }
+        protected override Color IdleFill { get { return Color.FromArgb(33, 30, 45); } }
         protected override Color HoverFill
         {
             get
@@ -6791,9 +6812,9 @@ namespace BoostixSetup
             InitializeVisualState();
         }
 
-        protected override Color IdleFill { get { return Color.FromArgb(0, 231, 24, 42); } }
-        protected override Color HoverFill { get { return Color.FromArgb(231, 24, 42); } }
-        protected override Color PressedFill { get { return Color.FromArgb(197, 20, 35); } }
+        protected override Color IdleFill { get { return Color.FromArgb(0, 225, 29, 72); } }
+        protected override Color HoverFill { get { return Color.FromArgb(225, 29, 72); } }
+        protected override Color PressedFill { get { return Color.FromArgb(190, 18, 60); } }
         protected override Color IdleGlyph { get { return Color.FromArgb(128, 255, 255, 255); } }
         protected override Color HoverGlyph { get { return Color.White; } }
         protected override Color PressedGlyph { get { return Color.White; } }
@@ -6841,8 +6862,8 @@ namespace BoostixSetup
 
     internal sealed class BoostixToggle : CheckBox
     {
-        private static readonly Color OffColor = Color.FromArgb(37, 37, 37);
-        private static readonly Color OffHoverColor = Color.FromArgb(52, 52, 52);
+        private static readonly Color OffColor = Color.FromArgb(33, 30, 45);
+        private static readonly Color OffHoverColor = Color.FromArgb(43, 39, 60);
         private static readonly Color OnColor = Color.FromArgb(
             ProductBrand.AccentRed,
             ProductBrand.AccentGreen,
@@ -6940,7 +6961,7 @@ namespace BoostixSetup
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            Color parentColor = Parent == null ? Color.FromArgb(22, 22, 22) : Parent.BackColor;
+            Color parentColor = Parent == null ? Color.FromArgb(14, 13, 21) : Parent.BackColor;
             using (var backgroundBrush = new SolidBrush(parentColor))
             {
                 e.Graphics.FillRectangle(backgroundBrush, ClientRectangle);
@@ -7114,7 +7135,7 @@ namespace BoostixSetup
     internal sealed class UpdateProgressForm : Form
     {
         private const int ProgressTrackWidth = 480;
-        private readonly Color background = Color.FromArgb(22, 22, 22);
+        private readonly Color background = Color.FromArgb(14, 13, 21);
         private readonly Color accent = Color.FromArgb(
             ProductBrand.AccentRed,
             ProductBrand.AccentGreen,
@@ -7123,7 +7144,7 @@ namespace BoostixSetup
             ProductBrand.AccentTextRed,
             ProductBrand.AccentTextGreen,
             ProductBrand.AccentTextBlue);
-        private readonly Color muted = Color.FromArgb(142, 142, 142);
+        private readonly Color muted = Color.FromArgb(146, 140, 170);
         private readonly bool demoMode;
         private readonly Timer progressAnimationTimer;
         private readonly Timer demoTimer;
@@ -7231,7 +7252,7 @@ namespace BoostixSetup
                     Math.Max(1F, ClientSize.Height - dpiScale)),
                 11F * dpiScale))
             using (var pen = new Pen(
-                Color.FromArgb(56, 56, 56),
+                Color.FromArgb(42, 38, 57),
                 Math.Max(1F, dpiScale)))
             {
                 e.Graphics.DrawPath(pen, path);
@@ -7287,6 +7308,7 @@ namespace BoostixSetup
             Controls.Add(iconBox);
 
             var title = MakeLabel("BOOSTIX", 22F, FontStyle.Bold, Color.White);
+            title.Font = BoostixFontProvider.CreateDisplay(22F, FontStyle.Bold);
             title.Location = new Point(105, 31);
             title.AutoSize = true;
             title.MouseDown += DragWindow;
@@ -7323,7 +7345,7 @@ namespace BoostixSetup
             percentLabel.AccessibleName = "Прогресс обновления: 0 процентов";
             Controls.Add(percentLabel);
 
-            phaseLabel = MakeLabel("Подготовка обновления", 10F, FontStyle.Bold, Color.FromArgb(220, 220, 220));
+            phaseLabel = MakeLabel("Подготовка обновления", 10F, FontStyle.Bold, Color.FromArgb(230, 227, 240));
             phaseLabel.Location = new Point(162, 190);
             phaseLabel.Size = new Size(356, 28);
             phaseLabel.TextAlign = ContentAlignment.MiddleLeft;
@@ -7336,7 +7358,7 @@ namespace BoostixSetup
             progressTrack.Anchor = AnchorStyles.Top |
                 AnchorStyles.Left |
                 AnchorStyles.Right;
-            progressTrack.BackColor = Color.FromArgb(48, 48, 48);
+            progressTrack.BackColor = Color.FromArgb(33, 30, 45);
             Controls.Add(progressTrack);
 
             progressFill = new Panel();
@@ -7399,7 +7421,7 @@ namespace BoostixSetup
             headlineLabel.ForeColor = Color.White;
             descriptionLabel.Text = "Boostix обновляется до версии " + InstallerEngine.ProductVersion;
             phaseLabel.Text = "Подготовка обновления";
-            phaseLabel.ForeColor = Color.FromArgb(220, 220, 220);
+            phaseLabel.ForeColor = Color.FromArgb(230, 227, 240);
             detailLabel.Text = "Не закрывайте установщик до завершения обновления.";
             detailLabel.ForeColor = muted;
             actionButton.Visible = false;
@@ -7492,13 +7514,13 @@ namespace BoostixSetup
             successPending = false;
             demoTimer.Stop();
             headlineLabel.Text = "НЕ УДАЛОСЬ ОБНОВИТЬ";
-            headlineLabel.ForeColor = Color.FromArgb(255, 102, 122);
+            headlineLabel.ForeColor = Color.FromArgb(248, 113, 113);
             descriptionLabel.Text = "Повторите установку обновления.";
             phaseLabel.Text = "Ошибка установки";
-            phaseLabel.ForeColor = Color.FromArgb(255, 102, 122);
+            phaseLabel.ForeColor = Color.FromArgb(248, 113, 113);
             detailLabel.Text = FriendlyError(exception) +
                 "\r\nЖурнал: " + InstallerDiagnostics.LogPath;
-            detailLabel.ForeColor = Color.FromArgb(205, 205, 205);
+            detailLabel.ForeColor = Color.FromArgb(196, 191, 212);
             actionButton.Text = "ПОВТОРИТЬ";
             actionButton.AccessibleName = "Повторить обновление Boostix";
             actionButton.AccessibleDescription = "Повторно запускает установку обновления";
@@ -7625,7 +7647,7 @@ namespace BoostixSetup
             catch (Exception exception)
             {
                 detailLabel.Text = "Не удалось запустить программу: " + FriendlyError(exception);
-                detailLabel.ForeColor = Color.FromArgb(255, 102, 122);
+                detailLabel.ForeColor = Color.FromArgb(248, 113, 113);
                 actionButton.Enabled = true;
                 actionButton.Focus();
             }
@@ -7687,8 +7709,8 @@ namespace BoostixSetup
 
     internal sealed class InstallerForm : Form
     {
-        private readonly Color background = Color.FromArgb(22, 22, 22);
-        private readonly Color panel = Color.FromArgb(27, 27, 27);
+        private readonly Color background = Color.FromArgb(14, 13, 21);
+        private readonly Color panel = Color.FromArgb(23, 21, 31);
         private readonly Color accent = Color.FromArgb(
             ProductBrand.AccentRed,
             ProductBrand.AccentGreen,
@@ -7697,7 +7719,7 @@ namespace BoostixSetup
             ProductBrand.AccentTextRed,
             ProductBrand.AccentTextGreen,
             ProductBrand.AccentTextBlue);
-        private readonly Color muted = Color.FromArgb(142, 142, 142);
+        private readonly Color muted = Color.FromArgb(146, 140, 170);
         private BoostixActionButton installButton;
         private BoostixCloseButton closeButton;
         private BoostixToggle desktopShortcut;
@@ -7767,7 +7789,7 @@ namespace BoostixSetup
                     Math.Max(1F, ClientSize.Height - dpiScale)),
                 11F * dpiScale))
             using (var pen = new Pen(
-                Color.FromArgb(56, 56, 56),
+                Color.FromArgb(42, 38, 57),
                 Math.Max(1F, dpiScale)))
             {
                 e.Graphics.DrawPath(pen, path);
@@ -7795,6 +7817,7 @@ namespace BoostixSetup
             Controls.Add(iconBox);
 
             var title = MakeLabel("BOOSTIX", 22F, FontStyle.Bold, Color.White);
+            title.Font = BoostixFontProvider.CreateDisplay(22F, FontStyle.Bold);
             title.Location = new Point(105, 35);
             title.AutoSize = true;
             title.MouseDown += DragWindow;
@@ -7829,7 +7852,7 @@ namespace BoostixSetup
             locationTitle.AutoSize = true;
             locationPanel.Controls.Add(locationTitle);
 
-            var locationValue = MakeLabel(InstallerEngine.InstallDirectory, 9.5F, FontStyle.Regular, Color.FromArgb(235, 235, 235));
+            var locationValue = MakeLabel(InstallerEngine.InstallDirectory, 9.5F, FontStyle.Regular, Color.FromArgb(244, 242, 250));
             locationValue.Location = new Point(16, 34);
             locationValue.AutoEllipsis = true;
             locationValue.Size = new Size(448, 24);
@@ -7846,7 +7869,7 @@ namespace BoostixSetup
             desktopShortcut.Anchor = AnchorStyles.Top |
                 AnchorStyles.Left |
                 AnchorStyles.Right;
-            desktopShortcut.ForeColor = Color.FromArgb(195, 195, 195);
+            desktopShortcut.ForeColor = Color.FromArgb(196, 191, 212);
             desktopShortcut.Font = BoostixFontProvider.Create(9.5F, FontStyle.Regular);
             desktopShortcut.AccessibleName = "Создать ярлык на рабочем столе";
             desktopShortcut.AccessibleDescription = "Включает или отключает создание ярлыка Boostix на рабочем столе";
@@ -7859,7 +7882,7 @@ namespace BoostixSetup
             progressTrack.Anchor = AnchorStyles.Top |
                 AnchorStyles.Left |
                 AnchorStyles.Right;
-            progressTrack.BackColor = Color.FromArgb(48, 48, 48);
+            progressTrack.BackColor = Color.FromArgb(33, 30, 45);
             Controls.Add(progressTrack);
 
             progressFill = new Panel();
@@ -7879,7 +7902,7 @@ namespace BoostixSetup
             installButton.Size = new Size(170, 42);
             installButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             installButton.ForeColor = Color.White;
-            installButton.Font = BoostixFontProvider.Create(10F, FontStyle.Bold);
+            installButton.Font = BoostixFontProvider.CreateDisplay(10.5F, FontStyle.Bold);
             installButton.AccessibleName = "Установить Boostix";
             installButton.AccessibleDescription = "Начинает установку приложения";
             installButton.TabIndex = 1;
@@ -7970,7 +7993,7 @@ namespace BoostixSetup
             InstallerDiagnostics.Write("Interactive installation failed.", exception);
             installOperationRunning = false;
             statusLabel.Text = "ОШИБКА УСТАНОВКИ";
-            statusLabel.ForeColor = Color.FromArgb(255, 102, 122);
+            statusLabel.ForeColor = Color.FromArgb(248, 113, 113);
             installButton.Text = "ПОВТОРИТЬ";
             installButton.AccessibleName = "Повторить установку Boostix";
             installButton.AccessibleDescription = "Повторно запускает установку приложения";

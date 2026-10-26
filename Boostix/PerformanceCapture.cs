@@ -1196,9 +1196,9 @@ namespace Boostix
         {
             try
             {
-                string path = process == null || process.MainModule == null
+                string path = process == null
                     ? null
-                    : process.MainModule.FileName;
+                    : GameExecutablePath.GetProcessImagePath(process);
                 return string.IsNullOrWhiteSpace(path)
                     ? null
                     : Path.GetFullPath(path);

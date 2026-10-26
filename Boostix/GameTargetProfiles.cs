@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Boostix
@@ -145,7 +146,7 @@ namespace Boostix
 
             try
             {
-                if (process.HasExited)
+                if (GameExecutablePath.HasProcessExited(process))
                 {
                     error = "The selected process has already exited.";
                     return false;
@@ -155,14 +156,13 @@ namespace Boostix
                 int processId = process.Id;
                 int sessionId = process.SessionId;
                 string processName = process.ProcessName ?? string.Empty;
-                string executablePath = process.MainModule == null
-                    ? string.Empty
-                    : process.MainModule.FileName;
+                string executablePath =
+                    GameExecutablePath.GetProcessImagePath(process);
                 IntPtr mainWindow = process.MainWindowHandle;
                 string windowTitle = process.MainWindowTitle ?? string.Empty;
 
                 process.Refresh();
-                if (process.HasExited ||
+                if (GameExecutablePath.HasProcessExited(process) ||
                     process.StartTime.ToUniversalTime() != startBefore)
                 {
                     error = "The selected process changed while it was inspected.";
@@ -254,6 +254,115 @@ namespace Boostix
 
     internal static class GameExecutablePath
     {
+        private const uint ProcessQueryLimitedInformation = 0x1000;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(
+            uint desiredAccess,
+            [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
+            int processId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryFullProcessImageName(
+            IntPtr process,
+            int flags,
+            StringBuilder exeName,
+            ref int size);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetExitCodeProcess(
+            IntPtr process,
+            out uint exitCode);
+
+        private const uint StillActive = 259;
+        private const int ErrorInvalidParameter = 87;
+
+        /// <summary>
+        /// Reads the image path with PROCESS_QUERY_LIMITED_INFORMATION.
+        /// Process.MainModule needs PROCESS_VM_READ, which Windows denies for
+        /// elevated games and anti-cheat strips from handles; the limited
+        /// query is still granted, so such games stay selectable.
+        /// </summary>
+        internal static string GetProcessImagePath(Process process)
+        {
+            IntPtr handle = OpenLimitedProcessHandle(process);
+            try
+            {
+                var buffer = new StringBuilder(1024);
+                int size = buffer.Capacity;
+                if (!QueryFullProcessImageName(handle, 0, buffer, ref size))
+                {
+                    throw new System.ComponentModel.Win32Exception(
+                        Marshal.GetLastWin32Error());
+                }
+                return buffer.ToString(0, size);
+            }
+            finally
+            {
+                CloseHandle(handle);
+            }
+        }
+
+        /// <summary>
+        /// Process.HasExited opens PROCESS_QUERY_INFORMATION, which an elevated
+        /// game denies to Boostix; the exit code is readable with limited access.
+        /// </summary>
+        internal static bool HasProcessExited(Process process)
+        {
+            IntPtr handle;
+            try
+            {
+                handle = OpenLimitedProcessHandle(process);
+            }
+            catch (System.ComponentModel.Win32Exception ex)
+            {
+                if (ex.NativeErrorCode == ErrorInvalidParameter)
+                {
+                    return true;
+                }
+                throw;
+            }
+            try
+            {
+                uint exitCode;
+                if (!GetExitCodeProcess(handle, out exitCode))
+                {
+                    throw new System.ComponentModel.Win32Exception(
+                        Marshal.GetLastWin32Error());
+                }
+                return exitCode != StillActive;
+            }
+            finally
+            {
+                CloseHandle(handle);
+            }
+        }
+
+        private static IntPtr OpenLimitedProcessHandle(Process process)
+        {
+            if (process == null)
+            {
+                throw new ArgumentNullException("process");
+            }
+
+            IntPtr handle = OpenProcess(
+                ProcessQueryLimitedInformation,
+                false,
+                process.Id);
+            if (handle == IntPtr.Zero)
+            {
+                throw new System.ComponentModel.Win32Exception(
+                    Marshal.GetLastWin32Error());
+            }
+            return handle;
+        }
+
         internal static bool TryNormalize(
             string path,
             out string displayPath,

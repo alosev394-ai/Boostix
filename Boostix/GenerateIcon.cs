@@ -62,65 +62,50 @@ internal static class GenerateIcon
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
             graphics.Clear(Color.Transparent);
 
+            // Brand mark: violet-to-fuchsia rounded square with a lightning bolt.
             float scale = size / 256F;
-            using (GraphicsPath frame = RoundedRectangle(new RectangleF(9 * scale, 9 * scale, 238 * scale, 238 * scale), 31 * scale))
-            using (var background = new SolidBrush(Color.FromArgb(27, 27, 27)))
-            using (var border = new Pen(Color.FromArgb(139, 92, 246), Math.Max(1F, 5F * scale)))
+            var bounds = new RectangleF(8 * scale, 8 * scale, 240 * scale, 240 * scale);
+            using (GraphicsPath frame = RoundedRectangle(bounds, 60 * scale))
+            using (var background = new LinearGradientBrush(
+                bounds,
+                Color.FromArgb(124, 58, 237),
+                Color.FromArgb(192, 38, 211),
+                45F))
+            using (var highlight = new Pen(Color.FromArgb(70, 255, 255, 255), Math.Max(1F, 4F * scale)))
             {
                 graphics.FillPath(background, frame);
-                graphics.DrawPath(border, frame);
-            }
-
-            GraphicsState state = graphics.Save();
-            graphics.TranslateTransform(size / 2F, size / 2F);
-            graphics.RotateTransform(43F);
-            graphics.ScaleTransform(scale, scale);
-
-            using (var flame = new GraphicsPath())
-            {
-                flame.AddBezier(-18, 49, -30, 72, -16, 93, 0, 101);
-                flame.AddBezier(0, 101, 16, 93, 30, 72, 18, 49);
-                flame.AddLine(18, 49, -18, 49);
-                using (var brush = new LinearGradientBrush(new RectangleF(-28, 48, 56, 55), Color.FromArgb(255, 209, 102), Color.FromArgb(124, 58, 237), 90F))
+                if (size >= 32)
                 {
-                    graphics.FillPath(brush, flame);
+                    graphics.DrawPath(highlight, frame);
                 }
             }
 
-            using (var leftFin = new GraphicsPath())
-            using (var rightFin = new GraphicsPath())
-            using (var finBrush = new SolidBrush(Color.FromArgb(139, 92, 246)))
-            using (var darkFinBrush = new SolidBrush(Color.FromArgb(91, 33, 182)))
+            PointF[] grid =
             {
-                leftFin.AddPolygon(new[] { new PointF(-24, 25), new PointF(-48, 52), new PointF(-18, 47) });
-                rightFin.AddPolygon(new[] { new PointF(24, 25), new PointF(48, 52), new PointF(18, 47) });
-                graphics.FillPath(finBrush, leftFin);
-                graphics.FillPath(darkFinBrush, rightFin);
-            }
-
-            using (var body = new GraphicsPath())
+                new PointF(13F, 2.5F),
+                new PointF(4F, 13.5F),
+                new PointF(11.5F, 13.5F),
+                new PointF(10.5F, 21.5F),
+                new PointF(20F, 10F),
+                new PointF(12.5F, 10F)
+            };
+            float unit = 9F * scale;
+            var bolt = new PointF[grid.Length];
+            for (int index = 0; index < grid.Length; index++)
             {
-                body.StartFigure();
-                body.AddBezier(0, -76, -31, -51, -38, 9, -24, 51);
-                body.AddBezier(-24, 51, -17, 66, 17, 66, 24, 51);
-                body.AddBezier(24, 51, 38, 9, 31, -51, 0, -76);
-                body.CloseFigure();
-                using (var brush = new LinearGradientBrush(new RectangleF(-40, -76, 80, 142), Color.White, Color.FromArgb(194, 194, 198), 28F))
-                using (var pen = new Pen(Color.FromArgb(245, 245, 245), 2F))
-                {
-                    graphics.FillPath(brush, body);
-                    graphics.DrawPath(pen, body);
-                }
+                bolt[index] = new PointF(
+                    128F * scale + (grid[index].X - 12F) * unit,
+                    128F * scale + (grid[index].Y - 12F) * unit);
             }
-
-            using (var windowBrush = new SolidBrush(Color.FromArgb(139, 92, 246)))
-            using (var windowPen = new Pen(Color.White, 3F))
+            using (var path = new GraphicsPath())
+            using (var brush = new SolidBrush(Color.White))
+            using (var outline = new Pen(Color.White, Math.Max(1F, 10F * scale)))
             {
-                graphics.FillEllipse(windowBrush, -14, -27, 28, 28);
-                graphics.DrawEllipse(windowPen, -14, -27, 28, 28);
+                outline.LineJoin = LineJoin.Round;
+                path.AddPolygon(bolt);
+                graphics.FillPath(brush, path);
+                graphics.DrawPath(outline, path);
             }
-
-            graphics.Restore(state);
         }
         return bitmap;
     }

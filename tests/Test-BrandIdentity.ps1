@@ -107,14 +107,23 @@ $sessionScript = [IO.File]::ReadAllText($sessionScriptPath)
 $applyScript = [IO.File]::ReadAllText($applyScriptPath)
 $build = [IO.File]::ReadAllText($buildPath)
 
-if (-not $program.Contains('MakeText("BOOSTIX", 30')) {
-    throw 'The main page title is not the required BOOSTIX wordmark.'
+# The BOOSTIX wordmark heads the navigation sidebar on every page.
+$brandStart = $center.IndexOf('private FrameworkElement BuildBrand()', [StringComparison]::Ordinal)
+$brandEnd = $center.IndexOf('internal static string GetApplicationVersion()', [StringComparison]::Ordinal)
+if ($brandStart -lt 0 -or $brandEnd -le $brandStart) {
+    throw 'The sidebar brand block was not found.'
 }
-if ($program.Contains('MakeText("BOOST",')) {
+$brandBlock = $center.Substring($brandStart, $brandEnd - $brandStart)
+if (-not $brandBlock.Contains('"BOOSTIX"') -or
+    -not $brandBlock.Contains('"Boostix.Title"') -or
+    -not $brandBlock.Contains('ProductBrand.ReleaseLabel')) {
+    throw 'The sidebar is not headed by the required BOOSTIX wordmark and release label.'
+}
+if ($program.Contains('MakeText("BOOST",') -or $center.Contains('MakeText("BOOST",')) {
     throw 'The retired two-line Boost title returned to the main page.'
 }
 if (-not $program.Contains('AssemblyCompany(ProductBrand.CompanyName)') -or
-    -not $program.Contains('"by Silas Suspect"')) {
+    -not $center.Contains('"by Silas Suspect"')) {
     throw 'The application author identity is not sourced consistently.'
 }
 

@@ -297,12 +297,21 @@ function Convert-PixelsToDip {
     return $Pixels * $Dpi / 96.0
 }
 
+# The sidebar is the application's only navigation: Home hosts the Boost
+# control, every other entry is a section page with its primary action.
 $tabContracts = @(
-    @{ Id = 'Boostix.Center.Tab.Readiness'; Name = '0KHQldCQ0J3QoQ=='; PageElement = 'Boostix.Center.SelectTarget' },
-    @{ Id = 'Boostix.Center.Tab.Impact'; Name = '0JLQm9CY0K/QndCY0JU='; PageElement = 'Boostix.Center.ImpactScan' },
-    @{ Id = 'Boostix.Center.Tab.Report'; Name = '0K3QpNCk0JXQmtCi'; PageElement = 'Boostix.Center.ReportBenchmark' },
-    @{ Id = 'Boostix.Center.Tab.Profiles'; Name = '0J/QoNCe0KTQmNCb0Jg='; PageElement = 'Boostix.Center.ProfileAdd' },
+    @{ Id = 'Boostix.Center.Tab.Home'; Name = '0JPQm9CQ0JLQndCQ0K8='; PageElement = 'Boostix.Activate' },
+    @{ Id = 'Boostix.Center.Tab.Readiness'; Name = '0KHQmNCh0KLQldCc0JA='; PageElement = 'Boostix.Center.SelectTarget' },
+    @{ Id = 'Boostix.Center.Tab.Impact'; Name = '0KTQntCd'; PageElement = 'Boostix.Center.ImpactScan' },
+    @{ Id = 'Boostix.Center.Tab.Report'; Name = '0J7QotCn0IHQotCr'; PageElement = 'Boostix.Center.ReportBenchmark' },
+    @{ Id = 'Boostix.Center.Tab.Profiles'; Name = '0JjQk9Cg0Ks='; PageElement = 'Boostix.Center.ProfileAdd' },
     @{ Id = 'Boostix.Center.Tab.Settings'; Name = '0J3QkNCh0KLQoNCe0JnQmtCY'; PageElement = 'Boostix.Center.Setting.0' }
+)
+$homeFocusTargets = @(
+    'Boostix.Center.Tab.Home',
+    'Boostix.Activate',
+    'Boostix.Target.Select',
+    'Boostix.OpenSystem'
 )
 
 $process = $null
@@ -321,11 +330,11 @@ try {
     $windowWidthDip = Convert-PixelsToDip `
         $window.Current.BoundingRectangle.Width `
         $dpi
-    if ($windowWidthDip -lt 618 -or $windowWidthDip -gt 622) {
+    if ($windowWidthDip -lt 878 -or $windowWidthDip -gt 882) {
         throw (
-            "Boost Center width was $windowWidthDip DIP " +
+            "Boostix window width was $windowWidthDip DIP " +
             "($($window.Current.BoundingRectangle.Width) px at $dpi DPI); " +
-            'expected approximately 620 DIP.')
+            'expected the fixed 880 DIP shell.')
     }
 
     $tabContainer = Wait-ForElementById `
@@ -373,13 +382,16 @@ try {
         }
         $windowBounds = $window.Current.BoundingRectangle
         if ($bounds.Left -lt $windowBounds.Left -or
-            $bounds.Right -gt $windowBounds.Right) {
+            $bounds.Right -gt $windowBounds.Right -or
+            $bounds.Top -lt $windowBounds.Top -or
+            $bounds.Bottom -gt $windowBounds.Bottom) {
             throw "Boost Center tab is clipped: $($contract.Id)"
         }
     }
 
-    Wait-ForSelectedTab $tabs[0]
-    Assert-ContainerSelection $containerSelection $tabs[0]
+    # --demo-center opens the "Система" section.
+    Wait-ForSelectedTab $tabs[1]
+    Assert-ContainerSelection $containerSelection $tabs[1]
     for ($index = 0; $index -lt $tabContracts.Count; $index++) {
         Select-Tab $tabs[$index]
         Assert-ContainerSelection $containerSelection $tabs[$index]
@@ -450,12 +462,28 @@ try {
     Start-Sleep -Milliseconds 350
     Wait-ForFocusedAutomationId $process $tabContracts[1].Id
 
-    # Escape closes the Center and returns focus to the saved opener rather
-    # than leaving the keyboard on a collapsed page control.
+    # Escape returns to Home and keeps keyboard focus on a visible Home
+    # control rather than on a collapsed section page.
     [Windows.Forms.SendKeys]::SendWait('{ESC}')
-    Wait-ForFocusedAutomationId $process 'Boostix.OpenCenter' 5000
+    Wait-ForSelectedTab $tabs[0]
+    Assert-ContainerSelection $containerSelection $tabs[0]
+    $deadline = [DateTime]::UtcNow.AddMilliseconds(5000)
+    $focusedId = '<none>'
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $focused = [Windows.Automation.AutomationElement]::FocusedElement
+        if ($focused -and $focused.Current.ProcessId -eq $process.Id) {
+            $focusedId = $focused.Current.AutomationId
+            if ($homeFocusTargets -contains $focusedId) {
+                break
+            }
+        }
+        Start-Sleep -Milliseconds 50
+    }
+    if ($homeFocusTargets -notcontains $focusedId) {
+        throw "Keyboard focus after Escape was '$focusedId'; expected a Home control."
+    }
 
-    Write-Host 'Boost Center 2.0 UIA navigation test passed.' -ForegroundColor Green
+    Write-Host 'Boostix sidebar UIA navigation test passed.' -ForegroundColor Green
 }
 finally {
     if ($selectionEventsStarted) {

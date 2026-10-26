@@ -484,8 +484,147 @@ namespace Boostix
                 File.Exists(loaded.QuarantinePath),
                 "Corrupt profile data was not quarantined.");
 
+            RunLimitedAccessProcessCapture();
+
             Console.WriteLine("Game target/profile regression harness passed.");
             return 0;
+        }
+
+        // Games started as administrator, and games whose anti-cheat strips
+        // PROCESS_VM_READ, deny module enumeration (Process.MainModule) to a
+        // standard Boostix process while still allowing the limited query of
+        // their image path. Such a game must remain selectable.
+        private static void RunLimitedAccessProcessCapture()
+        {
+            var catalog = new SystemGameProcessCatalog();
+            using (System.Diagnostics.Process self =
+                System.Diagnostics.Process.GetCurrentProcess())
+            {
+                GameProcessSnapshot own;
+                string ownError;
+                Assert(catalog.TryCapture(self.Id, out own, out ownError),
+                    "The catalog could not capture the current process: " + ownError);
+                Assert(string.Equals(
+                        own.ExecutablePath,
+                        self.MainModule.FileName,
+                        StringComparison.OrdinalIgnoreCase),
+                    "The limited image path differs from the module path: " +
+                    own.ExecutablePath);
+            }
+
+            int sessionId;
+            using (System.Diagnostics.Process self =
+                System.Diagnostics.Process.GetCurrentProcess())
+            {
+                sessionId = self.SessionId;
+            }
+            int restrictedProcessId = 0;
+            string restrictedName = string.Empty;
+            string restrictedPath = string.Empty;
+            foreach (System.Diagnostics.Process process in
+                System.Diagnostics.Process.GetProcesses())
+            {
+                using (process)
+                {
+                    if (restrictedProcessId != 0 || process.Id <= 4)
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        if (process.SessionId != sessionId)
+                        {
+                            continue;
+                        }
+                        DateTime ignoredStart = process.StartTime;
+                    }
+                    catch (Exception)
+                    {
+                        // Protected system processes deny even the start time;
+                        // they are not selectable targets in any version.
+                        continue;
+                    }
+                    try
+                    {
+                        string ignoredPath = process.MainModule.FileName;
+                    }
+                    catch (System.ComponentModel.Win32Exception)
+                    {
+                        string limitedPath = QueryLimitedImagePath(process.Id);
+                        if (!string.IsNullOrEmpty(limitedPath))
+                        {
+                            restrictedProcessId = process.Id;
+                            restrictedName = process.ProcessName;
+                            restrictedPath = limitedPath;
+                        }
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+                }
+            }
+
+            if (restrictedProcessId == 0)
+            {
+                Console.WriteLine(
+                    "No module-restricted process is running in this session; " +
+                    "limited-access capture was verified only for the current process.");
+                return;
+            }
+
+            GameProcessSnapshot restricted;
+            string restrictedError;
+            Assert(catalog.TryCapture(
+                    restrictedProcessId,
+                    out restricted,
+                    out restrictedError),
+                "A process that denies module access was dropped from the catalog: " +
+                restrictedName + " (" + restrictedError + ")");
+            Assert(string.Equals(
+                    restricted.ExecutablePath,
+                    restrictedPath,
+                    StringComparison.OrdinalIgnoreCase),
+                "The captured path of " + restrictedName + " was " +
+                restricted.ExecutablePath + "; Windows reports " + restrictedPath + ".");
+            Console.WriteLine(
+                "Limited-access capture verified with " + restrictedName + ".");
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        [System.Runtime.InteropServices.DllImport(
+            "kernel32.dll",
+            CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern bool QueryFullProcessImageName(
+            IntPtr process,
+            int flags,
+            StringBuilder name,
+            ref int size);
+
+        // Independent oracle: whether Windows grants the limited image query.
+        private static string QueryLimitedImagePath(int processId)
+        {
+            IntPtr handle = OpenProcess(0x1000, false, processId);
+            if (handle == IntPtr.Zero)
+            {
+                return null;
+            }
+            try
+            {
+                var name = new StringBuilder(1024);
+                int size = name.Capacity;
+                return QueryFullProcessImageName(handle, 0, name, ref size)
+                    ? name.ToString(0, size)
+                    : null;
+            }
+            finally
+            {
+                CloseHandle(handle);
+            }
         }
     }
 }
