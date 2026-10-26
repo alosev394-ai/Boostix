@@ -401,7 +401,13 @@ function Wait-ForFocusedId {
     }
     $actual = [Windows.Automation.AutomationElement]::FocusedElement
     $actualId = if ($actual) { $actual.Current.AutomationId } else { '<none>' }
-    throw "Keyboard focus was '$actualId', expected '$AutomationId'."
+    $owner = if ($actual) {
+        [string](Get-Process -Id $actual.Current.ProcessId -ErrorAction SilentlyContinue).ProcessName
+    }
+    else {
+        'none'
+    }
+    throw "Keyboard focus was '$actualId' (process $owner), expected '$AutomationId'."
 }
 
 $tabIds = @(

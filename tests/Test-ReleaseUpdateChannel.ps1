@@ -76,9 +76,9 @@ $overlayType = $assembly.GetType('Boostix.UpdateFlowOverlay', $true, $false)
 $flags = [Reflection.BindingFlags]::NonPublic -bor [Reflection.BindingFlags]::Static
 $manifestUrl = [string]$overlayType.GetField('ManifestUrl', $flags).GetRawConstantValue()
 $signatureUrl = [string]$overlayType.GetField('ManifestSignatureUrl', $flags).GetRawConstantValue()
-if (-not $manifestUrl.EndsWith('/update-v2.json', [StringComparison]::Ordinal) -or
-    -not $signatureUrl.EndsWith('/update-v2.json.sig', [StringComparison]::Ordinal)) {
-    throw "Compiled $releaseVersion application is not pinned to the v2 update channel."
+if (-not $manifestUrl.EndsWith('/update-v3.json', [StringComparison]::Ordinal) -or
+    -not $signatureUrl.EndsWith('/update-v3.json.sig', [StringComparison]::Ordinal)) {
+    throw "Compiled $releaseVersion application is not pinned to the v3 update channel."
 }
 
 $decodeMethod = $overlayType.GetMethod('DecodeManifestSignature', $flags)
@@ -115,15 +115,76 @@ $signedChannelRoot = if ($releaseSnapshotDirectory) {
 else {
     $projectRoot
 }
+$v3ManifestPath = Join-Path $signedChannelRoot 'update-v3.json'
+$v3SignaturePath = Join-Path $signedChannelRoot 'update-v3.json.sig'
+Test-SignedManifest -ManifestPath $v3ManifestPath -SignaturePath $v3SignaturePath
+$v3 = Get-Content -Raw -Encoding UTF8 $v3ManifestPath | ConvertFrom-Json
+
+# update.json (1.x) and update-v2.json (2.0.x) were signed with the retired v1
+# key. They stay frozen so clients embedding that key keep a valid manifest;
+# the compiled updater must no longer trust them.
+$retiredPublicKeyXml = '<RSAKeyValue><Modulus>vCSgQnLtxkncktDMNkZo6cnqx3cBrLMm8z6R+jj/ljBCAm/yiC8fs1GTy7mzPBkH+LhEiEYJlx/HAVVfVXUI4hMEamtYUffbjkeCwrcpOTm9dBXDEiLOQ4ZV5Niisvws/TVqCHPwZj8ck4c/gISjUWotDGkuViPThl5suJImn4zXSo9pnJS5c2G5Pn62NMk2L3HaCmBPSeuFMbYah3XYgjQj7+K8LQ2HkXIwNl9pcJc/Pt8VarA7lVH5u9boct9YIe811iLAyKZ/h+xxN2stBKEE1Eb+HQnO6X6SrdmY+I0jjqsT1uy7yNwAE+ASlAu7iAw+L+nQB1ndi0F2/TWQ73J9Nw5E/GLtVkco9p0aCsiYvBX99Cu+02EMuICSRzfljKWfCD+TIlyX0HzDnLhFV+M3JVweSRLo1UWlyfOWdda3Re4mSUXk0YNyGegCnW/PFSjKgvm9ufYeEHTFoiLCGrsPknSsH5nrSFqCk/UCefupyJnNLfLB53SM8luedAJ9</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>'
 $legacyManifestPath = Join-Path $signedChannelRoot 'update.json'
 $legacySignaturePath = Join-Path $signedChannelRoot 'update.json.sig'
 $v2ManifestPath = Join-Path $signedChannelRoot 'update-v2.json'
 $v2SignaturePath = Join-Path $signedChannelRoot 'update-v2.json.sig'
-Test-SignedManifest -ManifestPath $legacyManifestPath -SignaturePath $legacySignaturePath
-Test-SignedManifest -ManifestPath $v2ManifestPath -SignaturePath $v2SignaturePath
+$retiredRsa = New-Object Security.Cryptography.RSACryptoServiceProvider
+try {
+    $retiredRsa.PersistKeyInCsp = $false
+    $retiredRsa.FromXmlString($retiredPublicKeyXml)
+    $sha256Oid = [Security.Cryptography.CryptoConfig]::MapNameToOID('SHA256')
+    foreach ($frozen in @(
+        @{ Manifest = $legacyManifestPath; Signature = $legacySignaturePath },
+        @{ Manifest = $v2ManifestPath; Signature = $v2SignaturePath }
+    )) {
+        $frozenBytes = [IO.File]::ReadAllBytes($frozen.Manifest)
+        $frozenSignature = [Convert]::FromBase64String(
+            [IO.File]::ReadAllText($frozen.Signature).Trim())
+        if (-not $retiredRsa.VerifyData($frozenBytes, $sha256Oid, $frozenSignature)) {
+            throw "The frozen channel was modified and no longer verifies: $($frozen.Manifest)"
+        }
+        $rejected = $false
+        try {
+            Test-SignedManifest -ManifestPath $frozen.Manifest -SignaturePath $frozen.Signature
+        }
+        catch {
+            $rejected = $true
+        }
+        if (-not $rejected) {
+            throw "The compiled updater still trusts the retired key: $($frozen.Manifest)"
+        }
+    }
+}
+finally {
+    $retiredRsa.PersistKeyInCsp = $false
+    $retiredRsa.Dispose()
+}
 
 $legacy = Get-Content -Raw -Encoding UTF8 $legacyManifestPath | ConvertFrom-Json
 $v2 = Get-Content -Raw -Encoding UTF8 $v2ManifestPath | ConvertFrom-Json
+$frozenVersion = [string]$v2.version
+if ([string]$legacy.version -cne $frozenVersion -or
+    [version]$frozenVersion -ge [version]$releaseVersion) {
+    throw 'The frozen channels must describe one release older than the current one.'
+}
+$frozenInstallerName = 'Boostix-Setup-' + $frozenVersion + '.exe'
+$frozenInstallerPath = if ($releaseSnapshotDirectory) {
+    Join-Path $releaseSnapshotDirectory $frozenInstallerName
+}
+else {
+    Join-Path (Join-Path $projectRoot 'dist') $frozenInstallerName
+}
+if (-not (Test-Path -LiteralPath $frozenInstallerPath -PathType Leaf)) {
+    throw "The installer named by the frozen update-v2.json is not published: $frozenInstallerName"
+}
+$frozenInstaller = Get-Item -LiteralPath $frozenInstallerPath
+if ([string]$v2.boostixInstallerUrl -cne (
+        'https://raw.githubusercontent.com/alosev394-ai/Boostix/main/dist/' +
+        $frozenInstallerName) -or
+    [string]$v2.boostixSha256 -cne (Get-FileHash -LiteralPath $frozenInstallerPath -Algorithm SHA256).Hash -or
+    [long]$v2.boostixSize -ne [long]$frozenInstaller.Length) {
+    throw 'The frozen update-v2.json no longer matches its published installer.'
+}
 $installer = Get-Item -LiteralPath $InstallerPath
 $installerHash = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash
 $legacyInstaller = Get-Item -LiteralPath $LegacyInstallerPath
@@ -145,18 +206,11 @@ $expectedLegacyFields = @('schemaVersion', 'version', 'installerUrl', 'sha256', 
 $actualLegacyFields = @($legacy.PSObject.Properties.Name)
 if ($actualLegacyFields.Count -ne $expectedLegacyFields.Count -or
     @($expectedLegacyFields | Where-Object { $_ -cnotin $actualLegacyFields }).Count -ne 0) {
-    throw 'Legacy update.json must contain exactly the signed schema-v1 fields.'
+    throw 'Frozen update.json must contain exactly the signed schema-v1 fields.'
 }
 $expectedLegacyUrl =
     'https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/dist/' +
     $legacyInstallerFileName
-if ([int]$legacy.schemaVersion -ne 1 -or
-    [string]$legacy.version -cne $releaseVersion -or
-    [string]$legacy.installerUrl -cne $expectedLegacyUrl -or
-    [string]$legacy.sha256 -cne $legacyInstallerHash -or
-    [long]$legacy.size -ne [long]$legacyInstaller.Length) {
-    throw 'Legacy update.json does not exactly describe the live compatibility bridge.'
-}
 
 $legacyAssembly = [Reflection.Assembly]::Load(
     [IO.File]::ReadAllBytes($LegacyInstallerPath))
@@ -262,14 +316,14 @@ finally {
 $expectedBoostixUrl =
     'https://raw.githubusercontent.com/alosev394-ai/Boostix/main/dist/' +
     $installerFileName
-if ([string]$v2.version -cne $releaseVersion -or
-    [long]$v2.size -ne [long]$legacyInstaller.Length -or
-    [string]$v2.sha256 -cne $legacyInstallerHash -or
-    [string]$v2.installerUrl -cne $expectedLegacyUrl -or
-    [string]$v2.boostixInstallerUrl -cne $expectedBoostixUrl -or
-    [string]$v2.boostixSha256 -cne $installerHash -or
-    [long]$v2.boostixSize -ne [long]$installer.Length) {
-    throw 'V2 manifest does not exactly describe the release installer.'
+if ([string]$v3.version -cne $releaseVersion -or
+    [long]$v3.size -ne [long]$legacyInstaller.Length -or
+    [string]$v3.sha256 -cne $legacyInstallerHash -or
+    [string]$v3.installerUrl -cne $expectedLegacyUrl -or
+    [string]$v3.boostixInstallerUrl -cne $expectedBoostixUrl -or
+    [string]$v3.boostixSha256 -cne $installerHash -or
+    [long]$v3.boostixSize -ne [long]$installer.Length) {
+    throw 'The v3 manifest does not exactly describe the release installer.'
 }
 
 Write-Host 'Release update channel regression test passed.' -ForegroundColor Green

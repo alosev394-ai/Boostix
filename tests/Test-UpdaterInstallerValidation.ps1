@@ -32,7 +32,7 @@ public sealed class MajesticBoostSlowDripServer : IDisposable
         listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        Address = "http://127.0.0.1:" + port + "/update-v2.json";
+        Address = "http://127.0.0.1:" + port + "/update-v3.json";
         worker = new Thread(Serve);
         worker.IsBackground = true;
         worker.Start();
@@ -366,9 +366,9 @@ if ($fetchStart -lt 0 -or $fallbackStart -lt 0 -or
 
 $immutableArguments = New-Object 'object[]' 2
 $immutableArguments[0] = $commitSha
-$immutableArguments[1] = 'update-v2.json'
+$immutableArguments[1] = 'update-v3.json'
 $immutableAddress = [string]$buildImmutableAddressMethod.Invoke($null, $immutableArguments)
-if ($immutableAddress -cne ('https://raw.githubusercontent.com/alosev394-ai/Boostix/' + $commitSha + '/update-v2.json')) {
+if ($immutableAddress -cne ('https://raw.githubusercontent.com/alosev394-ai/Boostix/' + $commitSha + '/update-v3.json')) {
     throw "Immutable manifest URL is unexpected: $immutableAddress"
 }
 

@@ -95,7 +95,9 @@ foreach ($signedSnapshotFile in @(
     'update.json',
     'update.json.sig',
     'update-v2.json',
-    'update-v2.json.sig'
+    'update-v2.json.sig',
+    'update-v3.json',
+    'update-v3.json.sig'
 )) {
     if (-not $workflow.Contains("'$signedSnapshotFile'")) {
         throw "CI does not preserve signed channel file '$signedSnapshotFile'."
@@ -183,7 +185,9 @@ foreach ($signedChannelContract in @(
     "Join-Path `$signedChannelRoot 'update.json'",
     "Join-Path `$signedChannelRoot 'update.json.sig'",
     "Join-Path `$signedChannelRoot 'update-v2.json'",
-    "Join-Path `$signedChannelRoot 'update-v2.json.sig'"
+    "Join-Path `$signedChannelRoot 'update-v2.json.sig'",
+    "Join-Path `$signedChannelRoot 'update-v3.json'",
+    "Join-Path `$signedChannelRoot 'update-v3.json.sig'"
 )) {
     if (-not $releaseChannelTest.Contains($signedChannelContract)) {
         throw "The release-channel snapshot contract is missing: $signedChannelContract"
@@ -208,9 +212,9 @@ $manifestBytes = $null
 $signatureBytes = $null
 try {
     [void](New-Item -ItemType Directory -Path $testRoot)
-    $manifestPath = Join-Path $testRoot 'update-v2.json'
-    $signaturePath = Join-Path $testRoot 'update-v2.json.sig'
-    $privateKeyPath = Join-Path $testRoot 'manifest-private-v1.dpapi'
+    $manifestPath = Join-Path $testRoot 'update-v3.json'
+    $signaturePath = Join-Path $testRoot 'update-v3.json.sig'
+    $privateKeyPath = Join-Path $testRoot 'manifest-private-v2.dpapi'
 
     $testRsa = New-Object Security.Cryptography.RSACryptoServiceProvider 3072
     $testRsa.PersistKeyInCsp = $false
@@ -218,7 +222,7 @@ try {
         $testRsa.ToXmlString($true))
     $publicKeyXml = $testRsa.ToXmlString($false)
     $entropy = [Text.Encoding]::UTF8.GetBytes(
-        'MajesticBoost manifest signing key v1')
+        'Boostix manifest signing key v2')
     $encryptedKey = [Security.Cryptography.ProtectedData]::Protect(
         $privateKeyBytes,
         $entropy,

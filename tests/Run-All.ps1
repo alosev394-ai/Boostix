@@ -45,6 +45,7 @@ $requiredTests = @(
     'Test-ReleaseUpdateChannel.ps1',
     'Test-ResponsiveLayout.ps1',
     'Test-SigningAndCiContracts.ps1',
+    'Test-SigningKeyBackup.ps1',
     'Test-SessionInsights.ps1',
     'Test-UninstallCleanupSafety.ps1',
     'Test-UpdaterFailureRecovery.ps1',

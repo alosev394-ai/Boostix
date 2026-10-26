@@ -279,22 +279,22 @@ foreach ($scenario in $fallbackScenarios) {
 }
 
 $addressArguments = New-Object 'object[]' 1
-$addressArguments[0] = 'update-v2.json'
+$addressArguments[0] = 'update-v3.json'
 $manifestAddress = [string](Invoke-StaticMethod `
     -Method $buildMainAddressMethod `
     -Arguments $addressArguments)
-$addressArguments[0] = 'update-v2.json.sig'
+$addressArguments[0] = 'update-v3.json.sig'
 $signatureAddress = [string](Invoke-StaticMethod `
     -Method $buildMainAddressMethod `
     -Arguments $addressArguments)
 if ($manifestAddress -cne
-        'https://raw.githubusercontent.com/alosev394-ai/Boostix/main/update-v2.json' -or
+        'https://raw.githubusercontent.com/alosev394-ai/Boostix/main/update-v3.json' -or
     $signatureAddress -cne
-        'https://raw.githubusercontent.com/alosev394-ai/Boostix/main/update-v2.json.sig') {
+        'https://raw.githubusercontent.com/alosev394-ai/Boostix/main/update-v3.json.sig') {
     throw 'The signed-main fallback URLs are not the exact trusted release paths.'
 }
 
-$addressArguments[0] = '..\update-v2.json'
+$addressArguments[0] = '..\update-v3.json'
 try {
     [void](Invoke-StaticMethod `
         -Method $buildMainAddressMethod `
@@ -309,9 +309,9 @@ catch {
 }
 
 $manifestBytes = [IO.File]::ReadAllBytes(
-    (Join-Path $projectRoot 'update-v2.json'))
+    (Join-Path $projectRoot 'update-v3.json'))
 $signatureBytes = [IO.File]::ReadAllBytes(
-    (Join-Path $projectRoot 'update-v2.json.sig'))
+    (Join-Path $projectRoot 'update-v3.json.sig'))
 $verificationArguments = New-Object 'object[]' 2
 $verificationArguments[0] = $manifestBytes
 $verificationArguments[1] = $signatureBytes
@@ -425,8 +425,8 @@ foreach ($requiredText in @(
     '!repositoryHeadResolved',
     'Stopwatch fallbackTimer = Stopwatch.StartNew();',
     'ManifestFallbackTotalTimeoutMilliseconds',
-    'BuildSignedMainManifestAddress("update-v2.json")',
-    'BuildSignedMainManifestAddress("update-v2.json.sig")',
+    'BuildSignedMainManifestAddress("update-v3.json")',
+    'BuildSignedMainManifestAddress("update-v3.json.sig")',
     'VerifyAndParseManifest(',
     'AllowAutoRedirect = false',
     'Unexpected final response URL.',

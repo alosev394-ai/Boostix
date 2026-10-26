@@ -138,6 +138,17 @@ foreach ($licensePath in @($presentMonLicensePath, $presentMonThirdPartyPath)) {
 # dist; published release history remains recoverable from immutable GitHub
 # releases and from Git itself.
 $resolvedDistDirectory = [IO.Path]::GetFullPath($distDirectory)
+# The frozen update-v2.json (retired v1 key) still sends 1.9.x/2.0.x clients
+# to the Boostix installer it names, so that one file must stay published.
+$frozenChannelInstaller = $null
+$frozenChannelPath = Join-Path $projectRoot 'update-v2.json'
+if (Test-Path -LiteralPath $frozenChannelPath -PathType Leaf) {
+    $frozenChannel = [IO.File]::ReadAllText($frozenChannelPath) | ConvertFrom-Json
+    $frozenChannelVersion = [string]$frozenChannel.version
+    if ($frozenChannelVersion -cmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+        $frozenChannelInstaller = 'Boostix-Setup-' + $frozenChannelVersion + '.exe'
+    }
+}
 foreach ($legacyArtifact in Get-ChildItem -LiteralPath $resolvedDistDirectory -File) {
     $knownLegacyArtifact =
         $legacyArtifact.Name -cmatch
@@ -145,7 +156,8 @@ foreach ($legacyArtifact in Get-ChildItem -LiteralPath $resolvedDistDirectory -F
     $staleCanonicalArtifact =
         $legacyArtifact.Name -cmatch
             '^Boostix-Setup-[0-9]+\.[0-9]+\.[0-9]+\.exe$' -and
-        $legacyArtifact.Name -cne "Boostix-Setup-$releaseVersion.exe"
+        $legacyArtifact.Name -cne "Boostix-Setup-$releaseVersion.exe" -and
+        $legacyArtifact.Name -cne $frozenChannelInstaller
     if ((Split-Path -Parent $legacyArtifact.FullName) -ceq $resolvedDistDirectory -and
         ($knownLegacyArtifact -or $staleCanonicalArtifact)) {
         Remove-Item -LiteralPath $legacyArtifact.FullName -Force
@@ -260,6 +272,8 @@ $hashLines = foreach ($hash in $hashes) {
     (New-Object Text.UTF8Encoding($false)))
 
 if ($PrepareSignedUpdate) {
+    # Releases from 2.1.0 publish only update-v3.json, signed with key v2.
+    # update.json and update-v2.json stay frozen (retired v1 key).
     $installer = Get-Item -LiteralPath $versionedSetupOutput
     $installerHash = (
         Get-FileHash -Algorithm SHA256 -LiteralPath $versionedSetupOutput
@@ -268,28 +282,9 @@ if ($PrepareSignedUpdate) {
     $legacyInstallerHash = (
         Get-FileHash -Algorithm SHA256 -LiteralPath $legacyCompatibilitySetupOutput
     ).Hash
-    $legacyManifestPath = Join-Path $projectRoot 'update.json'
-    $legacySignaturePath = Join-Path $projectRoot 'update.json.sig'
-    $legacyManifest = [string]::Join(
-        "`n",
-        @(
-            '{',
-            '  "schemaVersion": 1,',
-            ('  "version": "' + $releaseVersion + '",'),
-            ('  "installerUrl": "https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/dist/MajesticBoost-Setup-' + $releaseVersion + '.exe",'),
-            ('  "sha256": "' + $legacyInstallerHash + '",'),
-            ('  "size": ' + $legacyInstaller.Length),
-            '}',
-            ''
-        ))
-    [IO.File]::WriteAllText(
-        $legacyManifestPath,
-        $legacyManifest,
-        (New-Object Text.UTF8Encoding($false)))
-
-    $v2ManifestPath = Join-Path $projectRoot 'update-v2.json'
-    $v2SignaturePath = Join-Path $projectRoot 'update-v2.json.sig'
-    $v2Manifest = [string]::Join(
+    $v3ManifestPath = Join-Path $projectRoot 'update-v3.json'
+    $v3SignaturePath = Join-Path $projectRoot 'update-v3.json.sig'
+    $v3Manifest = [string]::Join(
         "`n",
         @(
             '{',
@@ -305,8 +300,8 @@ if ($PrepareSignedUpdate) {
             ''
         ))
     [IO.File]::WriteAllText(
-        $v2ManifestPath,
-        $v2Manifest,
+        $v3ManifestPath,
+        $v3Manifest,
         (New-Object Text.UTF8Encoding($false)))
 
     $signScript = Join-Path $projectRoot 'tools\Sign-UpdateManifest.ps1'
@@ -314,18 +309,8 @@ if ($PrepareSignedUpdate) {
         -NoProfile `
         -ExecutionPolicy Bypass `
         -File $signScript `
-        -ManifestPath $legacyManifestPath `
-        -SignaturePath $legacySignaturePath `
-        -AllowLegacyChannel
-    if ($LASTEXITCODE -ne 0) {
-        throw "Legacy signed update preparation failed with exit code $LASTEXITCODE."
-    }
-    & $systemPowerShell `
-        -NoProfile `
-        -ExecutionPolicy Bypass `
-        -File $signScript `
-        -ManifestPath $v2ManifestPath `
-        -SignaturePath $v2SignaturePath
+        -ManifestPath $v3ManifestPath `
+        -SignaturePath $v3SignaturePath
     if ($LASTEXITCODE -ne 0) {
         throw "Signed update preparation failed with exit code $LASTEXITCODE."
     }

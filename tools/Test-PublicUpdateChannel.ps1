@@ -31,17 +31,24 @@ $repository = 'alosev394-ai/Boostix'
 $legacyRepository = 'alosev394-ai/MajesticBoost'
 $rawManifestUrl =
     'https://raw.githubusercontent.com/' + $repository +
-    '/main/update-v2.json'
+    '/main/update-v3.json'
 $rawSignatureUrl = $rawManifestUrl + '.sig'
 $mirrorManifestUrl =
     'https://cdn.jsdelivr.net/gh/' + $repository +
-    '@latest/update-v2.json'
+    '@latest/update-v3.json'
 $mirrorSignatureUrl = $mirrorManifestUrl + '.sig'
+# update.json (1.x) and update-v2.json (2.0.x) are frozen manifests signed
+# with the retired v1 key; they must stay valid for clients that embed it.
+$frozenManifestUrl =
+    'https://raw.githubusercontent.com/' + $repository +
+    '/main/update-v2.json'
+$frozenSignatureUrl = $frozenManifestUrl + '.sig'
 $legacyManifestUrl =
     'https://raw.githubusercontent.com/' + $legacyRepository +
     '/main/update.json'
 $legacySignatureUrl = $legacyManifestUrl + '.sig'
-$trustedPublicKeyXml = '<RSAKeyValue><Modulus>vCSgQnLtxkncktDMNkZo6cnqx3cBrLMm8z6R+jj/ljBCAm/yiC8fs1GTy7mzPBkH+LhEiEYJlx/HAVVfVXUI4hMEamtYUffbjkeCwrcpOTm9dBXDEiLOQ4ZV5Niisvws/TVqCHPwZj8ck4c/gISjUWotDGkuViPThl5suJImn4zXSo9pnJS5c2G5Pn62NMk2L3HaCmBPSeuFMbYah3XYgjQj7+K8LQ2HkXIwNl9pcJc/Pt8VarA7lVH5u9boct9YIe811iLAyKZ/h+xxN2stBKEE1Eb+HQnO6X6SrdmY+I0jjqsT1uy7yNwAE+ASlAu7iAw+L+nQB1ndi0F2/TWQ73J9Nw5E/GLtVkco9p0aCsiYvBX99Cu+02EMuICSRzfljKWfCD+TIlyX0HzDnLhFV+M3JVweSRLo1UWlyfOWdda3Re4mSUXk0YNyGegCnW/PFSjKgvm9ufYeEHTFoiLCGrsPknSsH5nrSFqCk/UCefupyJnNLfLB53SM8luedAJ9</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>'
+$trustedPublicKeyXml = '<RSAKeyValue><Modulus>5lnynA7cYtlcI+x1G01BYzUXRwDRrLwpl5cke/OxpQkB2HDnfCbO+JyWF/pl0+u7hz5owssduiQAQH2Lm1bB6tqYj2Wpz2zM/3CCse2SbplShIBISSYfKRPWtU4DZx9YdrggUjuX9FMOCR50zjYAGmT7i+dsjoFKiIw9hk+yEkxuf7HXJQzyHMAs/KHWN+B0p6UY6CIlk8Qxqj16OkqLTzY0VVfshdKpLmMl1FJNx/CzyjHx7lLkPd7rH5KQfvoOYI48ts8JcO/Kr/SNHY9iAx2OgYYKXXXRvk5wrlvmRiuCZlrdWrOB9yEZo5HW8UVITDvu4DmHCFA3IYuowSZYHwvKrliufsiXtUWTa2K9NnzRx4bXn9sPYJVDGQyPS7cBho6ryrffKXSooHFeRRf5Rw3ATtYkCXaeKfvDTSpoGVkFFGF3p5KU0nbyw+QvNTqNjwwpVFxQpIkKl3wkutZd+I3uwSBLEwWyxisSuIYNHFPTLqSh6A6QciDPCvyYLUI1</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>'
+$retiredPublicKeyXml = '<RSAKeyValue><Modulus>vCSgQnLtxkncktDMNkZo6cnqx3cBrLMm8z6R+jj/ljBCAm/yiC8fs1GTy7mzPBkH+LhEiEYJlx/HAVVfVXUI4hMEamtYUffbjkeCwrcpOTm9dBXDEiLOQ4ZV5Niisvws/TVqCHPwZj8ck4c/gISjUWotDGkuViPThl5suJImn4zXSo9pnJS5c2G5Pn62NMk2L3HaCmBPSeuFMbYah3XYgjQj7+K8LQ2HkXIwNl9pcJc/Pt8VarA7lVH5u9boct9YIe811iLAyKZ/h+xxN2stBKEE1Eb+HQnO6X6SrdmY+I0jjqsT1uy7yNwAE+ASlAu7iAw+L+nQB1ndi0F2/TWQ73J9Nw5E/GLtVkco9p0aCsiYvBX99Cu+02EMuICSRzfljKWfCD+TIlyX0HzDnLhFV+M3JVweSRLo1UWlyfOWdda3Re4mSUXk0YNyGegCnW/PFSjKgvm9ufYeEHTFoiLCGrsPknSsH5nrSFqCk/UCefupyJnNLfLB53SM8luedAJ9</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>'
 
 function Assert-TrustedPublicKeyMatchesSource {
     $sourcePath = Join-Path $projectRoot 'Boostix\UpdateFlow.cs'
@@ -243,7 +250,8 @@ function Invoke-BoundedDownload {
 function Assert-SignedManifest {
     param(
         [Parameter(Mandatory = $true)][string]$ManifestPath,
-        [Parameter(Mandatory = $true)][string]$SignaturePath
+        [Parameter(Mandatory = $true)][string]$SignaturePath,
+        [Parameter(Mandatory = $true)][string]$PublicKeyXml
     )
 
     $manifestBytes = [IO.File]::ReadAllBytes($ManifestPath)
@@ -269,7 +277,7 @@ function Assert-SignedManifest {
     $rsa = New-Object Security.Cryptography.RSACryptoServiceProvider
     try {
         $rsa.PersistKeyInCsp = $false
-        $rsa.FromXmlString($trustedPublicKeyXml)
+        $rsa.FromXmlString($PublicKeyXml)
         $sha256Oid = [Security.Cryptography.CryptoConfig]::MapNameToOID('SHA256')
         if (-not $rsa.VerifyData($manifestBytes, $sha256Oid, $signature)) {
             throw 'The public manifest signature is not trusted.'
@@ -401,10 +409,12 @@ try {
     Assert-TrustedPublicKeyMatchesSource
     [void][IO.Directory]::CreateDirectory($canaryRoot)
 
-    $rawManifestPath = Join-Path $canaryRoot 'raw-update-v2.json'
-    $rawSignaturePath = Join-Path $canaryRoot 'raw-update-v2.json.sig'
-    $mirrorManifestPath = Join-Path $canaryRoot 'mirror-update-v2.json'
-    $mirrorSignaturePath = Join-Path $canaryRoot 'mirror-update-v2.json.sig'
+    $rawManifestPath = Join-Path $canaryRoot 'raw-update-v3.json'
+    $rawSignaturePath = Join-Path $canaryRoot 'raw-update-v3.json.sig'
+    $mirrorManifestPath = Join-Path $canaryRoot 'mirror-update-v3.json'
+    $mirrorSignaturePath = Join-Path $canaryRoot 'mirror-update-v3.json.sig'
+    $frozenManifestPath = Join-Path $canaryRoot 'frozen-update-v2.json'
+    $frozenSignaturePath = Join-Path $canaryRoot 'frozen-update-v2.json.sig'
     $legacyManifestPath = Join-Path $canaryRoot 'legacy-update.json'
     $legacySignaturePath = Join-Path $canaryRoot 'legacy-update.json.sig'
 
@@ -421,6 +431,12 @@ try {
         Invoke-BoundedDownload -Address $mirrorSignatureUrl `
             -Destination $mirrorSignaturePath -MaximumBytes 1024 `
             -AllowedHosts @('cdn.jsdelivr.net')
+        Invoke-BoundedDownload -Address $frozenManifestUrl `
+            -Destination $frozenManifestPath -MaximumBytes 16384 `
+            -AllowedHosts @('raw.githubusercontent.com')
+        Invoke-BoundedDownload -Address $frozenSignatureUrl `
+            -Destination $frozenSignaturePath -MaximumBytes 1024 `
+            -AllowedHosts @('raw.githubusercontent.com')
         Invoke-BoundedDownload -Address $legacyManifestUrl `
             -Destination $legacyManifestPath -MaximumBytes 16384 `
             -AllowedHosts @('raw.githubusercontent.com')
@@ -430,12 +446,16 @@ try {
     }
     else {
         $fixtureRoot = (Resolve-Path -LiteralPath $OfflineFixtureRoot).Path
-        Copy-OfflineFixture -Source (Join-Path $fixtureRoot 'update-v2.json') `
+        Copy-OfflineFixture -Source (Join-Path $fixtureRoot 'update-v3.json') `
             -Destination $rawManifestPath -MaximumBytes 16384
-        Copy-OfflineFixture -Source (Join-Path $fixtureRoot 'update-v2.json.sig') `
+        Copy-OfflineFixture -Source (Join-Path $fixtureRoot 'update-v3.json.sig') `
             -Destination $rawSignaturePath -MaximumBytes 1024
         [IO.File]::Copy($rawManifestPath, $mirrorManifestPath, $false)
         [IO.File]::Copy($rawSignaturePath, $mirrorSignaturePath, $false)
+        Copy-OfflineFixture -Source (Join-Path $fixtureRoot 'update-v2.json') `
+            -Destination $frozenManifestPath -MaximumBytes 16384
+        Copy-OfflineFixture -Source (Join-Path $fixtureRoot 'update-v2.json.sig') `
+            -Destination $frozenSignaturePath -MaximumBytes 1024
         Copy-OfflineFixture -Source (Join-Path $fixtureRoot 'update.json') `
             -Destination $legacyManifestPath -MaximumBytes 16384
         Copy-OfflineFixture -Source (Join-Path $fixtureRoot 'update.json.sig') `
@@ -443,11 +463,13 @@ try {
     }
 
     Assert-SignedManifest -ManifestPath $rawManifestPath `
-        -SignaturePath $rawSignaturePath
+        -SignaturePath $rawSignaturePath -PublicKeyXml $trustedPublicKeyXml
     Assert-SignedManifest -ManifestPath $mirrorManifestPath `
-        -SignaturePath $mirrorSignaturePath
+        -SignaturePath $mirrorSignaturePath -PublicKeyXml $trustedPublicKeyXml
+    Assert-SignedManifest -ManifestPath $frozenManifestPath `
+        -SignaturePath $frozenSignaturePath -PublicKeyXml $retiredPublicKeyXml
     Assert-SignedManifest -ManifestPath $legacyManifestPath `
-        -SignaturePath $legacySignaturePath
+        -SignaturePath $legacySignaturePath -PublicKeyXml $retiredPublicKeyXml
     if ((Get-FileHash $rawManifestPath -Algorithm SHA256).Hash -cne
             (Get-FileHash $mirrorManifestPath -Algorithm SHA256).Hash -or
         (Get-FileHash $rawSignaturePath -Algorithm SHA256).Hash -cne
@@ -458,6 +480,8 @@ try {
     $manifest = Get-Content -LiteralPath $rawManifestPath -Raw -Encoding UTF8 |
         ConvertFrom-Json
     $legacyManifest = Get-Content -LiteralPath $legacyManifestPath `
+        -Raw -Encoding UTF8 | ConvertFrom-Json
+    $frozenManifest = Get-Content -LiteralPath $frozenManifestPath `
         -Raw -Encoding UTF8 | ConvertFrom-Json
     $expectedManifestFields = @(
         'schemaVersion',
@@ -473,7 +497,7 @@ try {
         @($expectedManifestFields | Where-Object {
             $actualManifestFields -cnotcontains $_
         }).Count -ne 0) {
-        throw 'update-v2.json must contain exactly the eight schema-v1 fields.'
+        throw 'update-v3.json must contain exactly the eight schema-v1 fields.'
     }
     $expectedLegacyFields = @(
         'schemaVersion',
@@ -496,7 +520,7 @@ try {
         $manifest.boostixInstallerUrl -isnot [string] -or
         $manifest.boostixSha256 -isnot [string] -or
         $manifest.boostixSize -isnot [int]) {
-        throw 'update-v2.json contains an unexpected field type.'
+        throw 'update-v3.json contains an unexpected field type.'
     }
     if ($legacyManifest.schemaVersion -isnot [int] -or
         $legacyManifest.version -isnot [string] -or
@@ -535,35 +559,45 @@ try {
         $legacySize -le 0 -or $legacySize -gt $MaximumInstallerBytes) {
         throw 'The public manifest contains an invalid installer size.'
     }
-    $legacyBridgeErrors = New-Object Collections.Generic.List[string]
-    if ([int]$legacyManifest.schemaVersion -ne 1) {
-        $legacyBridgeErrors.Add(
-            "schemaVersion=$($legacyManifest.schemaVersion), expected 1")
+    # The frozen channels describe the last v1-signed release on their own.
+    $legacyVersion = [string]$legacyManifest.version
+    if ($legacyVersion -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+$' -or
+        [int]$legacyManifest.schemaVersion -ne 1) {
+        throw 'The frozen update.json has an invalid version or schema.'
     }
-    if ([string]$legacyManifest.version -cne $version) {
-        $legacyBridgeErrors.Add(
-            "version=$($legacyManifest.version), expected $version")
+    $legacyFileName = 'MajesticBoost-Setup-' + $legacyVersion + '.exe'
+    $expectedLegacyInstaller =
+        'https://raw.githubusercontent.com/' + $legacyRepository +
+        '/main/dist/' + $legacyFileName
+    $legacySize = [long]$legacyManifest.size
+    if ([string]$legacyManifest.installerUrl -cne $expectedLegacyInstaller -or
+        [string]$legacyManifest.sha256 -cnotmatch '^[0-9A-F]{64}$' -or
+        $legacySize -le 0 -or $legacySize -gt $MaximumInstallerBytes) {
+        throw 'The frozen update.json does not describe its compatibility bridge.'
     }
-    if ([string]$legacyManifest.installerUrl -cne $expectedLegacyInstaller) {
-        $legacyBridgeErrors.Add('installerUrl does not match the v2 bridge')
+    $frozenVersion = [string]$frozenManifest.version
+    $frozenFileName = 'Boostix-Setup-' + $frozenVersion + '.exe'
+    $expectedFrozenInstaller =
+        'https://raw.githubusercontent.com/' + $repository +
+        '/main/dist/' + $frozenFileName
+    $frozenSize = [long]$frozenManifest.boostixSize
+    if ($frozenVersion -cne $legacyVersion -or
+        [string]$frozenManifest.installerUrl -cne $expectedLegacyInstaller -or
+        [string]$frozenManifest.sha256 -cne [string]$legacyManifest.sha256 -or
+        [string]$frozenManifest.boostixInstallerUrl -cne $expectedFrozenInstaller -or
+        [string]$frozenManifest.boostixSha256 -cnotmatch '^[0-9A-F]{64}$' -or
+        $frozenSize -le 0 -or $frozenSize -gt $MaximumInstallerBytes) {
+        throw 'The frozen update-v2.json is not consistent with the frozen update.json.'
     }
-    if ([string]$legacyManifest.sha256 -cne [string]$manifest.sha256) {
-        $legacyBridgeErrors.Add('sha256 does not match the v2 bridge')
-    }
-    if ([long]$legacyManifest.size -ne $legacySize) {
-        $legacyBridgeErrors.Add(
-            "size=$($legacyManifest.size), expected $legacySize")
-    }
-    if ($legacyBridgeErrors.Count -ne 0) {
-        throw (
-            'Legacy update.json is not linked to the v2 compatibility bridge: ' +
-            [string]::Join('; ', $legacyBridgeErrors.ToArray()) + '.')
+    if ([version]$version -le [version]$frozenVersion) {
+        throw "update-v3.json ($version) must be newer than the frozen channels ($frozenVersion)."
     }
 
     $rawInstallerPath = Join-Path $canaryRoot 'raw-boostix-setup.exe'
     $latestInstallerPath = Join-Path $canaryRoot 'raw-boostix-latest.exe'
     $releaseInstallerPath = Join-Path $canaryRoot 'release-boostix-setup.exe'
     $legacyInstallerPath = Join-Path $canaryRoot 'legacy-bridge-setup.exe'
+    $frozenInstallerPath = Join-Path $canaryRoot 'frozen-boostix-setup.exe'
     $releaseInstallerUrl =
         'https://github.com/' + $repository + '/releases/download/v' +
         $version + '/' + $canonicalFileName
@@ -586,6 +620,9 @@ try {
         Invoke-BoundedDownload -Address $expectedLegacyInstaller `
             -Destination $legacyInstallerPath -MaximumBytes $legacySize `
             -AllowedHosts @('raw.githubusercontent.com')
+        Invoke-BoundedDownload -Address $expectedFrozenInstaller `
+            -Destination $frozenInstallerPath -MaximumBytes $frozenSize `
+            -AllowedHosts @('raw.githubusercontent.com')
     }
     else {
         $fixtureRoot = (Resolve-Path -LiteralPath $OfflineFixtureRoot).Path
@@ -603,6 +640,8 @@ try {
             -Destination $latestInstallerPath -MaximumBytes $canonicalSize
         Copy-OfflineFixture -Source $fixtureLegacy `
             -Destination $legacyInstallerPath -MaximumBytes $legacySize
+        Copy-OfflineFixture -Source (Join-Path $fixtureRoot ('dist\' + $frozenFileName)) `
+            -Destination $frozenInstallerPath -MaximumBytes $frozenSize
     }
 
     foreach ($artifact in @(
@@ -616,11 +655,16 @@ try {
             -ExpectedProductName 'Boostix' -ExpectedVersion $version `
             -ExpectedFileName $canonicalFileName
     }
-    Assert-ReleaseArtifact -Role 'legacy raw compatibility bridge' `
+    Assert-ReleaseArtifact -Role 'frozen legacy compatibility bridge' `
         -Path $legacyInstallerPath -ExpectedSize $legacySize `
-        -ExpectedSha256 ([string]$manifest.sha256) `
-        -ExpectedProductName 'Majestic Boost' -ExpectedVersion $version `
+        -ExpectedSha256 ([string]$legacyManifest.sha256) `
+        -ExpectedProductName 'Majestic Boost' -ExpectedVersion $legacyVersion `
         -ExpectedFileName $legacyFileName
+    Assert-ReleaseArtifact -Role 'frozen v2-channel installer' `
+        -Path $frozenInstallerPath -ExpectedSize $frozenSize `
+        -ExpectedSha256 ([string]$frozenManifest.boostixSha256) `
+        -ExpectedProductName 'Boostix' -ExpectedVersion $frozenVersion `
+        -ExpectedFileName $frozenFileName
 
     $mode = if ([string]::IsNullOrWhiteSpace($OfflineFixtureRoot)) {
         'public network'

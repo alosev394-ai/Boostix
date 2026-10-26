@@ -7,10 +7,7 @@ param(
     [string]$SignaturePath,
 
     [Parameter(Mandatory = $false)]
-    [switch]$AllowLegacyChannel,
-
-    [Parameter(Mandatory = $false)]
-    [string]$PrivateKeyPath = (Join-Path $env:LOCALAPPDATA 'BoostixSigning\manifest-private-v1.dpapi')
+    [string]$PrivateKeyPath = (Join-Path $env:LOCALAPPDATA 'BoostixSigning\manifest-private-v2.dpapi')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,30 +17,27 @@ Add-Type -AssemblyName System.Security
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDirectory
 if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
-    $ManifestPath = Join-Path $projectRoot 'update-v2.json'
+    $ManifestPath = Join-Path $projectRoot 'update-v3.json'
 }
 if ([string]::IsNullOrWhiteSpace($SignaturePath)) {
-    $SignaturePath = Join-Path $projectRoot 'update-v2.json.sig'
+    $SignaturePath = Join-Path $projectRoot 'update-v3.json.sig'
 }
 
-if ((Split-Path -Leaf $ManifestPath) -ieq 'update.json' -and -not $AllowLegacyChannel) {
-    throw 'The legacy update.json channel is frozen. Use update-v2.json, or pass -AllowLegacyChannel only for an intentional emergency repair.'
+# update.json (1.x clients) and update-v2.json (2.0.x clients) were signed with
+# the retired v1 key, which no longer exists. They stay frozen byte-for-byte so
+# those clients keep reading a valid manifest; new releases use update-v3.json
+# and key v2 (tools\New-UpdateSigningKey.ps1).
+foreach ($frozenName in @('update.json', 'update-v2.json')) {
+    if ((Split-Path -Leaf $ManifestPath) -ieq $frozenName) {
+        throw "The $frozenName channel is frozen with the retired v1 key and must not be re-signed. Use update-v3.json."
+    }
 }
 
 if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
     throw "Update manifest not found: $ManifestPath"
 }
-if (-not $PSBoundParameters.ContainsKey('PrivateKeyPath') -and
-    -not (Test-Path -LiteralPath $PrivateKeyPath -PathType Leaf)) {
-    # Reuse the existing DPAPI-protected release key during the product-name
-    # migration. The signing identity and public key intentionally stay stable.
-    $legacyPrivateKeyPath = Join-Path $env:LOCALAPPDATA 'MajesticBoostSigning\manifest-private-v1.dpapi'
-    if (Test-Path -LiteralPath $legacyPrivateKeyPath -PathType Leaf) {
-        $PrivateKeyPath = $legacyPrivateKeyPath
-    }
-}
 if (-not (Test-Path -LiteralPath $PrivateKeyPath -PathType Leaf)) {
-    throw "Encrypted signing key not found: $PrivateKeyPath"
+    throw "Encrypted signing key not found: $PrivateKeyPath. Restore it with tools\Backup-UpdateSigningKey.ps1 -Import."
 }
 
 $encryptedKey = $null
@@ -56,7 +50,7 @@ $rsa = $null
 try {
     $encryptedKey = [IO.File]::ReadAllBytes($PrivateKeyPath)
     $entropy = [Text.Encoding]::UTF8.GetBytes(
-        'MajesticBoost manifest signing key v1')
+        'Boostix manifest signing key v2')
     $privateKeyBytes = [Security.Cryptography.ProtectedData]::Unprotect(
         $encryptedKey,
         $entropy,

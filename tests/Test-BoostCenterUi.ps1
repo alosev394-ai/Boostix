@@ -257,7 +257,18 @@ function Wait-ForFocusedAutomationId {
     }
     $current = [Windows.Automation.AutomationElement]::FocusedElement
     $currentId = if ($current) { $current.Current.AutomationId } else { '<none>' }
-    throw "Keyboard focus was '$currentId', expected '$AutomationId'."
+    # Name the owner: another foreground application taking focus during a
+    # local run must be distinguishable from Boostix losing its own focus.
+    $owner = if (-not $current) {
+        'none'
+    }
+    elseif ($current.Current.ProcessId -eq $Process.Id) {
+        'Boostix'
+    }
+    else {
+        'another process: ' + [string](Get-Process -Id $current.Current.ProcessId -ErrorAction SilentlyContinue).ProcessName
+    }
+    throw "Keyboard focus was '$currentId' ($owner), expected '$AutomationId'."
 }
 
 function Wait-ForEventCount {

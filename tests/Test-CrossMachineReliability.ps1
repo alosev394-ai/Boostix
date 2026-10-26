@@ -361,7 +361,7 @@ $mirrorSignatureUrl = [string]$updateType.GetField(
     'MirrorManifestSignatureUrl',
     $allFlags).GetRawConstantValue()
 $expectedMirrorManifestUrl =
-    'https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@latest/update-v2.json'
+    'https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@latest/update-v3.json'
 if ($mirrorManifestUrl -cne $expectedMirrorManifestUrl -or
     $mirrorSignatureUrl -cne ($expectedMirrorManifestUrl + '.sig')) {
     throw 'The signed manifest mirror is not pinned to the purgeable latest semver alias.'

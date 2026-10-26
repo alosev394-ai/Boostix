@@ -1060,9 +1060,9 @@ namespace Boostix
         }
 
         private const string ManifestUrl =
-            "https://raw.githubusercontent.com/alosev394-ai/Boostix/main/update-v2.json";
+            "https://raw.githubusercontent.com/alosev394-ai/Boostix/main/update-v3.json";
         private const string ManifestSignatureUrl =
-            "https://raw.githubusercontent.com/alosev394-ai/Boostix/main/update-v2.json.sig";
+            "https://raw.githubusercontent.com/alosev394-ai/Boostix/main/update-v3.json.sig";
         private const string RepositoryHeadUrl =
             "https://api.github.com/repos/alosev394-ai/Boostix/git/ref/heads/main";
         private const string RepositoryRawPrefix =
@@ -1072,16 +1072,18 @@ namespace Boostix
         private const string ReleaseInstallerUrlPrefix =
             "https://github.com/alosev394-ai/Boostix/releases/download/v";
         private const string MirrorManifestUrl =
-            "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@latest/update-v2.json";
+            "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@latest/update-v3.json";
         private const string MirrorManifestSignatureUrl =
-            "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@latest/update-v2.json.sig";
+            "https://cdn.jsdelivr.net/gh/alosev394-ai/Boostix@latest/update-v3.json.sig";
         // Schema v1 keeps this signed transport field for installed 1.8.x
         // clients. New clients prefer boostixInstallerUrl and never display the
         // compatibility name.
         private const string LegacyInstallerUrlPrefix =
             "https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/dist/MajesticBoost-Setup-";
+        // Key v2 (2.1.0+). The v1 key that signed update.json/update-v2.json
+        // was retired; those channels stay frozen for older clients.
         private const string UpdateSigningPublicKeyXml =
-            "<RSAKeyValue><Modulus>vCSgQnLtxkncktDMNkZo6cnqx3cBrLMm8z6R+jj/ljBCAm/yiC8fs1GTy7mzPBkH+LhEiEYJlx/HAVVfVXUI4hMEamtYUffbjkeCwrcpOTm9dBXDEiLOQ4ZV5Niisvws/TVqCHPwZj8ck4c/gISjUWotDGkuViPThl5suJImn4zXSo9pnJS5c2G5Pn62NMk2L3HaCmBPSeuFMbYah3XYgjQj7+K8LQ2HkXIwNl9pcJc/Pt8VarA7lVH5u9boct9YIe811iLAyKZ/h+xxN2stBKEE1Eb+HQnO6X6SrdmY+I0jjqsT1uy7yNwAE+ASlAu7iAw+L+nQB1ndi0F2/TWQ73J9Nw5E/GLtVkco9p0aCsiYvBX99Cu+02EMuICSRzfljKWfCD+TIlyX0HzDnLhFV+M3JVweSRLo1UWlyfOWdda3Re4mSUXk0YNyGegCnW/PFSjKgvm9ufYeEHTFoiLCGrsPknSsH5nrSFqCk/UCefupyJnNLfLB53SM8luedAJ9</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
+            "<RSAKeyValue><Modulus>5lnynA7cYtlcI+x1G01BYzUXRwDRrLwpl5cke/OxpQkB2HDnfCbO+JyWF/pl0+u7hz5owssduiQAQH2Lm1bB6tqYj2Wpz2zM/3CCse2SbplShIBISSYfKRPWtU4DZx9YdrggUjuX9FMOCR50zjYAGmT7i+dsjoFKiIw9hk+yEkxuf7HXJQzyHMAs/KHWN+B0p6UY6CIlk8Qxqj16OkqLTzY0VVfshdKpLmMl1FJNx/CzyjHx7lLkPd7rH5KQfvoOYI48ts8JcO/Kr/SNHY9iAx2OgYYKXXXRvk5wrlvmRiuCZlrdWrOB9yEZo5HW8UVITDvu4DmHCFA3IYuowSZYHwvKrliufsiXtUWTa2K9NnzRx4bXn9sPYJVDGQyPS7cBho6ryrffKXSooHFeRRf5Rw3ATtYkCXaeKfvDTSpoGVkFFGF3p5KU0nbyw+QvNTqNjwwpVFxQpIkKl3wkutZd+I3uwSBLEwWyxisSuIYNHFPTLqSh6A6QciDPCvyYLUI1</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
         private const int ManifestSchemaVersion = 1;
         private const int ManifestMaximumBytes = 16384;
         private const int SignatureMaximumBytes = 1024;
@@ -1378,7 +1380,7 @@ namespace Boostix
                     payload = DownloadSmallFile(
                         BuildImmutableManifestAddress(
                             commitSha,
-                            "update-v2.json"),
+                            "update-v3.json"),
                         ManifestMaximumBytes,
                         GetManifestRequestTimeout(
                             totalTimer,
@@ -1388,7 +1390,7 @@ namespace Boostix
                     signaturePayload = DownloadSmallFile(
                         BuildImmutableManifestAddress(
                             commitSha,
-                            "update-v2.json.sig"),
+                            "update-v3.json.sig"),
                         SignatureMaximumBytes,
                         GetManifestRequestTimeout(
                             totalTimer,
@@ -1457,7 +1459,7 @@ namespace Boostix
                 try
                 {
                     payload = DownloadSmallFile(
-                        BuildSignedMainManifestAddress("update-v2.json"),
+                        BuildSignedMainManifestAddress("update-v3.json"),
                         ManifestMaximumBytes,
                         GetManifestRequestTimeout(
                             fallbackTimer,
@@ -1465,7 +1467,7 @@ namespace Boostix
                         fallbackTimer,
                         ManifestFallbackTotalTimeoutMilliseconds);
                     signaturePayload = DownloadSmallFile(
-                        BuildSignedMainManifestAddress("update-v2.json.sig"),
+                        BuildSignedMainManifestAddress("update-v3.json.sig"),
                         SignatureMaximumBytes,
                         GetManifestRequestTimeout(
                             fallbackTimer,
@@ -1733,17 +1735,17 @@ namespace Boostix
 
         private static string BuildSignedMainManifestAddress(string fileName)
         {
-            if (string.Equals(fileName, "update-v2.json", StringComparison.Ordinal))
+            if (string.Equals(fileName, "update-v3.json", StringComparison.Ordinal))
             {
                 return ValidateSignedMainManifestAddress(
                     ManifestUrl,
-                    "update-v2.json");
+                    "update-v3.json");
             }
-            if (string.Equals(fileName, "update-v2.json.sig", StringComparison.Ordinal))
+            if (string.Equals(fileName, "update-v3.json.sig", StringComparison.Ordinal))
             {
                 return ValidateSignedMainManifestAddress(
                     ManifestSignatureUrl,
-                    "update-v2.json.sig");
+                    "update-v3.json.sig");
             }
             throw new InvalidDataException("Signed-main manifest path is invalid.");
         }
@@ -1855,11 +1857,11 @@ namespace Boostix
             if (!IsCommitSha(commitSha) ||
                 (!string.Equals(
                     fileName,
-                    "update-v2.json",
+                    "update-v3.json",
                     StringComparison.Ordinal) &&
                  !string.Equals(
                     fileName,
-                    "update-v2.json.sig",
+                    "update-v3.json.sig",
                     StringComparison.Ordinal)))
             {
                 throw new InvalidDataException("Immutable manifest path is invalid.");
