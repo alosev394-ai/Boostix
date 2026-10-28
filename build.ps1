@@ -204,7 +204,8 @@ $appArguments = @(
     "$projectRoot\Boostix\OptimizationFlow.cs",
     "$projectRoot\Boostix\UpdateFlow.cs",
     "$projectRoot\Boostix\WhatsNew.cs",
-    "$projectRoot\Boostix\TrayIntegration.cs"
+    "$projectRoot\Boostix\TrayIntegration.cs",
+    "$projectRoot\Boostix\WindowBackdrop.cs"
 )
 
 & $compiler @appArguments

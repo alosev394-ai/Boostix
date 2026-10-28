@@ -68,9 +68,9 @@ foreach ($identityContract in @(
     'ProductFileName = "Boostix"',
     'CompanyName = "Silas Suspect"',
     'ReleaseLabel = ""',
-    'AccentHex = "#FFFFA030"',
-    'AccentVisualHex = "#FFFFB862"',
-    'AccentTextHex = "#FFFFB862"'
+    'AccentHex = "#FFFFF44F"',
+    'AccentVisualHex = "#FFFFF57A"',
+    'AccentTextHex = "#FFFFF57A"'
 )) {
     if (-not $brand.Contains($identityContract)) {
         throw "The central brand contract is missing: $identityContract"

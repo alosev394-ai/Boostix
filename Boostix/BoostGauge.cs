@@ -17,7 +17,7 @@ namespace Boostix
 
     /// <summary>
     /// The Boost control drawn as a boost-pressure gauge: a 240° scale with an
-    /// amber Boost zone at the top end. The needle rests at the left stop
+    /// lemon Boost zone at the top end. The needle rests at the left stop
     /// while Boost is off, does the ignition sweep to the end stop while the
     /// session starts, and settles in the Boost zone while it runs.
     /// </summary>
@@ -228,19 +228,19 @@ namespace Boostix
             {
                 tick.Stroke = BoostixDesignTokens.Brush(scale);
             }
-            Color amber = BoostixDesignTokens.Accent;
+            Color lemon = BoostixDesignTokens.Accent;
             byte zoneAlpha = SystemParameters.HighContrast || running
                 ? (byte)255
                 : (hovered ? (byte)200 : (byte)120);
-            Brush zone = BoostixDesignTokens.Brush(BoostixDesignTokens.WithAlpha(amber, zoneAlpha));
+            Brush zone = BoostixDesignTokens.Brush(BoostixDesignTokens.WithAlpha(lemon, zoneAlpha));
             foreach (Line tick in zoneTicks)
             {
                 tick.Stroke = zone;
             }
             zoneBand.Stroke = zone;
-            needle.Fill = BoostixDesignTokens.Brush(running ? amber : BoostixDesignTokens.SecondaryText);
+            needle.Fill = BoostixDesignTokens.Brush(running ? lemon : BoostixDesignTokens.SecondaryText);
             hub.Fill = BoostixDesignTokens.Brush(BoostixDesignTokens.SurfaceRaised);
-            hub.Stroke = BoostixDesignTokens.Brush(running || hovered ? amber : BoostixDesignTokens.Border);
+            hub.Stroke = BoostixDesignTokens.Brush(running || hovered ? lemon : BoostixDesignTokens.Border);
             readout.Foreground = BoostixDesignTokens.Brush(
                 state == BoostGaugeState.Active ? BoostixDesignTokens.AccentText : BoostixDesignTokens.Text);
             readoutCaption.Foreground = BoostixDesignTokens.Brush(BoostixDesignTokens.MutedText);

@@ -94,6 +94,7 @@ namespace Boostix
                     }
 
                     var application = new Application();
+                    BoostixDesignTokens.GlassBackdrop = WindowBackdrop.IsAvailable;
                     BoostixDesignTokens.ApplyThemeResources(
                         application.Resources);
                     application.Resources[SystemParameters.FocusVisualStyleKey] =
@@ -461,6 +462,9 @@ namespace Boostix
         private Viewbox monitorAdaptiveViewbox;
         private Grid monitorDesignSurface;
         private HwndSource windowSource;
+        private HwndSource backdropSource;
+        private Border windowFrame;
+        private Grid windowRoot;
         private IntPtr windowHandle;
         private bool applyingMonitorBounds;
         private bool monitorBoundsQueued;
@@ -529,25 +533,38 @@ namespace Boostix
             MinHeight = Height;
             MaxWidth = Width;
             MaxHeight = Height;
-            WindowStyle = WindowStyle.None;
+            // DWM draws the Windows 11 glass only behind a framed window;
+            // WindowChrome below hides that frame, so both look the same.
+            WindowStyle = WindowBackdrop.BuildSupportsGlass
+                ? WindowStyle.SingleBorderWindow
+                : WindowStyle.None;
             ResizeMode = ResizeMode.NoResize;
             // An opaque native window keeps WPF on the ClearType/hardware-rendered
             // path. Layered transparent windows rasterize text less sharply,
             // especially at 1080p and fractional DPI.
             AllowsTransparency = false;
-            SetResourceReference(
-                BackgroundProperty,
-                BoostixDesignTokens.BackgroundBrushKey);
-            WindowChrome.SetWindowChrome(
-                this,
-                new WindowChrome
-                {
-                    CaptionHeight = 0,
-                    CornerRadius = new CornerRadius(12),
-                    GlassFrameThickness = new Thickness(0),
-                    ResizeBorderThickness = new Thickness(0),
-                    UseAeroCaptionButtons = false
-                });
+            var chrome = new WindowChrome
+            {
+                CaptionHeight = 0,
+                CornerRadius = new CornerRadius(12),
+                GlassFrameThickness = new Thickness(0),
+                ResizeBorderThickness = new Thickness(0),
+                UseAeroCaptionButtons = false
+            };
+            if (BoostixDesignTokens.GlassBackdrop)
+            {
+                // Windows 11 draws its acrylic under the whole client area;
+                // the petrol tint layers above it stay readable.
+                chrome.GlassFrameThickness = new Thickness(-1);
+                Background = Brushes.Transparent;
+            }
+            else
+            {
+                SetResourceReference(
+                    BackgroundProperty,
+                    BoostixDesignTokens.BackgroundBrushKey);
+            }
+            WindowChrome.SetWindowChrome(this, chrome);
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ShowInTaskbar = true;
             UseLayoutRounding = true;
@@ -590,6 +607,8 @@ namespace Boostix
             }
             Loaded += BoostWindowLoaded;
             SourceInitialized += BoostWindowSourceInitialized;
+            Activated += delegate { ApplyWindowTint(true); };
+            Deactivated += delegate { ApplyWindowTint(false); };
             KeyDown += WindowKeyDown;
             PreviewMouseLeftButtonDown += WindowMouseLeftButtonDown;
             Closing += BoostWindowClosing;
@@ -607,29 +626,25 @@ namespace Boostix
             }
 
             var frame = new Border();
-            frame.CornerRadius = new CornerRadius(12);
             frame.BorderThickness = new Thickness(1);
             frame.SetResourceReference(
                 Border.BorderBrushProperty,
                 BoostixDesignTokens.BorderBrushKey);
             frame.SetResourceReference(
                 Border.BackgroundProperty,
-                BoostixDesignTokens.BackgroundBrushKey);
+                BoostixDesignTokens.WindowTintBrushKey);
             shell.Children.Add(frame);
+            windowFrame = frame;
 
             var root = new Grid();
             root.Background = Brushes.Transparent;
             KeyboardNavigation.SetTabNavigation(
                 root,
                 KeyboardNavigationMode.Cycle);
-            root.SizeChanged += delegate
-            {
-                root.Clip = new RectangleGeometry(
-                    new Rect(0, 0, Math.Max(0, root.ActualWidth), Math.Max(0, root.ActualHeight)),
-                    11,
-                    11);
-            };
+            root.SizeChanged += delegate { UpdateWindowFrameShape(); };
             frame.Child = root;
+            windowRoot = root;
+            UpdateWindowFrameShape();
 
             FrameworkElement home = BuildHomePage();
 
@@ -5435,6 +5450,7 @@ namespace Boostix
             if (application != null)
             {
                 BoostixDesignTokens.ApplyThemeResources(application.Resources);
+                BoostixDesignTokens.ApplyWindowTint(application.Resources, IsActive);
             }
 
             RefreshChromeButtonTheme(centerButton);
@@ -5589,6 +5605,18 @@ namespace Boostix
             }
         }
 
+        /// <summary>
+        /// On a framed window WindowChrome sets the window region inside its
+        /// own SourceInitialized handler; the resize that follows raises
+        /// Loaded before BoostWindowSourceInitialized runs. The handle is
+        /// therefore stored first, so Loaded can register Ctrl+Alt+B.
+        /// </summary>
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            windowHandle = new WindowInteropHelper(this).Handle;
+            base.OnSourceInitialized(e);
+        }
+
         private void BoostWindowSourceInitialized(object sender, EventArgs e)
         {
             windowHandle = new WindowInteropHelper(this).Handle;
@@ -5597,7 +5625,16 @@ namespace Boostix
                 return;
             }
 
+            if (WindowStyle == WindowStyle.SingleBorderWindow)
+            {
+                WindowBackdrop.HideSystemCaptionButtons(windowHandle);
+            }
             ApplyNativeWindowAppearance();
+            backdropSource = HwndSource.FromHwnd(windowHandle);
+            if (backdropSource != null)
+            {
+                backdropSource.AddHook(BackdropMessageHook);
+            }
             if (TrayAndHotkeyEnabled)
             {
                 hotkeySource = HwndSource.FromHwnd(windowHandle);
@@ -5656,6 +5693,102 @@ namespace Boostix
             {
                 // DWM corner attributes are optional on older Windows versions.
             }
+
+            UpdateGlassBackdrop();
+        }
+
+        /// <summary>
+        /// Puts the window on Windows 11 glass, or back on opaque petrol,
+        /// whenever High Contrast or the transparency effects switch changes.
+        /// </summary>
+        private void UpdateGlassBackdrop()
+        {
+            if (windowHandle == IntPtr.Zero)
+            {
+                return;
+            }
+            bool glass = WindowBackdrop.IsAvailable &&
+                WindowBackdrop.TryApply(windowHandle);
+            if (!glass && BoostixDesignTokens.GlassBackdrop)
+            {
+                WindowBackdrop.Remove(windowHandle);
+            }
+            if (glass == BoostixDesignTokens.GlassBackdrop)
+            {
+                return;
+            }
+
+            BoostixDesignTokens.GlassBackdrop = glass;
+            WindowChrome chrome = WindowChrome.GetWindowChrome(this);
+            if (chrome != null)
+            {
+                chrome.GlassFrameThickness = glass
+                    ? new Thickness(-1)
+                    : new Thickness(0);
+            }
+            if (glass)
+            {
+                Background = Brushes.Transparent;
+            }
+            else
+            {
+                SetResourceReference(
+                    BackgroundProperty,
+                    BoostixDesignTokens.BackgroundBrushKey);
+            }
+            UpdateWindowFrameShape();
+            ApplyRuntimeTheme();
+        }
+
+        private static void ApplyWindowTint(bool active)
+        {
+            Application application = Application.Current;
+            if (application != null)
+            {
+                BoostixDesignTokens.ApplyWindowTint(application.Resources, active);
+            }
+        }
+
+        /// <summary>
+        /// On glass the frame follows the 8 px corners DWM gives the window,
+        /// so no untinted acrylic shows in the corners.
+        /// </summary>
+        private void UpdateWindowFrameShape()
+        {
+            double radius = BoostixDesignTokens.GlassBackdrop ? 8 : 12;
+            if (windowFrame != null)
+            {
+                windowFrame.CornerRadius = new CornerRadius(radius);
+            }
+            if (windowRoot != null)
+            {
+                windowRoot.Clip = new RectangleGeometry(
+                    new Rect(
+                        0,
+                        0,
+                        Math.Max(0, windowRoot.ActualWidth),
+                        Math.Max(0, windowRoot.ActualHeight)),
+                    radius - 1,
+                    radius - 1);
+            }
+        }
+
+        private IntPtr BackdropMessageHook(
+            IntPtr window,
+            int message,
+            IntPtr wordParameter,
+            IntPtr longParameter,
+            ref bool handled)
+        {
+            // Windows broadcasts WM_SETTINGCHANGE when transparency effects
+            // are switched in Settings.
+            if (message == WmSettingChange)
+            {
+                Dispatcher.BeginInvoke(
+                    DispatcherPriority.Background,
+                    new Action(UpdateGlassBackdrop));
+            }
+            return IntPtr.Zero;
         }
 
         private IntPtr WindowMessageHook(
@@ -6221,6 +6354,11 @@ namespace Boostix
                 windowSource.RemoveHook(WindowMessageHook);
                 windowSource = null;
             }
+            if (backdropSource != null)
+            {
+                backdropSource.RemoveHook(BackdropMessageHook);
+                backdropSource = null;
+            }
             if (hotkeyRegistered)
             {
                 BoostHotkey.Unregister(windowHandle);
@@ -6565,19 +6703,19 @@ namespace Boostix
         }
 
         /// <summary>
-        /// Window/taskbar icon: the Boostix gauge mark on a graphite tile.
+        /// Window/taskbar icon: the Boostix gauge mark on a petrol tile.
         /// </summary>
         private static ImageSource BuildWindowIcon()
         {
             var group = new DrawingGroup();
             group.Children.Add(new GeometryDrawing(
-                BrushFrom("#FF22272D"),
-                new Pen(BrushFrom("#FF353C44"), 1),
+                BrushFrom("#FF0F4C5C"),
+                new Pen(BrushFrom("#FF21505D"), 1),
                 new RectangleGeometry(new Rect(1, 1, 30, 30), 8, 8)));
             var center = new Point(16, 18.5);
             group.Children.Add(new GeometryDrawing(
                 null,
-                new Pen(BrushFrom("#FF8A929C"), 2.2) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round },
+                new Pen(BrushFrom("#FF9FC0C6"), 2.2) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round },
                 IconArc(center, 9.5, -120, 55)));
             group.Children.Add(new GeometryDrawing(
                 null,
@@ -6586,7 +6724,7 @@ namespace Boostix
             double needle = 78 * Math.PI / 180;
             group.Children.Add(new GeometryDrawing(
                 null,
-                new Pen(BrushFrom("#FFEDEFF2"), 2.2) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round },
+                new Pen(BrushFrom("#FFEDF3F4"), 2.2) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round },
                 new LineGeometry(
                     center,
                     new Point(center.X + 8.7 * Math.Sin(needle), center.Y - 8.7 * Math.Cos(needle)))));

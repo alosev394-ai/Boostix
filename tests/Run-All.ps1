@@ -16,6 +16,7 @@ $requiredTests = @(
     'Test-ApplicationReliability.ps1',
     'Test-BackgroundImpactSafety.ps1',
     'Test-GameTargetProfiles.ps1',
+    'Test-GlassTheme.ps1',
     'Test-SessionGuard.ps1',
     'Test-SessionGuardIntegrationBoundary.ps1',
     'Test-SessionPowerPlan.ps1',

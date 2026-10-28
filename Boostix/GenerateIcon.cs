@@ -62,13 +62,13 @@ internal static class GenerateIcon
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
             graphics.Clear(Color.Transparent);
 
-            // Brand mark: a boost gauge on a graphite tile; the needle rests
-            // in the amber Boost zone.
+            // Brand mark: a boost gauge on a petrol tile; the needle rests
+            // in the lemon Boost zone.
             float scale = size / 256F;
             var bounds = new RectangleF(8 * scale, 8 * scale, 240 * scale, 240 * scale);
             using (GraphicsPath frame = RoundedRectangle(bounds, 56 * scale))
-            using (var background = new SolidBrush(Color.FromArgb(34, 39, 45)))
-            using (var edge = new Pen(Color.FromArgb(53, 60, 68), Math.Max(1F, 6F * scale)))
+            using (var background = new SolidBrush(Color.FromArgb(15, 76, 92)))
+            using (var edge = new Pen(Color.FromArgb(33, 80, 93), Math.Max(1F, 6F * scale)))
             {
                 graphics.FillPath(background, frame);
                 graphics.DrawPath(edge, frame);
@@ -78,10 +78,10 @@ internal static class GenerateIcon
             float centerY = 148F * scale;
             float radius = 78F * scale;
             var arcBounds = new RectangleF(centerX - radius, centerY - radius, radius * 2, radius * 2);
-            using (var scalePen = new Pen(Color.FromArgb(138, 146, 156), Math.Max(1.2F, 18F * scale)))
-            using (var zonePen = new Pen(Color.FromArgb(255, 160, 48), Math.Max(1.6F, 24F * scale)))
-            using (var needlePen = new Pen(Color.FromArgb(237, 239, 242), Math.Max(1.4F, 18F * scale)))
-            using (var hub = new SolidBrush(Color.FromArgb(255, 160, 48)))
+            using (var scalePen = new Pen(Color.FromArgb(159, 192, 198), Math.Max(1.2F, 18F * scale)))
+            using (var zonePen = new Pen(Color.FromArgb(255, 244, 79), Math.Max(1.6F, 24F * scale)))
+            using (var needlePen = new Pen(Color.FromArgb(237, 243, 244), Math.Max(1.4F, 18F * scale)))
+            using (var hub = new SolidBrush(Color.FromArgb(255, 244, 79)))
             {
                 scalePen.StartCap = LineCap.Round;
                 scalePen.EndCap = LineCap.Round;

@@ -549,7 +549,8 @@ namespace Boostix
 
             HorizontalAlignment = HorizontalAlignment.Stretch;
             VerticalAlignment = VerticalAlignment.Stretch;
-            Background = new SolidColorBrush(BackgroundColor);
+            // The window frame underneath paints the petrol tint or glass.
+            Background = new SolidColorBrush(BoostixDesignTokens.WithAlpha(BackgroundColor, 0));
             Focusable = true;
             KeyboardNavigation.SetTabNavigation(this, KeyboardNavigationMode.Cycle);
             KeyboardNavigation.SetControlTabNavigation(this, KeyboardNavigationMode.Cycle);
@@ -746,8 +747,7 @@ namespace Boostix
         /// </summary>
         internal void RefreshTheme()
         {
-            Background = new SolidColorBrush(BackgroundColor);
-            sidebar.Background = new SolidColorBrush(SidebarColor);
+            Background = new SolidColorBrush(BoostixDesignTokens.WithAlpha(BackgroundColor, 0));
             sidebar.BorderBrush = new SolidColorBrush(DividerColor);
             footerBar.BorderBrush = new SolidColorBrush(DividerColor);
             if (headerTitle != null)
@@ -1060,10 +1060,13 @@ namespace Boostix
         {
             var host = new Border
             {
-                Background = new SolidColorBrush(SidebarColor),
                 BorderBrush = new SolidColorBrush(DividerColor),
                 BorderThickness = new Thickness(0, 0, 1, 0)
             };
+            // Translucent over Windows 11 glass, opaque petrol elsewhere.
+            host.SetResourceReference(
+                Border.BackgroundProperty,
+                BoostixDesignTokens.SidebarTintBrushKey);
             AutomationProperties.SetAutomationId(host, "Boostix.Sidebar");
             var layout = new Grid();
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
