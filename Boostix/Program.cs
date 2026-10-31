@@ -582,7 +582,11 @@ namespace Boostix
                     ex);
             }
             demoMode = HasLaunchArgument(launchArguments, "--demo");
-            startInTray = HasLaunchArgument(launchArguments, AutostartRegistration.TrayArgument);
+            if (demoMode)
+            {
+                BoostSessionReportStore.DisablePersistence();
+            }
+            startInTray =HasLaunchArgument(launchArguments, AutostartRegistration.TrayArgument);
             safeMode = HasLaunchArgument(launchArguments, "--safe-mode");
             updateHealthProbe = HasLaunchArgument(
                 launchArguments,

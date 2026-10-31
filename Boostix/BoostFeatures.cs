@@ -1304,6 +1304,22 @@ namespace Boostix
     {
         private const int MaxReports = 20;
         private const int MaxReportBytes = 1024 * 1024;
+        private static volatile bool persistenceDisabled;
+
+        /// <summary>
+        /// Demo and test launches keep their sessions in memory. They must not
+        /// add to the user's real history (only 20 reports are kept) or
+        /// finalize the user's unfinished session as interrupted.
+        /// </summary>
+        public static void DisablePersistence()
+        {
+            persistenceDisabled = true;
+        }
+
+        public static bool PersistenceDisabled
+        {
+            get { return persistenceDisabled; }
+        }
 
         public static string StateDirectory
         {
@@ -1337,7 +1353,7 @@ namespace Boostix
 
         public static void Save(BoostSessionReport report)
         {
-            if (report == null)
+            if (report == null || persistenceDisabled)
             {
                 return;
             }
@@ -1360,6 +1376,10 @@ namespace Boostix
 
         public static BoostSessionReport LoadLast()
         {
+            if (persistenceDisabled)
+            {
+                return null;
+            }
             BoostSessionReport report = LoadKnownReport(
                 StateDirectory,
                 "last-session.report");

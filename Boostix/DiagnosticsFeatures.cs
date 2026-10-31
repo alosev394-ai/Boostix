@@ -783,7 +783,7 @@ namespace Boostix
             int count = Math.Max(
                 0,
                 Math.Min(MaximumSessionCount, maximumCount));
-            if (count == 0)
+            if (count == 0 || BoostSessionReportStore.PersistenceDisabled)
             {
                 return new List<BoostSessionReport>();
             }
