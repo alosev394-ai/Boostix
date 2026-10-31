@@ -135,7 +135,9 @@ if ([string]$choose.Invoke($null, @(, [string[]]@('--demo', '--lang=en'))) -cne 
 }
 
 # --- Start-up, restart and update wiring. ---
-$program = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\Program.cs'))
+# A Windows checkout (core.autocrlf, as on CI) has CRLF; the multi-line
+# contracts below are written with `n.
+$program = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\Program.cs')).Replace("`r`n", "`n")
 $update = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\UpdateFlow.cs'))
 $installer = [IO.File]::ReadAllText((Join-Path $projectRoot 'BoostixInstaller\Program.cs'))
 $overlay = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\BoostCenterOverlay.cs'))
