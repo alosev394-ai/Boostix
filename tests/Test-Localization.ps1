@@ -179,6 +179,43 @@ foreach ($item in $highlights) {
     }
 }
 
+# --- Session reports follow the interface language. ---
+# A fragment of a Russian message stops matching once both sides are
+# translated, so runtime texts are never searched for a translated piece.
+foreach ($file in $sourceFiles) {
+    if ([regex]::IsMatch([IO.File]::ReadAllText($file.FullName), '\.(IndexOf|Contains|StartsWith|EndsWith)\(\s*L\.T\(')) {
+        throw "$($file.Name) searches a runtime text for a translated fragment."
+    }
+}
+# Page-file advice comes from SessionGuard in English; the report shows it in
+# the interface language.
+$describePagefile = $assembly.GetType('Boostix.BoostWindow', $true).GetMethod('DescribePagefileRecommendation', $flags)
+if (-not $describePagefile) {
+    throw 'Page-file advice has no translated description for the session report.'
+}
+$pagefileCodes = [Enum]::GetValues($assembly.GetType('Boostix.PagefileRecommendationCode', $true))
+foreach ($language in 'ru', 'en') {
+    try {
+        [void]$setLanguage.Invoke($null, @($language))
+        foreach ($code in $pagefileCodes) {
+            $advice = [string]$describePagefile.Invoke($null, @($code))
+            if (-not $advice -or $cyrillic.IsMatch($advice) -ne ($language -eq 'ru')) {
+                throw "Page-file advice for $code is not in '$language': $advice"
+            }
+        }
+    }
+    finally {
+        [void]$setLanguage.Invoke($null, @('ru'))
+    }
+}
+if ($program -notmatch 'RecordSessionAction\(\s*L\.T\("[^"]+"\),\s*DescribePagefileRecommendation\(assessment\.Recommendation\)') {
+    throw 'The page-file session action does not use the translated advice.'
+}
+# GameTargetService explains a lost target in English for the diagnostics log.
+if ($program.Contains('NotifySelectedTargetEnded(generation, targetError);')) {
+    throw 'The session report shows the internal English target error.'
+}
+
 # --- An English launch shows English. ---
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes

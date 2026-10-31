@@ -66,6 +66,32 @@ if ($priorityCatch -lt 0 -or
     throw 'A denied target priority is recorded on every maintenance tick instead of once per target.'
 }
 
+# A game that sets its own priority (CS2 back to Normal, Dota 2 to High) is
+# left alone for the rest of the session. Raising it again on every return to
+# the game fought the game and filled one CS2 report with nine pairs of
+# "external change preserved" and "Normal -> AboveNormal".
+$restoreStart = $program.IndexOf(
+    'private void RestoreOwnedTargetPriorities()',
+    [StringComparison]::Ordinal)
+$restoreEnd = $program.IndexOf(
+    'private int ReadActiveMaintenanceGeneration()',
+    [StringComparison]::Ordinal)
+if ($restoreStart -lt 0 -or $restoreEnd -le $restoreStart) {
+    throw 'The priority restore source boundary was not found.'
+}
+$restore = $program.Substring($restoreStart, $restoreEnd - $restoreStart)
+if (-not $restore.Contains('selfManagedPriorityTargets.Add(')) {
+    throw 'An external priority change is not remembered for the session.'
+}
+$selfManagedAt = $maintenance.IndexOf('selfManagedPriorityTargets.Contains(', [StringComparison]::Ordinal)
+$raiseAt = $maintenance.IndexOf('target.PriorityClass = ProcessPriorityClass.AboveNormal;', [StringComparison]::Ordinal)
+if ($selfManagedAt -lt 0 -or $raiseAt -lt 0 -or $selfManagedAt -gt $raiseAt) {
+    throw 'Boost raises the priority of a game that manages its own priority.'
+}
+if (-not [regex]::IsMatch($program, 'priorityFailureTargetKey = null;\s*selfManagedPriorityTargets\.Clear\(\);')) {
+    throw 'The self-managed priority list is not reset when a session starts.'
+}
+
 # A daylight-saving shift must not expire or extend the Boost start window,
 # and a failed script launch must leave a diagnosable crash-log entry.
 foreach ($required in @(

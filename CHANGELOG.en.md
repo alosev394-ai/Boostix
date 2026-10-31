@@ -3,6 +3,19 @@
 The English interface arrived in 3.2.0. Earlier versions are described in
 [`CHANGELOG.md`](CHANGELOG.md), in Russian.
 
+## 3.2.1 — 2026-11-01
+
+### Fixes
+
+- Boost no longer fights a game over its priority. When a game sets its own
+  priority, as CS2 and Dota 2 do, Boost leaves it alone until the session
+  ends instead of raising it again every time you return to the game.
+- The page file advice in the session report is in the interface language
+  instead of English. So is the reason a game dropped out of the session.
+- In the English interface every launch added a note to the crash log saying
+  that no saved FPS measurement exists. That is not a crash, and the note is
+  gone.
+
 ## 3.2.0 — 2026-10-31
 
 ### New

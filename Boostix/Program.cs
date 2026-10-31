@@ -503,6 +503,11 @@ namespace Boostix
         private PerformanceCaptureAttemptResult lastCaptureAttempt;
         private readonly Dictionary<int, TrackedTargetPriority> trackedTargetPriorities =
             new Dictionary<int, TrackedTargetPriority>();
+        // Games that changed their own priority during this session. Boost
+        // leaves them alone until the session ends instead of raising them
+        // again on every return to the game.
+        private readonly HashSet<string> selfManagedPriorityTargets =
+            new HashSet<string>(StringComparer.Ordinal);
         private readonly GameTargetService gameTargetService;
         private readonly GameProfileStore gameProfileStore;
         private readonly PerformanceProofCheckpointStore proofCheckpointStore;
@@ -3030,9 +3035,8 @@ namespace Boostix
                         assessment.Summary + " " +
                         assessment.RecommendedAction);
                     RecordSessionAction(
-                        "PAGEFILE GUARD",
-                        assessment.Summary + " " +
-                        assessment.RecommendedAction,
+                        L.T("ФАЙЛ ПОДКАЧКИ"),
+                        DescribePagefileRecommendation(assessment.Recommendation),
                         BoostActionOutcome.Skipped);
                 }
             }
@@ -3484,15 +3488,21 @@ namespace Boostix
 
             GameTargetIdentity exactTarget = selectedTarget;
             GameProcessSnapshot targetSnapshot;
-            string targetError = L.T("Выбранная игра больше не запущена.");
+            string targetError = "No game target is selected.";
             if (exactTarget == null ||
                 !gameTargetService.TryResolve(
                     exactTarget,
                     out targetSnapshot,
                     out targetError))
             {
+                // GameTargetService explains the loss in English for the
+                // diagnostics log; the session report stays in the interface
+                // language.
+                AppendActiveBoostLog("Selected target is no longer available: " + targetError);
                 RestoreOwnedTargetPriorities();
-                NotifySelectedTargetEnded(generation, targetError);
+                NotifySelectedTargetEnded(
+                    generation,
+                    L.T("Выбранная игра больше не запущена."));
                 return;
             }
 
@@ -3536,7 +3546,9 @@ namespace Boostix
                 bool alreadyTracked;
                 lock (activeMaintenanceSync)
                 {
-                    if (!IsActiveMaintenanceGeneration(generation))
+                    if (!IsActiveMaintenanceGeneration(generation) ||
+                        selfManagedPriorityTargets.Contains(
+                            PriorityTargetKey(processId, startTimeUtc)))
                     {
                         return;
                     }
@@ -3921,6 +3933,28 @@ namespace Boostix
                 System.Globalization.CultureInfo.InvariantCulture) + " bytes";
         }
 
+        /// <summary>
+        /// PagefileAdvisor keeps its English text for the diagnostics log; the
+        /// session report shows the same advice in the interface language.
+        /// </summary>
+        internal static string DescribePagefileRecommendation(
+            PagefileRecommendationCode recommendation)
+        {
+            switch (recommendation)
+            {
+                case PagefileRecommendationCode.EnableSystemManaged:
+                    return L.T("Файл подкачки Windows выключен. Включите его с размером по выбору системы и перезагрузите компьютер.");
+                case PagefileRecommendationCode.FreeSystemDriveSpace:
+                    return L.T("На системном диске мало места: в тяжёлой сцене Windows может упереться в лимит памяти. Освободите место перед долгой игрой.");
+                case PagefileRecommendationCode.PreferSystemManaged:
+                    return L.T("У файла подкачки задан постоянный размер, и в тяжёлых сценах Windows может упереться в лимит памяти. Надёжнее оставить размер по выбору системы.");
+                case PagefileRecommendationCode.UnableToAssess:
+                    return L.T("Не удалось узнать настройку файла подкачки. Проверьте её в параметрах виртуальной памяти Windows.");
+                default:
+                    return L.T("Файл подкачки настроен системой, места на диске хватает.");
+            }
+        }
+
         private static string FormatMemoryCompact(long bytes)
         {
             if (bytes <= 0)
@@ -3956,9 +3990,15 @@ namespace Boostix
                     ProcessPriorityClass current = process.PriorityClass;
                     if (current != ProcessPriorityClass.AboveNormal)
                     {
+                        lock (activeMaintenanceSync)
+                        {
+                            selfManagedPriorityTargets.Add(
+                                PriorityTargetKey(item.ProcessId, item.StartTimeUtc));
+                        }
                         RecordSessionAction(
                             item.ProcessName + L.T(" — ПРИОРИТЕТ"),
-                            L.T("Внешнее изменение ") + current + L.T(" сохранено; Boost его не перезаписал."),
+                            L.T("Игра сама сменила приоритет на ") + current +
+                            L.T(". Boost больше не меняет его до конца сессии."),
                             BoostActionOutcome.ExternalOverridePreserved);
                         continue;
                     }
@@ -3980,6 +4020,12 @@ namespace Boostix
                     }
                 }
             }
+        }
+
+        private static string PriorityTargetKey(int processId, DateTime startTimeUtc)
+        {
+            return processId.ToString(CultureInfo.InvariantCulture) + ":" +
+                startTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture);
         }
 
         private int ReadActiveMaintenanceGeneration()
@@ -4046,6 +4092,7 @@ namespace Boostix
             lock (activeMaintenanceSync)
             {
                 priorityFailureTargetKey = null;
+                selfManagedPriorityTargets.Clear();
             }
             currentSession.AddAction(
                 L.T("ПАМЯТЬ ДО ЗАПУСКА"),
@@ -6539,9 +6586,10 @@ namespace Boostix
                 proofCoordinator = restoredProof;
             }
             else if (!string.IsNullOrWhiteSpace(proofLoadError) &&
-                     proofLoadError.IndexOf(
-                         L.T("не найден"),
-                         StringComparison.OrdinalIgnoreCase) < 0)
+                     !string.Equals(
+                         proofLoadError,
+                         L.T("Сохранённый замер FPS не найден."),
+                         StringComparison.Ordinal))
             {
                 CrashLog.Write(
                     "Proof Mode checkpoint was not restored: " + proofLoadError,

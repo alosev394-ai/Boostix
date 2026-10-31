@@ -52,7 +52,7 @@ Windows 10 окно сплошное, тёмно-бирюзовое.
 
 ## Установка
 
-Скачайте `Boostix-Setup-3.2.0.exe` со страницы релиза и сверьте SHA-256 с
+Скачайте `Boostix-Setup-3.2.1.exe` со страницы релиза и сверьте SHA-256 с
 `SHA256SUMS.txt`. Дальше Boostix обновляется сам.
 
 Файлы Boostix пока **не подписаны сертификатом Authenticode**, поэтому Windows
@@ -77,8 +77,8 @@ Visual C++ runtime для поставляемого PresentMon.
 Артефакты сборки:
 
 - `dist\Boostix.exe`;
-- `dist\Boostix-Setup-3.2.0.exe` и `dist\Boostix-Setup-Latest.exe`;
-- `dist\MajesticBoost-Setup-3.2.0.exe` — технический мост обновления старых
+- `dist\Boostix-Setup-3.2.1.exe` и `dist\Boostix-Setup-Latest.exe`;
+- `dist\MajesticBoost-Setup-3.2.1.exe` — технический мост обновления старых
   установок 1.3–1.9; установленный продукт остаётся Boostix.
 
 Сборка не готова к публикации, если любой обязательный `Test-*.ps1` пропущен или
@@ -109,6 +109,7 @@ Boost); поиск причины вылета опирается на журн�
 
 ## Документация
 
+- [Примечания к выпуску 3.2.1](release-notes-3.2.1.md)
 - [Примечания к выпуску 3.2.0](release-notes-3.2.0.md)
 - [Примечания к выпуску 3.1.0](release-notes-3.1.0.md)
 - [Примечания к выпуску 3.0.0](release-notes-3.0.0.md)

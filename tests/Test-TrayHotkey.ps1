@@ -54,7 +54,21 @@ public static class BoostixHotkeyInput
 {
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
+    [DllImport("user32.dll")]
+    private static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint key);
+    [DllImport("user32.dll")]
+    private static extern bool UnregisterHotKey(IntPtr window, int id);
     private const uint KeyUp = 0x0002;
+    public static bool IsControlAltBFree()
+    {
+        const int probeId = 0xB0B;
+        if (!RegisterHotKey(IntPtr.Zero, probeId, 0x0001 | 0x0002, 0x42))
+        {
+            return false;
+        }
+        UnregisterHotKey(IntPtr.Zero, probeId);
+        return true;
+    }
     public static void PressControlAltB()
     {
         keybd_event(0x11, 0, 0, UIntPtr.Zero);
@@ -86,6 +100,12 @@ function Wait-ForBoostName {
     return $false
 }
 
+# A global hotkey goes to whoever registered it first. When the developer's
+# own Boostix holds Ctrl+Alt+B, pressing it would switch Boost on and off in
+# that real copy (it did once: a two-second Manual session with the test
+# window as the game), so the press is skipped. CI has no other copy.
+$hotkeyFree = [BoostixHotkeyInput]::IsControlAltBFree()
+
 $process = Start-Process -FilePath $ApplicationPath -PassThru -ArgumentList @(
     '--skip-setup',
     '--demo',
@@ -106,14 +126,19 @@ try {
         throw 'The Boost control did not become ready.'
     }
 
-    # Global hotkeys fire regardless of which window has focus.
-    [BoostixHotkeyInput]::PressControlAltB()
-    if (-not (Wait-ForBoostName -Window $window -Prefix $deactivatePrefix -TimeoutSeconds 8)) {
-        throw 'Ctrl+Alt+B did not switch Boost on (the shortcut may be taken by another program).'
+    if ($hotkeyFree) {
+        # Global hotkeys fire regardless of which window has focus.
+        [BoostixHotkeyInput]::PressControlAltB()
+        if (-not (Wait-ForBoostName -Window $window -Prefix $deactivatePrefix -TimeoutSeconds 8)) {
+            throw 'Ctrl+Alt+B did not switch Boost on.'
+        }
+        [BoostixHotkeyInput]::PressControlAltB()
+        if (-not (Wait-ForBoostName -Window $window -Prefix $activatePrefix -TimeoutSeconds 8)) {
+            throw 'Ctrl+Alt+B did not switch Boost off.'
+        }
     }
-    [BoostixHotkeyInput]::PressControlAltB()
-    if (-not (Wait-ForBoostName -Window $window -Prefix $activatePrefix -TimeoutSeconds 8)) {
-        throw 'Ctrl+Alt+B did not switch Boost off.'
+    else {
+        Write-Warning 'Ctrl+Alt+B belongs to another program (usually a running Boostix), so it was not pressed. Close that program to test the shortcut itself.'
     }
 
     # The two new settings sit after the existing ones.
@@ -147,4 +172,9 @@ finally {
     }
 }
 
-Write-Host 'Tray/hotkey test passed: Ctrl+Alt+B switches Boost on and off, and the hotkey setting is on by default.' -ForegroundColor Green
+if ($hotkeyFree) {
+    Write-Host 'Tray/hotkey test passed: Ctrl+Alt+B switches Boost on and off, and the hotkey setting is on by default.' -ForegroundColor Green
+}
+else {
+    Write-Host 'Tray/hotkey test passed without pressing Ctrl+Alt+B (held by another program); the hotkey setting is on by default.' -ForegroundColor Yellow
+}
