@@ -140,12 +140,12 @@ namespace Boostix
             string normalizedContext = (contextKey ?? string.Empty).Trim();
             if (!IsVersionedDigest(normalizedTarget, "target-v"))
             {
-                error = "Не удалось зафиксировать точную идентичность исполняемого файла.";
+                error = L.T("Не удалось зафиксировать точную идентичность исполняемого файла.");
                 return false;
             }
             if (!IsVersionedDigest(normalizedContext, "proof-v"))
             {
-                error = "Не удалось зафиксировать точный сценарий измерения.";
+                error = L.T("Не удалось зафиксировать точный сценарий измерения.");
                 return false;
             }
 
@@ -184,7 +184,7 @@ namespace Boostix
                 {
                     return CreateTransitionLocked(
                         PerformanceProofSubmissionStatus.TerminalState,
-                        "Этот замер FPS уже завершён.");
+                        L.T("Этот замер FPS уже завершён."));
                 }
 
                 string expectedPairId = stepIndex < 2
@@ -198,14 +198,14 @@ namespace Boostix
                 {
                     return CreateTransitionLocked(
                         PerformanceProofSubmissionStatus.Rejected,
-                        "Результат относится к другому этапу или паре. Текущий этап не изменён.");
+                        L.T("Результат относится к другому этапу или паре. Текущий этап не изменён."));
                 }
 
                 if (run == null)
                 {
                     return CreateTransitionLocked(
                         PerformanceProofSubmissionStatus.Rejected,
-                        "Замер не содержит данных. Повторите текущий этап.");
+                        L.T("Замер не содержит данных. Повторите текущий этап."));
                 }
 
                 if (!string.Equals(
@@ -215,7 +215,7 @@ namespace Boostix
                 {
                     return FailLocked(
                         PerformanceProofCoordinatorFailure.TargetMismatch,
-                        "Игра обновилась. Замер FPS остановлен.");
+                        L.T("Игра обновилась. Замер FPS остановлен."));
                 }
                 if (!string.Equals(
                         run.ContextKey,
@@ -224,13 +224,13 @@ namespace Boostix
                 {
                     return FailLocked(
                         PerformanceProofCoordinatorFailure.ContextMismatch,
-                        "Настройки экрана изменились. Замер FPS остановлен.");
+                        L.T("Настройки экрана изменились. Замер FPS остановлен."));
                 }
                 if (run.Variant != ExpectedVariants[stepIndex])
                 {
                     return FailLocked(
                         PerformanceProofCoordinatorFailure.UnexpectedVariant,
-                        "Состояние Boost не соответствует текущему этапу. Тест остановлен.");
+                        L.T("Состояние Boost не соответствует текущему этапу. Тест остановлен."));
                 }
 
                 string runId = (run.RunId ?? string.Empty).Trim();
@@ -238,7 +238,7 @@ namespace Boostix
                 {
                     return CreateTransitionLocked(
                         PerformanceProofSubmissionStatus.Rejected,
-                        "Идентификатор замера недействителен. Повторите текущий этап.");
+                        L.T("Идентификатор замера недействителен. Повторите текущий этап."));
                 }
                 foreach (PerformanceProofRun existing in runs)
                 {
@@ -246,7 +246,7 @@ namespace Boostix
                     {
                         return FailLocked(
                             PerformanceProofCoordinatorFailure.DuplicateRun,
-                            "Повторно передан уже учтённый замер. Тест остановлен.");
+                            L.T("Повторно передан уже учтённый замер. Тест остановлен."));
                     }
                 }
 
@@ -266,14 +266,14 @@ namespace Boostix
                 {
                     return CreateTransitionLocked(
                         PerformanceProofSubmissionStatus.Rejected,
-                        "Время замера нарушает порядок этапов. Повторите текущий этап.");
+                        L.T("Время замера нарушает порядок этапов. Повторите текущий этап."));
                 }
 
                 runs.Add(frozen);
                 stepIndex++;
                 if (stepIndex < TotalStepCount)
                 {
-                    message = "Проход засчитан. Подготовьтесь к следующей минуте.";
+                    message = L.T("Проход засчитан. Подготовьтесь к следующей минуте.");
                     return CreateTransitionLocked(
                         PerformanceProofSubmissionStatus.Accepted,
                         message);
@@ -286,7 +286,7 @@ namespace Boostix
                 {
                     return FailLocked(
                         PerformanceProofCoordinatorFailure.ComparisonFailed,
-                        "Финальное сравнение не прошло проверку целостности.");
+                        L.T("Финальное сравнение не прошло проверку целостности."));
                 }
 
                 state = PerformanceProofCoordinatorState.Completed;
@@ -306,13 +306,13 @@ namespace Boostix
                 {
                     return CreateTransitionLocked(
                         PerformanceProofSubmissionStatus.TerminalState,
-                        "Этот замер FPS уже завершён.");
+                        L.T("Этот замер FPS уже завершён."));
                 }
                 state = PerformanceProofCoordinatorState.Cancelled;
                 failure = PerformanceProofCoordinatorFailure.None;
                 message = SanitizeMessage(
                     reason,
-                    "Замер FPS отменён.");
+                    L.T("Замер FPS отменён."));
                 return CreateTransitionLocked(
                     PerformanceProofSubmissionStatus.TerminalState,
                     message);
@@ -337,7 +337,7 @@ namespace Boostix
             if (string.IsNullOrWhiteSpace(checkpoint) ||
                 checkpoint.Length > MaximumCheckpointTextLength)
             {
-                error = "Чекпоинт доказательного теста отсутствует или слишком велик.";
+                error = L.T("Чекпоинт доказательного теста отсутствует или слишком велик.");
                 return false;
             }
 
@@ -350,20 +350,20 @@ namespace Boostix
                     string.IsNullOrEmpty(lines[1]) ||
                     string.IsNullOrEmpty(lines[2]))
                 {
-                    error = "Формат чекпоинта доказательного теста повреждён.";
+                    error = L.T("Формат чекпоинта доказательного теста повреждён.");
                     return false;
                 }
 
                 byte[] payload = Convert.FromBase64String(lines[1]);
                 if (payload.Length == 0 || payload.Length > MaximumCheckpointBytes)
                 {
-                    error = "Размер чекпоинта доказательного теста недопустим.";
+                    error = L.T("Размер чекпоинта доказательного теста недопустим.");
                     return false;
                 }
                 byte[] expectedHash = ParseSha256(lines[2]);
                 if (expectedHash == null)
                 {
-                    error = "Контрольная сумма чекпоинта недействительна.";
+                    error = L.T("Контрольная сумма чекпоинта недействительна.");
                     return false;
                 }
                 byte[] actualHash;
@@ -373,7 +373,7 @@ namespace Boostix
                 }
                 if (!FixedTimeEquals(expectedHash, actualHash))
                 {
-                    error = "Контрольная сумма чекпоинта не совпадает.";
+                    error = L.T("Контрольная сумма чекпоинта не совпадает.");
                     return false;
                 }
 
@@ -390,7 +390,7 @@ namespace Boostix
             catch
             {
                 coordinator = null;
-                error = "Чекпоинт доказательного теста повреждён.";
+                error = L.T("Чекпоинт доказательного теста повреждён.");
                 return false;
             }
         }
@@ -430,8 +430,8 @@ namespace Boostix
                 ExpectedVariant = variant,
                 SequenceLabel = firstPair ? "A→B" : "B→A",
                 Instruction = variant == PerformanceProofVariant.Boost
-                    ? "Включите Boost, оставайтесь в той же сцене и запустите минутный проход."
-                    : "Выключите Boost, оставайтесь в той же сцене и запустите минутный проход.",
+                    ? L.T("Включите Boost, оставайтесь в той же сцене и запустите минутный проход.")
+                    : L.T("Выключите Boost, оставайтесь в той же сцене и запустите минутный проход."),
                 TargetIdentity = targetIdentity,
                 ContextKey = contextKey
             };
@@ -460,7 +460,7 @@ namespace Boostix
         {
             state = PerformanceProofCoordinatorState.Failed;
             failure = failureCode;
-            message = SanitizeMessage(failureMessage, "Замер FPS остановлен.");
+            message = SanitizeMessage(failureMessage, L.T("Замер FPS остановлен."));
             return CreateTransitionLocked(
                 PerformanceProofSubmissionStatus.Failed,
                 message);
@@ -495,7 +495,7 @@ namespace Boostix
             if (run.FrameTimesMs == null ||
                 run.FrameTimesMs.Count > MaximumFramesPerRun)
             {
-                error = "Количество кадров в замере недопустимо.";
+                error = L.T("Количество кадров в замере недопустимо.");
                 return false;
             }
             if (run.CapturedUtc == DateTime.MinValue ||
@@ -505,7 +505,7 @@ namespace Boostix
                 run.CaptureDurationSeconds < PerformanceProofService.MinimumDurationSeconds ||
                 run.CaptureDurationSeconds > MaximumCaptureDurationSeconds)
             {
-                error = "Замер должен длиться не менее 50 секунд.";
+                error = L.T("Замер должен длиться не менее 50 секунд.");
                 return false;
             }
 
@@ -519,7 +519,7 @@ namespace Boostix
             }
             catch
             {
-                error = "Данные кадров изменились во время проверки. Повторите этап.";
+                error = L.T("Данные кадров изменились во время проверки. Повторите этап.");
                 return false;
             }
 
@@ -527,7 +527,7 @@ namespace Boostix
                 PerformanceProofService.CalculateMetrics(frameCopy);
             if (metrics.FrameCount < PerformanceProofService.MinimumFramesPerRun)
             {
-                error = "В замере недостаточно корректных кадров. Повторите этап.";
+                error = L.T("В замере недостаточно корректных кадров. Повторите этап.");
                 return false;
             }
 
@@ -545,7 +545,7 @@ namespace Boostix
             if (observedDurationMilliseconds <
                 PerformanceProofService.MinimumDurationSeconds * 1000.0)
             {
-                error = "Покадровые данные покрывают менее 50 секунд. Повторите этап.";
+                error = L.T("Покадровые данные покрывают менее 50 секунд. Повторите этап.");
                 return false;
             }
 
@@ -725,7 +725,7 @@ namespace Boostix
 
         private bool TryValidateRestoredState(out string error)
         {
-            error = "Чекпоинт доказательного теста не прошёл проверку целостности.";
+            error = L.T("Чекпоинт доказательного теста не прошёл проверку целостности.");
             if (!IsProofIdentifier(proofId) ||
                 !string.Equals(
                     firstPairId,
@@ -1099,7 +1099,7 @@ namespace Boostix
             error = string.Empty;
             if (coordinator == null)
             {
-                error = "Состояние доказательного теста отсутствует.";
+                error = L.T("Состояние доказательного теста отсутствует.");
                 return false;
             }
 
@@ -1112,7 +1112,7 @@ namespace Boostix
                     string directory = Path.GetDirectoryName(checkpointPath);
                     if (string.IsNullOrWhiteSpace(directory))
                     {
-                        error = "Папка чекпоинта недоступна.";
+                        error = L.T("Папка чекпоинта недоступна.");
                         return false;
                     }
                     EnsureSafeDirectory(directory);
@@ -1120,7 +1120,7 @@ namespace Boostix
                         (File.GetAttributes(checkpointPath) &
                          FileAttributes.ReparsePoint) != 0)
                     {
-                        error = "Файл чекпоинта не прошёл проверку безопасности.";
+                        error = L.T("Файл чекпоинта не прошёл проверку безопасности.");
                         return false;
                     }
 
@@ -1129,7 +1129,7 @@ namespace Boostix
                     if (bytes.Length >
                         PerformanceProofCoordinator.MaximumCheckpointTextLength)
                     {
-                        error = "Чекпоинт доказательного теста слишком велик.";
+                        error = L.T("Чекпоинт доказательного теста слишком велик.");
                         return false;
                     }
 
@@ -1167,7 +1167,7 @@ namespace Boostix
                 }
                 catch (Exception ex)
                 {
-                    error = "Не удалось сохранить чекпоинт: " + ex.GetType().Name + ".";
+                    error = L.T("Не удалось сохранить чекпоинт: ") + ex.GetType().Name + ".";
                     return false;
                 }
                 finally
@@ -1192,14 +1192,14 @@ namespace Boostix
                     if (string.IsNullOrWhiteSpace(directory) ||
                         !Directory.Exists(directory))
                     {
-                        error = "Сохранённый замер FPS не найден.";
+                        error = L.T("Сохранённый замер FPS не найден.");
                         return false;
                     }
                     EnsureSafeDirectory(directory);
                     var file = new FileInfo(checkpointPath);
                     if (!file.Exists)
                     {
-                        error = "Сохранённый замер FPS не найден.";
+                        error = L.T("Сохранённый замер FPS не найден.");
                         return false;
                     }
                     if ((file.Attributes & FileAttributes.ReparsePoint) != 0 ||
@@ -1207,7 +1207,7 @@ namespace Boostix
                         file.Length >
                             PerformanceProofCoordinator.MaximumCheckpointTextLength)
                     {
-                        error = "Файл чекпоинта не прошёл проверку безопасности.";
+                        error = L.T("Файл чекпоинта не прошёл проверку безопасности.");
                         return false;
                     }
                     string content = File.ReadAllText(
@@ -1220,7 +1220,7 @@ namespace Boostix
                 }
                 catch (Exception ex)
                 {
-                    error = "Не удалось прочитать чекпоинт: " + ex.GetType().Name + ".";
+                    error = L.T("Не удалось прочитать чекпоинт: ") + ex.GetType().Name + ".";
                     return false;
                 }
             }

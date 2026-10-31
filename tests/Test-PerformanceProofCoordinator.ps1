@@ -41,7 +41,7 @@ foreach ($contract in @(
 }
 foreach ($contract in @(
     'BuildPerformanceProofCard(',
-    'string proofButtonText = "',
+    'string proofButtonText = L.T("',
     'Boostix.Center.CancelProof'
 )) {
     if (-not $centerText.Contains($contract)) {
@@ -682,7 +682,9 @@ try {
         [Text.UTF8Encoding]::new($true))
 
     $compilerOutput = & $compiler /nologo /warn:4 /target:exe `
-        "/out:$outputPath" $proofSource $coordinatorSource $harnessPath 2>&1
+        "/out:$outputPath" $proofSource $coordinatorSource $harnessPath `
+        (Join-Path $projectRoot 'Boostix\Localization.cs') `
+        (Join-Path $projectRoot 'Boostix\LocalizationEnglish.cs') 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Coordinator harness compilation failed:`n$($compilerOutput -join [Environment]::NewLine)"
     }

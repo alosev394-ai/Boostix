@@ -598,6 +598,8 @@ try {
         "/out:$outputPath",
         $proofSource,
         $crashSource,
+        (Join-Path $projectRoot 'Boostix\Localization.cs'),
+        (Join-Path $projectRoot 'Boostix\LocalizationEnglish.cs'),
         $harnessPath
     ) 2>&1
     if ($LASTEXITCODE -ne 0) {

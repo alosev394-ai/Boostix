@@ -75,6 +75,10 @@ namespace Boostix
         public bool KeepNvidiaOverlay;
         public bool GlobalHotkey;
         public bool MinimizeToTray;
+        public bool GameSignals;
+        public bool StartWithWindows;
+        public string Theme;
+        public string Language;
 
         public BoostCenterSettings Clone()
         {
@@ -90,7 +94,11 @@ namespace Boostix
                 KeepWallpaper = KeepWallpaper,
                 KeepNvidiaOverlay = KeepNvidiaOverlay,
                 GlobalHotkey = GlobalHotkey,
-                MinimizeToTray = MinimizeToTray
+                MinimizeToTray = MinimizeToTray,
+                GameSignals = GameSignals,
+                StartWithWindows = StartWithWindows,
+                Theme = Theme,
+                Language = Language
             };
         }
     }
@@ -787,10 +795,10 @@ namespace Boostix
                 report.Checks.Add(new BoostCheckResult
                 {
                     Id = "payload",
-                    Title = "КОМПОНЕНТЫ BOOST",
+                    Title = L.T("КОМПОНЕНТЫ BOOST"),
                     Detail = missing.Count == 0
-                        ? "Все необходимые компоненты на месте."
-                        : "Не найдены: " + string.Join(", ", missing.ToArray()),
+                        ? L.T("Все необходимые компоненты на месте.")
+                        : L.T("Не найдены: ") + string.Join(", ", missing.ToArray()),
                     Severity = missing.Count == 0
                         ? BoostCheckSeverity.Pass
                         : BoostCheckSeverity.Blocked
@@ -798,7 +806,7 @@ namespace Boostix
             }
             catch (Exception ex)
             {
-                AddUnknown(report, "payload", "КОМПОНЕНТЫ BOOST", ex);
+                AddUnknown(report, "payload", L.T("КОМПОНЕНТЫ BOOST"), ex);
             }
         }
 
@@ -812,30 +820,30 @@ namespace Boostix
             if (string.Equals(normalized, "NeedsRecovery", StringComparison.OrdinalIgnoreCase))
             {
                 severity = BoostCheckSeverity.Blocked;
-                detail = "Сначала завершите возврат настроек Windows.";
+                detail = L.T("Сначала завершите возврат настроек Windows.");
             }
             else if (string.Equals(normalized, "Active", StringComparison.OrdinalIgnoreCase))
             {
                 severity = BoostCheckSeverity.Pass;
-                detail = "Настройка Windows для игр выполнена.";
+                detail = L.T("Настройка Windows для игр выполнена.");
             }
             else if (string.Equals(normalized, "NotApplied", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(normalized, "None", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(normalized, "Restored", StringComparison.OrdinalIgnoreCase))
             {
                 severity = BoostCheckSeverity.Info;
-                detail = "Настройка Windows для игр ещё не выполнена.";
+                detail = L.T("Настройка Windows для игр ещё не выполнена.");
             }
             else
             {
                 severity = BoostCheckSeverity.Unknown;
-                detail = "Состояние системной оптимизации не удалось определить.";
+                detail = L.T("Состояние системной оптимизации не удалось определить.");
             }
 
             report.Checks.Add(new BoostCheckResult
             {
                 Id = "optimization",
-                Title = "СИСТЕМНАЯ ОПТИМИЗАЦИЯ",
+                Title = L.T("СИСТЕМНАЯ ОПТИМИЗАЦИЯ"),
                 Detail = detail,
                 Severity = severity
             });
@@ -856,10 +864,10 @@ namespace Boostix
                 report.Checks.Add(new BoostCheckResult
                 {
                     Id = "restart",
-                    Title = "ПЕРЕЗАГРУЗКА WINDOWS",
+                    Title = L.T("ПЕРЕЗАГРУЗКА WINDOWS"),
                     Detail = pending
-                        ? "Windows ожидает перезагрузку. Перед долгой сессией лучше перезапустить ПК."
-                        : "Незавершённая перезагрузка не обнаружена.",
+                        ? L.T("Windows ожидает перезагрузку. Перед долгой сессией лучше перезапустить ПК.")
+                        : L.T("Незавершённая перезагрузка не обнаружена."),
                     Severity = pending
                         ? BoostCheckSeverity.Warning
                         : BoostCheckSeverity.Pass
@@ -867,7 +875,7 @@ namespace Boostix
             }
             catch (Exception ex)
             {
-                AddUnknown(report, "restart", "ПЕРЕЗАГРУЗКА WINDOWS", ex);
+                AddUnknown(report, "restart", L.T("ПЕРЕЗАГРУЗКА WINDOWS"), ex);
             }
         }
 
@@ -878,7 +886,7 @@ namespace Boostix
                 SystemPowerStatus status;
                 if (!GetSystemPowerStatus(out status))
                 {
-                    throw new InvalidOperationException("Windows не вернула состояние питания.");
+                    throw new InvalidOperationException(L.T("Windows не вернула состояние питания."));
                 }
 
                 bool hasBattery = status.BatteryFlag != 128 && status.BatteryFlag != 255;
@@ -887,31 +895,31 @@ namespace Boostix
                 BoostCheckSeverity severity;
                 if (!hasBattery)
                 {
-                    detail = "Стационарное питание обнаружено.";
+                    detail = L.T("Стационарное питание обнаружено.");
                     severity = BoostCheckSeverity.Pass;
                 }
                 else if (onAc)
                 {
-                    detail = "Ноутбук подключён к питанию.";
+                    detail = L.T("Ноутбук подключён к питанию.");
                     severity = BoostCheckSeverity.Pass;
                 }
                 else
                 {
-                    detail = "Ноутбук работает от батареи. Подключите зарядку для полной скорости.";
+                    detail = L.T("Ноутбук работает от батареи. Подключите зарядку для полной скорости.");
                     severity = BoostCheckSeverity.Warning;
                 }
 
                 report.Checks.Add(new BoostCheckResult
                 {
                     Id = "power",
-                    Title = "ПИТАНИЕ",
+                    Title = L.T("ПИТАНИЕ"),
                     Detail = detail,
                     Severity = severity
                 });
             }
             catch (Exception ex)
             {
-                AddUnknown(report, "power", "ПИТАНИЕ", ex);
+                AddUnknown(report, "power", L.T("ПИТАНИЕ"), ex);
             }
         }
 
@@ -923,7 +931,7 @@ namespace Boostix
                 if (!BoostSystemMetrics.TryGetPerformanceSnapshot(out snapshot) ||
                     snapshot.TotalPhysicalBytes <= 0)
                 {
-                    throw new InvalidOperationException("Windows не вернула сведения о памяти.");
+                    throw new InvalidOperationException(L.T("Windows не вернула сведения о памяти."));
                 }
 
                 report.TotalMemoryBytes = snapshot.TotalPhysicalBytes;
@@ -947,10 +955,10 @@ namespace Boostix
                 report.Checks.Add(new BoostCheckResult
                 {
                     Id = "memory",
-                    Title = "ОПЕРАТИВНАЯ ПАМЯТЬ",
+                    Title = L.T("ОПЕРАТИВНАЯ ПАМЯТЬ"),
                     Detail = string.Format(
                         CultureInfo.CurrentCulture,
-                        "Доступно {0:0.0} из {1:0.0} ГБ (кэш Windows уже учтён). Commit {2:0.0} из {3:0.0} ГБ, запас {4:0.0} ГБ.",
+                        L.T("Доступно {0:0.0} из {1:0.0} ГБ (кэш Windows уже учтён). Commit {2:0.0} из {3:0.0} ГБ, запас {4:0.0} ГБ."),
                         snapshot.AvailablePhysicalBytes / 1073741824.0,
                         snapshot.TotalPhysicalBytes / 1073741824.0,
                         snapshot.CommitTotalBytes / 1073741824.0,
@@ -963,7 +971,7 @@ namespace Boostix
             }
             catch (Exception ex)
             {
-                AddUnknown(report, "memory", "ОПЕРАТИВНАЯ ПАМЯТЬ", ex);
+                AddUnknown(report, "memory", L.T("ОПЕРАТИВНАЯ ПАМЯТЬ"), ex);
             }
         }
 
@@ -975,17 +983,17 @@ namespace Boostix
                 mode.Size = (short)Marshal.SizeOf(typeof(DeviceMode));
                 if (!EnumDisplaySettings(null, EnumCurrentSettings, ref mode))
                 {
-                    throw new InvalidOperationException("Windows не вернула режим дисплея.");
+                    throw new InvalidOperationException(L.T("Windows не вернула режим дисплея."));
                 }
 
                 report.RefreshRate = mode.DisplayFrequency;
                 report.Checks.Add(new BoostCheckResult
                 {
                     Id = "display",
-                    Title = "ЧАСТОТА МОНИТОРА",
+                    Title = L.T("ЧАСТОТА МОНИТОРА"),
                     Detail = mode.DisplayFrequency > 1
-                        ? mode.DisplayFrequency.ToString(CultureInfo.CurrentCulture) + " Гц"
-                        : "Частоту обновления задаёт драйвер видеокарты.",
+                        ? mode.DisplayFrequency.ToString(CultureInfo.CurrentCulture) + L.T(" Гц")
+                        : L.T("Частоту обновления задаёт драйвер видеокарты."),
                     Severity = mode.DisplayFrequency > 1
                         ? BoostCheckSeverity.Info
                         : BoostCheckSeverity.Unknown
@@ -993,7 +1001,7 @@ namespace Boostix
             }
             catch (Exception ex)
             {
-                AddUnknown(report, "display", "ЧАСТОТА МОНИТОРА", ex);
+                AddUnknown(report, "display", L.T("ЧАСТОТА МОНИТОРА"), ex);
             }
         }
 
@@ -1008,10 +1016,10 @@ namespace Boostix
                 report.Checks.Add(new BoostCheckResult
                 {
                     Id = "storage",
-                    Title = "СВОБОДНОЕ МЕСТО",
+                    Title = L.T("СВОБОДНОЕ МЕСТО"),
                     Detail = string.Format(
                         CultureInfo.CurrentCulture,
-                        "На диске {0} свободно {1:0.0} ГБ.",
+                        L.T("На диске {0} свободно {1:0.0} ГБ."),
                         drive.Name,
                         free / 1073741824.0),
                     Severity = low
@@ -1021,7 +1029,7 @@ namespace Boostix
             }
             catch (Exception ex)
             {
-                AddUnknown(report, "storage", "СВОБОДНОЕ МЕСТО", ex);
+                AddUnknown(report, "storage", L.T("СВОБОДНОЕ МЕСТО"), ex);
             }
         }
 
@@ -1044,21 +1052,21 @@ namespace Boostix
                 string detail;
                 if (ready)
                 {
-                    detail = "Игровой режим включён, фоновая запись выключена.";
+                    detail = L.T("Игровой режим включён, фоновая запись выключена.");
                 }
                 else if (gameMode == -1 && dvr == -1)
                 {
-                    detail = "Windows использует настройки игры по умолчанию.";
+                    detail = L.T("Windows использует настройки игры по умолчанию.");
                 }
                 else
                 {
-                    detail = "Игровые параметры Windows отличаются от профиля Boost.";
+                    detail = L.T("Игровые параметры Windows отличаются от профиля Boost.");
                 }
 
                 report.Checks.Add(new BoostCheckResult
                 {
                     Id = "gaming",
-                    Title = "ИГРОВЫЕ ПАРАМЕТРЫ WINDOWS",
+                    Title = L.T("ИГРОВЫЕ ПАРАМЕТРЫ WINDOWS"),
                     Detail = detail,
                     Severity = ready
                         ? BoostCheckSeverity.Pass
@@ -1067,7 +1075,7 @@ namespace Boostix
             }
             catch (Exception ex)
             {
-                AddUnknown(report, "gaming", "ИГРОВЫЕ ПАРАМЕТРЫ WINDOWS", ex);
+                AddUnknown(report, "gaming", L.T("ИГРОВЫЕ ПАРАМЕТРЫ WINDOWS"), ex);
             }
         }
 
@@ -1112,9 +1120,9 @@ namespace Boostix
                 report.Checks.Add(new BoostCheckResult
                 {
                     Id = "power-plan",
-                    Title = "ПЛАН ПИТАНИЯ",
+                    Title = L.T("ПЛАН ПИТАНИЯ"),
                     Detail = string.IsNullOrWhiteSpace(compact)
-                        ? "Активный план питания не удалось прочитать."
+                        ? L.T("Активный план питания не удалось прочитать.")
                         : compact,
                     Severity = maxFps || boostixPerformance || highPerformance
                         ? BoostCheckSeverity.Pass
@@ -1123,7 +1131,7 @@ namespace Boostix
             }
             catch (Exception ex)
             {
-                AddUnknown(report, "power-plan", "ПЛАН ПИТАНИЯ", ex);
+                AddUnknown(report, "power-plan", L.T("ПЛАН ПИТАНИЯ"), ex);
             }
         }
 
@@ -1144,7 +1152,7 @@ namespace Boostix
                 !startInfo.RedirectStandardError)
             {
                 throw new ArgumentException(
-                    "Для безопасного чтения оба потока должны быть перенаправлены.",
+                    L.T("Для безопасного чтения оба потока должны быть перенаправлены."),
                     "startInfo");
             }
 
@@ -1153,7 +1161,7 @@ namespace Boostix
                 if (process == null)
                 {
                     throw new InvalidOperationException(
-                        "Диагностический процесс не запущен.");
+                        L.T("Диагностический процесс не запущен."));
                 }
 
                 // Drain both pipes concurrently. Reading either stream synchronously
@@ -1171,7 +1179,7 @@ namespace Boostix
                     TerminateTimedOutProcess(process);
                     TryWaitForProcessReaders(outputTask, errorTask);
                     throw new TimeoutException(
-                        "Диагностический процесс не ответил вовремя.");
+                        L.T("Диагностический процесс не ответил вовремя."));
                 }
 
                 if (!WaitForProcessReaders(
@@ -1180,7 +1188,7 @@ namespace Boostix
                     ProcessOutputDrainTimeoutMilliseconds))
                 {
                     throw new TimeoutException(
-                        "Вывод диагностического процесса не завершился вовремя.");
+                        L.T("Вывод диагностического процесса не завершился вовремя."));
                 }
 
                 return outputTask.GetAwaiter().GetResult();
@@ -1286,7 +1294,7 @@ namespace Boostix
             {
                 Id = id,
                 Title = title,
-                Detail = "Проверка недоступна: " + error.Message,
+                Detail = L.T("Проверка недоступна: ") + error.Message,
                 Severity = BoostCheckSeverity.Unknown
             });
         }

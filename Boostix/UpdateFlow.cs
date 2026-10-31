@@ -1101,13 +1101,13 @@ namespace Boostix
         private const int InstallerDownloadAttemptsPerSource = 2;
         private const int MaximumInstallerRedirects = 5;
 
-        private static readonly Color BackgroundColor = BoostixDesignTokens.Background;
-        private static readonly Color TextColor = BoostixDesignTokens.Text;
-        private static readonly Color MutedColor = BoostixDesignTokens.MutedText;
-        private static readonly Color AccentColor = BoostixDesignTokens.Accent;
-        // Light error text keeps WCAG AA contrast on the #161616 surface.
+        private static Color BackgroundColor { get { return BoostixDesignTokens.Background; } }
+        private static Color TextColor { get { return BoostixDesignTokens.Text; } }
+        private static Color MutedColor { get { return BoostixDesignTokens.MutedText; } }
+        private static Color AccentColor { get { return BoostixDesignTokens.Accent; } }
+        // Light error text keeps WCAG AA contrast on every theme's surfaces.
         // Destructive window controls retain the darker red fill separately.
-        private static readonly Color ErrorColor = BoostixDesignTokens.Error;
+        private static Color ErrorColor { get { return BoostixDesignTokens.Error; } }
 
         private readonly Window owner;
         private readonly string[] arguments;
@@ -1157,7 +1157,7 @@ namespace Boostix
             Focusable = true;
             KeyboardNavigation.SetTabNavigation(this, KeyboardNavigationMode.Cycle);
             KeyboardNavigation.SetControlTabNavigation(this, KeyboardNavigationMode.Cycle);
-            AutomationProperties.SetName(this, "Проверка обновлений Boostix");
+            AutomationProperties.SetName(this, L.T("Проверка обновлений Boostix"));
 
             card = new Border
             {
@@ -2292,7 +2292,7 @@ namespace Boostix
             catch (Exception ex)
             {
                 Log("Update retry check failed: " + DescribeException(ex));
-                ShowRetry("Не удалось повторно проверить обновление. Проверьте подключение к интернету и повторите попытку.");
+                ShowRetry(L.T("Не удалось повторно проверить обновление. Проверьте подключение к интернету и повторите попытку."));
                 return false;
             }
         }
@@ -2301,14 +2301,14 @@ namespace Boostix
         {
             if (availableUpdate == null)
             {
-                ShowRetry("Не удалось определить доступную версию. Повторите проверку.");
+                ShowRetry(L.T("Не удалось определить доступную версию. Повторите проверку."));
                 return;
             }
 
             FileStream updateLock = TryAcquireUpdateLock();
             if (updateLock == null)
             {
-                ShowRetry("Обновление уже скачивается в другом окне Boostix. Закройте лишнее окно и повторите попытку.");
+                ShowRetry(L.T("Обновление уже скачивается в другом окне Boostix. Закройте лишнее окно и повторите попытку."));
                 return;
             }
 
@@ -2350,11 +2350,11 @@ namespace Boostix
                 Log("Installer launch failed: " + DescribeException(ex));
                 if (ex.NativeErrorCode == 1223)
                 {
-                    ShowRetry("Запрос прав администратора был отменён. Для продолжения установите обновление.");
+                    ShowRetry(L.T("Запрос прав администратора был отменён. Для продолжения установите обновление."));
                 }
                 else
                 {
-                    ShowRetry("Не удалось запустить установщик. Проверьте доступ к системе и повторите попытку.");
+                    ShowRetry(L.T("Не удалось запустить установщик. Проверьте доступ к системе и повторите попытку."));
                 }
             }
             catch (UpdateStorageException ex)
@@ -2372,7 +2372,7 @@ namespace Boostix
             catch (InvalidDataException ex)
             {
                 Log("Downloaded update validation failed: " + DescribeException(ex));
-                ShowRetry("Скачанный файл обновления не прошёл проверку безопасности. Повторите попытку; если ошибка сохранится, скачайте актуальный установщик с официального репозитория.");
+                ShowRetry(L.T("Скачанный файл обновления не прошёл проверку безопасности. Повторите попытку; если ошибка сохранится, скачайте актуальный установщик с официального репозитория."));
             }
             catch (IOException ex)
             {
@@ -2386,7 +2386,7 @@ namespace Boostix
             catch (Exception ex)
             {
                 Log("Update failed: " + DescribeException(ex));
-                ShowRetry("Не удалось подготовить обновление. Повторите попытку или скачайте актуальный установщик с официального репозитория.");
+                ShowRetry(L.T("Не удалось подготовить обновление. Повторите попытку или скачайте актуальный установщик с официального репозитория."));
             }
         }
 
@@ -2511,9 +2511,9 @@ namespace Boostix
             updateCheckRetryRecommended = true;
             Log("Update storage access failed: " + DescribeException(exception));
             ShowRetry(
-                "Не удалось записать файл обновления. Проверьте свободное место, " +
-                "доступ к папке TEMP и не блокирует ли файл антивирус, затем " +
-                "повторите попытку.");
+                L.T("Не удалось записать файл обновления. Проверьте свободное место, ") +
+                L.T("доступ к папке TEMP и не блокирует ли файл антивирус, затем ") +
+                L.T("повторите попытку."));
         }
 
         private void ShowUpdateNetworkRetry(WebException exception)
@@ -2531,41 +2531,41 @@ namespace Boostix
             int httpStatusCode = GetWebExceptionHttpStatusCode(exception);
             if (httpStatusCode == 407)
             {
-                return "Прокси-сервер Windows отклонил учётные данные. " +
-                    "Войдите в корпоративную сеть или исправьте настройки прокси и повторите попытку.";
+                return L.T("Прокси-сервер Windows отклонил учётные данные. ") +
+                    L.T("Войдите в корпоративную сеть или исправьте настройки прокси и повторите попытку.");
             }
             if (exception != null &&
                 (exception.Status == WebExceptionStatus.TrustFailure ||
                  exception.Status == WebExceptionStatus.SecureChannelFailure))
             {
-                return "Не удалось установить защищённое соединение с GitHub. " +
-                    "Проверьте дату и время Windows, сертификаты и HTTPS-фильтрацию антивируса или прокси.";
+                return L.T("Не удалось установить защищённое соединение с GitHub. ") +
+                    L.T("Проверьте дату и время Windows, сертификаты и HTTPS-фильтрацию антивируса или прокси.");
             }
             if (httpStatusCode == 401 || httpStatusCode == 403)
             {
-                return "Сеть или защитное ПО запретили доступ к файлу обновления на GitHub. " +
-                    "Разрешите github.com и raw.githubusercontent.com либо скачайте актуальный установщик вручную.";
+                return L.T("Сеть или защитное ПО запретили доступ к файлу обновления на GitHub. ") +
+                    L.T("Разрешите github.com и raw.githubusercontent.com либо скачайте актуальный установщик вручную.");
             }
             if (httpStatusCode == 404)
             {
-                return "Файл обновления временно недоступен на GitHub. " +
-                    "Повторите попытку позже или скачайте актуальный установщик вручную.";
+                return L.T("Файл обновления временно недоступен на GitHub. ") +
+                    L.T("Повторите попытку позже или скачайте актуальный установщик вручную.");
             }
             if (exception != null &&
                 (exception.Status == WebExceptionStatus.NameResolutionFailure ||
                  exception.Status == WebExceptionStatus.ProxyNameResolutionFailure))
             {
-                return "Не удалось найти сервер обновлений. " +
-                    "Проверьте DNS, системный прокси и подключение к интернету, затем повторите попытку.";
+                return L.T("Не удалось найти сервер обновлений. ") +
+                    L.T("Проверьте DNS, системный прокси и подключение к интернету, затем повторите попытку.");
             }
             if (exception != null &&
                 exception.Status == WebExceptionStatus.Timeout)
             {
-                return "Сервер обновлений не ответил вовремя. " +
-                    "Проверьте скорость подключения, VPN или прокси и повторите попытку.";
+                return L.T("Сервер обновлений не ответил вовремя. ") +
+                    L.T("Проверьте скорость подключения, VPN или прокси и повторите попытку.");
             }
-            return "Не удалось скачать обновление. Проверьте подключение к интернету, " +
-                "системный прокси и блокировку GitHub защитным ПО, затем повторите попытку.";
+            return L.T("Не удалось скачать обновление. Проверьте подключение к интернету, ") +
+                L.T("системный прокси и блокировку GitHub защитным ПО, затем повторите попытку.");
         }
 
         private async Task RunDemoUpdateProgressAsync(UpdateManifest update)
@@ -2654,7 +2654,8 @@ namespace Boostix
                     var startInfo = new ProcessStartInfo
                     {
                         FileName = installerPath,
-                        Arguments = "/updateui",
+                        // Older installers ignore the language switch.
+                        Arguments = "/updateui --lang=" + L.Language,
                         WorkingDirectory = safeWorkingDirectory,
                         UseShellExecute = true,
                         Verb = "runas",
@@ -3594,9 +3595,9 @@ namespace Boostix
             state = UpdateState.Checking;
             Visibility = Visibility.Visible;
             BuildWorkingScreen(
-                "Проверка обновлений",
-                "Проверяем актуальную версию Boostix.",
-                "Подождите несколько секунд.");
+                L.T("Проверка обновлений"),
+                L.T("Проверяем актуальную версию Boostix."),
+                L.T("Подождите несколько секунд."));
         }
 
         private void ShowDownloading(SemanticVersion version)
@@ -3686,8 +3687,8 @@ namespace Boostix
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
             StackPanel header = BuildHeader(
-                "Загружаем обновление",
-                "Версия " + version + " будет проверена перед запуском.");
+                L.T("Загружаем обновление"),
+                L.T("Версия ") + version + L.T(" будет проверена перед запуском."));
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
@@ -3705,11 +3706,11 @@ namespace Boostix
                 semiboldFont,
                 FontWeights.Bold);
             progressPercentText.TextAlignment = TextAlignment.Center;
-            AutomationProperties.SetName(progressPercentText, "Загружено 0 процентов");
+            AutomationProperties.SetName(progressPercentText, L.T("Загружено 0 процентов"));
             body.Children.Add(progressPercentText);
 
             progressStageText = MakeText(
-                "Скачиваем обновление…",
+                L.T("Скачиваем обновление…"),
                 11.5,
                 TextColor,
                 semiboldFont,
@@ -3736,11 +3737,11 @@ namespace Boostix
                 HorizontalAlignment = HorizontalAlignment.Left
             };
             track.Child = progressFill;
-            AutomationProperties.SetName(track, "Прогресс загрузки обновления");
+            AutomationProperties.SetName(track, L.T("Прогресс загрузки обновления"));
             body.Children.Add(track);
 
             progressBytesText = MakeText(
-                "0 Б из " + FormatBytes(availableUpdate == null ? 0 : availableUpdate.Size),
+                L.T("0 Б из ") + FormatBytes(availableUpdate == null ? 0 : availableUpdate.Size),
                 10.5,
                 MutedColor,
                 regularFont,
@@ -3782,22 +3783,22 @@ namespace Boostix
             progressPercentText.Text = percent.ToString(CultureInfo.InvariantCulture) + "%";
             AutomationProperties.SetName(
                 progressPercentText,
-                "Загружено " + percent.ToString(CultureInfo.InvariantCulture) + " процентов");
+                L.T("Загружено ") + percent.ToString(CultureInfo.InvariantCulture) + L.T(" процентов"));
 
             if (progress.Stage == UpdateProgressStage.Verifying)
             {
-                progressStageText.Text = "Проверяем файл…";
-                progressBytesText.Text = "Загрузка завершена";
+                progressStageText.Text = L.T("Проверяем файл…");
+                progressBytesText.Text = L.T("Загрузка завершена");
             }
             else if (progress.Stage == UpdateProgressStage.Launching)
             {
-                progressStageText.Text = "Открываем установку…";
-                progressBytesText.Text = "Подтвердите запрос Windows";
+                progressStageText.Text = L.T("Открываем установку…");
+                progressBytesText.Text = L.T("Подтвердите запрос Windows");
             }
             else
             {
-                progressStageText.Text = "Скачиваем обновление…";
-                progressBytesText.Text = FormatBytes(downloaded) + " из " + FormatBytes(total);
+                progressStageText.Text = L.T("Скачиваем обновление…");
+                progressBytesText.Text = FormatBytes(downloaded) + L.T(" из ") + FormatBytes(total);
             }
             AutomationProperties.SetName(progressStageText, progressStageText.Text);
         }
@@ -3814,13 +3815,13 @@ namespace Boostix
         {
             if (bytes >= 1024L * 1024L)
             {
-                return (bytes / (1024.0 * 1024.0)).ToString("0.0", CultureInfo.CurrentCulture) + " МБ";
+                return (bytes / (1024.0 * 1024.0)).ToString("0.0", CultureInfo.CurrentCulture) + L.T(" МБ");
             }
             if (bytes >= 1024L)
             {
-                return (bytes / 1024.0).ToString("0.0", CultureInfo.CurrentCulture) + " КБ";
+                return (bytes / 1024.0).ToString("0.0", CultureInfo.CurrentCulture) + L.T(" КБ");
             }
-            return bytes.ToString(CultureInfo.CurrentCulture) + " Б";
+            return bytes.ToString(CultureInfo.CurrentCulture) + L.T(" Б");
         }
 
         private void ShowUpdateRequired(SemanticVersion currentVersion, SemanticVersion newVersion)
@@ -3835,8 +3836,8 @@ namespace Boostix
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             StackPanel header = BuildHeader(
-                "Доступно обновление",
-                "Вышла новая версия Boostix.");
+                L.T("Доступно обновление"),
+                L.T("Вышла новая версия Boostix."));
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
@@ -3856,7 +3857,7 @@ namespace Boostix
             body.Children.Add(versionText);
 
             TextBlock description = MakeText(
-                "Boostix скачает обновление, проверит его и попросит разрешения Windows на установку.",
+                L.T("Boostix скачает обновление, проверит его и попросит разрешения Windows на установку."),
                 10.5,
                 MutedColor,
                 regularFont,
@@ -3870,12 +3871,12 @@ namespace Boostix
             cardContent.Children.Add(body);
 
             StackPanel buttons = BuildButtonRow();
-            Button continueButton = MakeActionButton("Обновить", true);
+            Button continueButton = MakeActionButton(L.T("Обновить"), true);
             continueButton.IsDefault = true;
             continueButton.Click += ContinueButtonClick;
             AutomationProperties.SetName(
                 continueButton,
-                "Скачать, проверить и установить обновление " + newVersion);
+                L.T("Скачать, проверить и установить обновление ") + newVersion);
             buttons.Children.Add(continueButton);
             preferredFocusButton = continueButton;
             Grid.SetRow(buttons, 2);
@@ -3895,8 +3896,8 @@ namespace Boostix
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             StackPanel header = BuildHeader(
-                "Нужно обновление",
-                "Эта версия больше не запускается. Установите обновление.");
+                L.T("Нужно обновление"),
+                L.T("Эта версия больше не запускается. Установите обновление."));
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
@@ -3913,10 +3914,10 @@ namespace Boostix
             cardContent.Children.Add(messageText);
 
             StackPanel buttons = BuildButtonRow();
-            Button retryButton = MakeActionButton("Повторить", true);
+            Button retryButton = MakeActionButton(L.T("Повторить"), true);
             retryButton.IsDefault = true;
             retryButton.Click += ContinueButtonClick;
-            AutomationProperties.SetName(retryButton, "Повторить загрузку обязательного обновления");
+            AutomationProperties.SetName(retryButton, L.T("Повторить загрузку обязательного обновления"));
             buttons.Children.Add(retryButton);
             preferredFocusButton = retryButton;
             Grid.SetRow(buttons, 2);
@@ -3936,13 +3937,13 @@ namespace Boostix
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             StackPanel header = BuildHeader(
-                "Обновление готово",
-                "Сейчас откроется установка.");
+                L.T("Обновление готово"),
+                L.T("Сейчас откроется установка."));
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
             TextBlock messageText = MakeText(
-                "Демо завершено безопасно: сеть, UAC и запуск установщика отключены.",
+                L.T("Демо завершено безопасно: сеть, UAC и запуск установщика отключены."),
                 11.5,
                 AccentColor,
                 semiboldFont,
@@ -3954,10 +3955,10 @@ namespace Boostix
             cardContent.Children.Add(messageText);
 
             StackPanel buttons = BuildButtonRow();
-            Button retryButton = MakeActionButton("Повторить демо", true);
+            Button retryButton = MakeActionButton(L.T("Повторить демо"), true);
             retryButton.IsDefault = true;
             retryButton.Click += ContinueButtonClick;
-            AutomationProperties.SetName(retryButton, "Повторить демонстрацию обновления");
+            AutomationProperties.SetName(retryButton, L.T("Повторить демонстрацию обновления"));
             buttons.Children.Add(retryButton);
             preferredFocusButton = retryButton;
             Grid.SetRow(buttons, 2);

@@ -21,16 +21,34 @@ namespace Boostix
     internal static class WhatsNewContent
     {
         internal const string ChangelogResourceName = "Boostix.Changelog.md";
+        internal const string EnglishChangelogResourceName = "Boostix.Changelog.en.md";
         private static readonly Regex LinkPattern = new Regex(
             @"\[(?<text>[^\]]+)\]\([^)]*\)",
             RegexOptions.CultureInvariant);
 
+        /// <summary>
+        /// The English changelog for the English interface; the Russian one
+        /// when a version has no English entry.
+        /// </summary>
         internal static IList<string> LoadHighlights(string version)
+        {
+            if (L.Language == L.English)
+            {
+                IList<string> english = LoadHighlightsFrom(EnglishChangelogResourceName, version);
+                if (english.Count > 0)
+                {
+                    return english;
+                }
+            }
+            return LoadHighlightsFrom(ChangelogResourceName, version);
+        }
+
+        private static IList<string> LoadHighlightsFrom(string resourceName, string version)
         {
             try
             {
                 using (Stream stream = Assembly.GetExecutingAssembly()
-                    .GetManifestResourceStream(ChangelogResourceName))
+                    .GetManifestResourceStream(resourceName))
                 {
                     if (stream == null)
                     {
@@ -175,7 +193,7 @@ namespace Boostix
             Visibility = Visibility.Collapsed;
             KeyboardNavigation.SetTabNavigation(this, KeyboardNavigationMode.Cycle);
             AutomationProperties.SetAutomationId(this, "Boostix.WhatsNew");
-            AutomationProperties.SetName(this, "Что нового в Boostix");
+            AutomationProperties.SetName(this, L.T("Что нового в Boostix"));
 
             card = new Border
             {
@@ -208,7 +226,7 @@ namespace Boostix
             card.Child = layout;
 
             var header = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
-            header.Children.Add(BoostixUi.FieldLabel("Boostix обновился"));
+            header.Children.Add(BoostixUi.FieldLabel(L.T("Boostix обновился")));
             titleText = BoostixUi.Text(
                 string.Empty,
                 20,
@@ -240,12 +258,12 @@ namespace Boostix
                 HorizontalAlignment = HorizontalAlignment.Right,
                 Margin = new Thickness(0, 18, 0, 0)
             };
-            closeButton = BoostixUi.ActionButton("Понятно", BoostixButtonKind.Primary, null);
+            closeButton = BoostixUi.ActionButton(L.T("Понятно"), BoostixButtonKind.Primary, null);
             closeButton.IsDefault = true;
             closeButton.IsCancel = true;
             closeButton.Click += delegate { Hide(); };
             AutomationProperties.SetAutomationId(closeButton, "Boostix.WhatsNew.Close");
-            AutomationProperties.SetName(closeButton, "Закрыть список изменений");
+            AutomationProperties.SetName(closeButton, L.T("Закрыть список изменений"));
             buttons.Children.Add(closeButton);
             Grid.SetRow(buttons, 2);
             layout.Children.Add(buttons);
@@ -283,7 +301,7 @@ namespace Boostix
 
         public void Show(string version, IList<string> highlights)
         {
-            titleText.Text = "Что нового в " + version;
+            titleText.Text = L.T("Что нового в ") + version;
             AutomationProperties.SetName(titleText, titleText.Text);
             itemsPanel.Children.Clear();
             foreach (string highlight in highlights ?? new List<string>())

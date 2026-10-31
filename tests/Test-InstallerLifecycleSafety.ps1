@@ -7,6 +7,9 @@ Set-StrictMode -Version Latest
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $sourcePath = Join-Path $projectRoot 'BoostixInstaller\Program.cs'
 $brandSource = Join-Path $projectRoot 'ProductBrand.cs'
+$localizationSources = @(
+    (Join-Path $projectRoot 'Boostix\Localization.cs'),
+    (Join-Path $projectRoot 'Boostix\LocalizationEnglish.cs'))
 $source = [IO.File]::ReadAllText($sourcePath)
 $frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $compiler = Join-Path $frameworkRoot 'csc.exe'
@@ -82,6 +85,7 @@ try {
         /reference:System.Windows.Forms.dll `
         /reference:System.Security.dll `
         $brandSource `
+        $localizationSources `
         $sourcePath 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Installer source did not compile:`r`n$($compilerOutput -join [Environment]::NewLine)"

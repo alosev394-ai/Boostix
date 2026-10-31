@@ -50,11 +50,11 @@ namespace Boostix
             public string Status;
         }
 
-        private static readonly Color BackgroundColor = BoostixDesignTokens.Background;
-        private static readonly Color TextColor = BoostixDesignTokens.Text;
-        private static readonly Color MutedColor = BoostixDesignTokens.MutedText;
-        private static readonly Color AccentColor = BoostixDesignTokens.Accent;
-        private static readonly Color ErrorColor = BoostixDesignTokens.Error;
+        private static Color BackgroundColor { get { return BoostixDesignTokens.Background; } }
+        private static Color TextColor { get { return BoostixDesignTokens.Text; } }
+        private static Color MutedColor { get { return BoostixDesignTokens.MutedText; } }
+        private static Color AccentColor { get { return BoostixDesignTokens.Accent; } }
+        private static Color ErrorColor { get { return BoostixDesignTokens.Error; } }
         private const int ElevatedScriptTimeoutMilliseconds = 10 * 60 * 1000;
         private const string ApplyScriptSha256 =
             "27CE23AD18B12C025FA5079AAC06680652A0B0D03555B39554825891E6711C3E";
@@ -116,7 +116,7 @@ namespace Boostix
             Focusable = true;
             KeyboardNavigation.SetTabNavigation(this, KeyboardNavigationMode.Cycle);
             KeyboardNavigation.SetControlTabNavigation(this, KeyboardNavigationMode.Cycle);
-            AutomationProperties.SetName(this, "Первоначальная настройка производительности");
+            AutomationProperties.SetName(this, L.T("Первоначальная настройка производительности"));
 
             card = new Border
             {
@@ -436,23 +436,23 @@ namespace Boostix
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var header = BuildHeader(
-                "Настроим Windows для игр",
-                "Boostix применит обратимый профиль производительности Windows.");
+                L.T("Настроим Windows для игр"),
+                L.T("Boostix применит обратимый профиль производительности Windows."));
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
             var body = new StackPanel { Margin = new Thickness(0, 4, 0, 12) };
             body.Children.Add(MakeConsentSummary(
-                "Питание на максимум",
-                "компьютер не будет экономить энергию во время игры"));
+                L.T("Питание на максимум"),
+                L.T("компьютер не будет экономить энергию во время игры")));
             body.Children.Add(MakeConsentSummary(
-                "Игровой режим Windows",
-                "фоновые задачи меньше мешают игре"));
+                L.T("Игровой режим Windows"),
+                L.T("фоновые задачи меньше мешают игре")));
             body.Children.Add(MakeConsentSummary(
-                "Меньше лишних эффектов",
-                "без прозрачности, виджетов и фоновой записи"));
+                L.T("Меньше лишних эффектов"),
+                L.T("без прозрачности, виджетов и фоновой записи")));
             var safetyText = MakeText(
-                "Сначала Boostix сохранит текущие настройки. Вернуть их можно одной кнопкой в разделе «Настройки». После настройки нужна перезагрузка.",
+                L.T("Сначала Boostix сохранит текущие настройки. Вернуть их можно одной кнопкой в разделе «Настройки». После настройки нужна перезагрузка."),
                 10,
                 MutedColor,
                 regularFont,
@@ -462,22 +462,22 @@ namespace Boostix
 
             // Full disclosure of every change, one click away.
             var details = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 8, 0, 0) };
-            details.Children.Add(MakeConsentBullet("создаст и включит отдельный план Boostix Performance для питания от сети;"));
-            details.Children.Add(MakeConsentBullet("выберет максимум производительности CPU, отключит парковку ядер, простой диска и USB-селективное отключение;"));
-            details.Children.Add(MakeConsentBullet("включит Game Mode, отключит DVR-запись и ограничение мощности, снизит резерв CPU для фоновых задач до 10%;"));
-            details.Children.Add(MakeConsentBullet("выберет быстрые визуальные эффекты, отключит прозрачность и фоновые виджеты Windows;"));
-            details.Children.Add(MakeConsentBullet("попытается создать точку восстановления; после применения потребуется перезагрузка."));
-            details.Children.Add(MakeConsentBullet("меняются только отличающиеся значения, резервная копия позволяет вернуть всё обратно."));
-            var detailsToggle = MakeActionButton("Что именно изменится", false);
+            details.Children.Add(MakeConsentBullet(L.T("создаст и включит отдельный план Boostix Performance для питания от сети;")));
+            details.Children.Add(MakeConsentBullet(L.T("выберет максимум производительности CPU, отключит парковку ядер, простой диска и USB-селективное отключение;")));
+            details.Children.Add(MakeConsentBullet(L.T("включит Game Mode, отключит DVR-запись и ограничение мощности, снизит резерв CPU для фоновых задач до 10%;")));
+            details.Children.Add(MakeConsentBullet(L.T("выберет быстрые визуальные эффекты, отключит прозрачность и фоновые виджеты Windows;")));
+            details.Children.Add(MakeConsentBullet(L.T("попытается создать точку восстановления; после применения потребуется перезагрузка.")));
+            details.Children.Add(MakeConsentBullet(L.T("меняются только отличающиеся значения, резервная копия позволяет вернуть всё обратно.")));
+            var detailsToggle = MakeActionButton(L.T("Что именно изменится"), false);
             detailsToggle.HorizontalAlignment = HorizontalAlignment.Left;
             detailsToggle.Margin = new Thickness(0, 10, 0, 0);
             detailsToggle.Click += delegate
             {
                 bool show = details.Visibility != Visibility.Visible;
                 details.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-                BoostixUi.SetButtonText(detailsToggle, show ? "Скрыть подробности" : "Что именно изменится");
+                BoostixUi.SetButtonText(detailsToggle, show ? L.T("Скрыть подробности") : L.T("Что именно изменится"));
             };
-            AutomationProperties.SetName(detailsToggle, "Показать полный список изменений");
+            AutomationProperties.SetName(detailsToggle, L.T("Показать полный список изменений"));
             body.Children.Add(detailsToggle);
             body.Children.Add(details);
 
@@ -492,24 +492,24 @@ namespace Boostix
             cardContent.Children.Add(body);
 
             var buttons = BuildButtonRow();
-            var cancelButton = MakeActionButton("Закрыть", false);
+            var cancelButton = MakeActionButton(L.T("Закрыть"), false);
             cancelButton.Click += delegate { CloseApplication(); };
-            AutomationProperties.SetName(cancelButton, "Отменить первоначальную настройку и закрыть программу");
+            AutomationProperties.SetName(cancelButton, L.T("Отменить первоначальную настройку и закрыть программу"));
             buttons.Children.Add(cancelButton);
 
-            var skipButton = MakeActionButton("Пропустить", false);
+            var skipButton = MakeActionButton(L.T("Пропустить"), false);
             skipButton.Margin = new Thickness(10, 0, 0, 0);
             skipButton.Click += delegate { HideFlow(); };
             AutomationProperties.SetName(
                 skipButton,
-                "Продолжить без системной оптимизации");
+                L.T("Продолжить без системной оптимизации"));
             buttons.Children.Add(skipButton);
 
-            var continueButton = MakeActionButton("Настроить", true);
+            var continueButton = MakeActionButton(L.T("Настроить"), true);
             continueButton.Margin = new Thickness(10, 0, 0, 0);
             continueButton.IsDefault = true;
             continueButton.Click += ContinueButtonClick;
-            AutomationProperties.SetName(continueButton, "Продолжить и применить оптимизацию производительности");
+            AutomationProperties.SetName(continueButton, L.T("Продолжить и применить оптимизацию производительности"));
             buttons.Children.Add(continueButton);
             preferredFocusButton = continueButton;
 
@@ -528,9 +528,9 @@ namespace Boostix
             state = FlowState.Applying;
             rollbackRequested = false;
             ShowWorking(
-                "Применяем настройки",
-                "Windows запросит права администратора. Не закрывайте это окно до завершения.",
-                "Отменить");
+                L.T("Применяем настройки"),
+                L.T("Windows запросит права администратора. Не закрывайте это окно до завершения."),
+                L.T("Отменить"));
 
             if (demoMode)
             {
@@ -561,7 +561,7 @@ namespace Boostix
             if (!File.Exists(scriptPath))
             {
                 ShowFailure(
-                    "Файл MaxFPS-Apply.ps1 не найден рядом с программой.",
+                    L.T("Файл MaxFPS-Apply.ps1 не найден рядом с программой."),
                     false);
                 return;
             }
@@ -577,7 +577,7 @@ namespace Boostix
             if (execution.ElevationCanceled)
             {
                 TryDeleteFile(resultPath);
-                ShowConsent("Запрос прав администратора был отменён. Изменения не внесены.");
+                ShowConsent(L.T("Запрос прав администратора был отменён. Изменения не внесены."));
                 return;
             }
 
@@ -604,9 +604,9 @@ namespace Boostix
                 }
                 ShowFailure(
                     execution.TimedOut
-                        ? "Применение заняло слишком много времени и было остановлено. " +
-                          "Если часть настроек успела измениться, резервная копия сохранена для восстановления."
-                        : "Не удалось применить оптимизацию. Изменения не считаются завершёнными.",
+                        ? L.T("Применение заняло слишком много времени и было остановлено. ") +
+                          L.T("Если часть настроек успела измениться, резервная копия сохранена для восстановления.")
+                        : L.T("Не удалось применить оптимизацию. Изменения не считаются завершёнными."),
                     false);
                 return;
             }
@@ -618,7 +618,7 @@ namespace Boostix
             {
                 TryDeleteFile(resultPath);
                 ShowFailure(
-                    "Оптимизация завершилась без корректного файла резервной копии. Перезапустите настройку.",
+                    L.T("Оптимизация завершилась без корректного файла резервной копии. Перезапустите настройку."),
                     false);
                 return;
             }
@@ -673,8 +673,8 @@ namespace Boostix
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var header = BuildHeader(
-                "Оптимизация готова",
-                "Настройки применены и сохранены для безопасного отката.");
+                L.T("Оптимизация готова"),
+                L.T("Настройки применены и сохранены для безопасного отката."));
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
@@ -706,7 +706,7 @@ namespace Boostix
             body.Children.Add(rebootBadge);
 
             var title = MakeText(
-                "Нужна перезагрузка",
+                L.T("Нужна перезагрузка"),
                 14,
                 TextColor,
                 semiboldFont,
@@ -715,7 +715,7 @@ namespace Boostix
             body.Children.Add(title);
 
             var description = MakeText(
-                "Перезагрузите компьютер, чтобы Windows полностью применила изменения производительности.",
+                L.T("Перезагрузите компьютер, чтобы Windows полностью применила изменения производительности."),
                 11,
                 MutedColor,
                 regularFont,
@@ -753,16 +753,16 @@ namespace Boostix
             cardContent.Children.Add(body);
 
             var buttons = BuildButtonRow();
-            var cancelButton = MakeActionButton("Отменить", false);
+            var cancelButton = MakeActionButton(L.T("Отменить"), false);
             cancelButton.Click += delegate { BeginRestoreAndClose(); };
-            AutomationProperties.SetName(cancelButton, "Отменить оптимизацию, восстановить настройки и закрыть программу");
+            AutomationProperties.SetName(cancelButton, L.T("Отменить оптимизацию, восстановить настройки и закрыть программу"));
             buttons.Children.Add(cancelButton);
 
-            var restartButton = MakeActionButton("Перезагрузить сейчас", true);
+            var restartButton = MakeActionButton(L.T("Перезагрузить сейчас"), true);
             restartButton.Margin = new Thickness(10, 0, 0, 0);
             restartButton.IsDefault = true;
             restartButton.Click += RestartButtonClick;
-            AutomationProperties.SetName(restartButton, "Перезагрузить компьютер сейчас");
+            AutomationProperties.SetName(restartButton, L.T("Перезагрузить компьютер сейчас"));
             buttons.Children.Add(restartButton);
             preferredFocusButton = restartButton;
 
@@ -782,27 +782,27 @@ namespace Boostix
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var header = BuildHeader(
-                "Нужно восстановление",
-                "Найдена незавершённая системная транзакция.");
+                L.T("Нужно восстановление"),
+                L.T("Найдена незавершённая системная транзакция."));
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
             string detail;
             if (string.Equals(transactionStatus, "RestoreIncomplete", StringComparison.OrdinalIgnoreCase))
             {
-                detail = "Предыдущий откат завершился не полностью. Резервная копия сохранена для безопасного повтора.";
+                detail = L.T("Предыдущий откат завершился не полностью. Резервная копия сохранена для безопасного повтора.");
             }
             else if (string.Equals(transactionStatus, "Restoring", StringComparison.OrdinalIgnoreCase))
             {
-                detail = "Предыдущее восстановление было прервано. Его нужно продолжить по той же резервной копии.";
+                detail = L.T("Предыдущее восстановление было прервано. Его нужно продолжить по той же резервной копии.");
             }
             else if (string.Equals(transactionStatus, "Applying", StringComparison.OrdinalIgnoreCase))
             {
-                detail = "Применение настроек было прервано до завершения. Изменённые параметры нужно вернуть.";
+                detail = L.T("Применение настроек было прервано до завершения. Изменённые параметры нужно вернуть.");
             }
             else
             {
-                detail = "Применение настроек завершилось ошибкой. Изменённые параметры нужно вернуть из резервной копии.";
+                detail = L.T("Применение настроек завершилось ошибкой. Изменённые параметры нужно вернуть из резервной копии.");
             }
 
             var body = new StackPanel
@@ -833,7 +833,7 @@ namespace Boostix
             body.Children.Add(recoveryBadge);
 
             var title = MakeText(
-                "Нужен безопасный откат",
+                L.T("Нужен безопасный откат"),
                 13.5,
                 TextColor,
                 semiboldFont,
@@ -847,7 +847,7 @@ namespace Boostix
             body.Children.Add(description);
 
             var closeNotice = MakeText(
-                "Сначала выполните попытку восстановления.",
+                L.T("Сначала выполните попытку восстановления."),
                 10,
                 ErrorColor,
                 semiboldFont,
@@ -860,10 +860,10 @@ namespace Boostix
             cardContent.Children.Add(body);
 
             var buttons = BuildButtonRow();
-            var restoreButton = MakeActionButton("Восстановить", true);
+            var restoreButton = MakeActionButton(L.T("Восстановить"), true);
             restoreButton.IsDefault = true;
             restoreButton.Click += delegate { BeginRestoreAndClose(); };
-            AutomationProperties.SetName(restoreButton, "Восстановить исходные настройки из найденной резервной копии");
+            AutomationProperties.SetName(restoreButton, L.T("Восстановить исходные настройки из найденной резервной копии"));
             buttons.Children.Add(restoreButton);
             preferredFocusButton = restoreButton;
 
@@ -883,8 +883,8 @@ namespace Boostix
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var header = BuildHeader(
-                "ВОССТАНОВИТЬ WINDOWS",
-                "Будут возвращены только параметры, изменённые Boostix.");
+                L.T("ВОССТАНОВИТЬ WINDOWS"),
+                L.T("Будут возвращены только параметры, изменённые Boostix."));
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
@@ -897,7 +897,7 @@ namespace Boostix
             };
 
             var title = MakeText(
-                "Откат системной оптимизации",
+                L.T("Откат системной оптимизации"),
                 13.5,
                 TextColor,
                 semiboldFont,
@@ -906,7 +906,7 @@ namespace Boostix
             body.Children.Add(title);
 
             var description = MakeText(
-                "Программа использует сохранённую резервную копию и не трогает параметры, которые с тех пор изменили другие приложения или вы сами.",
+                L.T("Программа использует сохранённую резервную копию и не трогает параметры, которые с тех пор изменили другие приложения или вы сами."),
                 10.7,
                 MutedColor,
                 regularFont,
@@ -916,7 +916,7 @@ namespace Boostix
             body.Children.Add(description);
 
             var notice = MakeText(
-                "Для восстановления Windows запросит права администратора.",
+                L.T("Для восстановления Windows запросит права администратора."),
                 10,
                 MutedColor,
                 semiboldFont,
@@ -929,18 +929,18 @@ namespace Boostix
             cardContent.Children.Add(body);
 
             var buttons = BuildButtonRow();
-            var cancelButton = MakeActionButton("Отмена", false);
+            var cancelButton = MakeActionButton(L.T("Отмена"), false);
             cancelButton.Click += delegate { CancelManualRestore(); };
-            AutomationProperties.SetName(cancelButton, "Отменить ручное восстановление");
+            AutomationProperties.SetName(cancelButton, L.T("Отменить ручное восстановление"));
             buttons.Children.Add(cancelButton);
 
-            var restoreButton = MakeActionButton("Восстановить", true);
+            var restoreButton = MakeActionButton(L.T("Восстановить"), true);
             restoreButton.Margin = new Thickness(10, 0, 0, 0);
             restoreButton.IsDefault = true;
             restoreButton.Click += delegate { BeginRestoreAndClose(); };
             AutomationProperties.SetName(
                 restoreButton,
-                "Восстановить исходные настройки из активной резервной копии");
+                L.T("Восстановить исходные настройки из активной резервной копии"));
             buttons.Children.Add(restoreButton);
             preferredFocusButton = restoreButton;
 
@@ -978,7 +978,7 @@ namespace Boostix
             catch (Exception ex)
             {
                 allowOwnerClose = false;
-                ShowFailure("Не удалось запустить перезагрузку: " + ex.Message, true);
+                ShowFailure(L.T("Не удалось запустить перезагрузку: ") + ex.Message, true);
             }
         }
 
@@ -1006,8 +1006,8 @@ namespace Boostix
             if (await RestoreAsync())
             {
                 ShowFailure(
-                    "Не удалось применить настройки, поэтому Boostix отменил все изменения. " +
-                    "Система в исходном состоянии: можно продолжить без настройки или попробовать ещё раз.",
+                    L.T("Не удалось применить настройки, поэтому Boostix отменил все изменения. ") +
+                    L.T("Система в исходном состоянии: можно продолжить без настройки или попробовать ещё раз."),
                     false);
             }
         }
@@ -1018,8 +1018,8 @@ namespace Boostix
         {
             state = FlowState.Restoring;
             ShowWorking(
-                "Восстанавливаем настройки",
-                "Возвращаем только те параметры, которые Boostix изменил при настройке.",
+                L.T("Восстанавливаем настройки"),
+                L.T("Возвращаем только те параметры, которые Boostix изменил при настройке."),
                 null);
 
             if (demoMode)
@@ -1032,7 +1032,7 @@ namespace Boostix
             if (!TryValidateStatePath(pendingStatePath, out validatedStatePath))
             {
                 ShowFailure(
-                    "Файл резервной копии не найден. Автоматический откат остановлен, чтобы не менять систему вслепую.",
+                    L.T("Файл резервной копии не найден. Автоматический откат остановлен, чтобы не менять систему вслепую."),
                     true);
                 return false;
             }
@@ -1041,7 +1041,7 @@ namespace Boostix
             string scriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "MaxFPS-Restore.ps1");
             if (!File.Exists(scriptPath))
             {
-                ShowFailure("Файл MaxFPS-Restore.ps1 не найден рядом с программой.", true);
+                ShowFailure(L.T("Файл MaxFPS-Restore.ps1 не найден рядом с программой."), true);
                 return false;
             }
 
@@ -1059,7 +1059,7 @@ namespace Boostix
             {
                 TryDeleteFile(resultPath);
                 ShowFailure(
-                    "Откат отменён в запросе прав администратора. Настройки пока остаются применёнными.",
+                    L.T("Откат отменён в запросе прав администратора. Настройки пока остаются применёнными."),
                     true);
                 return false;
             }
@@ -1069,10 +1069,10 @@ namespace Boostix
                 TryDeleteFile(resultPath);
                 ShowFailure(
                     execution.TimedOut
-                        ? "Восстановление заняло слишком много времени и было остановлено. " +
-                          "Резервная копия сохранена для повторной попытки."
-                        : "Не удалось полностью восстановить исходные настройки. " +
-                          "Резервная копия сохранена для повторной попытки.",
+                        ? L.T("Восстановление заняло слишком много времени и было остановлено. ") +
+                          L.T("Резервная копия сохранена для повторной попытки.")
+                        : L.T("Не удалось полностью восстановить исходные настройки. ") +
+                          L.T("Резервная копия сохранена для повторной попытки."),
                     true);
                 return false;
             }
@@ -1127,7 +1127,7 @@ namespace Boostix
             body.Children.Add(progressTrack);
 
             var statusText = MakeText(
-                "Это может занять несколько минут.",
+                L.T("Это может занять несколько минут."),
                 11,
                 MutedColor,
                 regularFont,
@@ -1175,7 +1175,7 @@ namespace Boostix
                         SetApplyingCancellationMessage();
                     }
                 };
-                AutomationProperties.SetName(cancelButton, "Отменить настройку и восстановить исходные параметры");
+                AutomationProperties.SetName(cancelButton, L.T("Отменить настройку и восстановить исходные параметры"));
                 buttons.Children.Add(cancelButton);
                 preferredFocusButton = cancelButton;
                 Grid.SetRow(buttons, 2);
@@ -1196,7 +1196,7 @@ namespace Boostix
             {
                 return;
             }
-            statusText.Text = "Завершаем текущий шаг, затем безопасно вернём изменения.";
+            statusText.Text = L.T("Завершаем текущий шаг, затем безопасно вернём изменения.");
             AutomationProperties.SetName(statusText, statusText.Text);
         }
 
@@ -1210,7 +1210,7 @@ namespace Boostix
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            var header = BuildHeader("Нужно ваше внимание", "Boostix остановил операцию безопасно.");
+            var header = BuildHeader(L.T("Нужно ваше внимание"), L.T("Boostix остановил операцию безопасно."));
             Grid.SetRow(header, 0);
             cardContent.Children.Add(header);
 
@@ -1224,28 +1224,28 @@ namespace Boostix
             var buttons = BuildButtonRow();
             if (canRetryRestore)
             {
-                var retryButton = MakeActionButton("Повторить откат", true);
+                var retryButton = MakeActionButton(L.T("Повторить откат"), true);
                 retryButton.IsDefault = true;
                 retryButton.Click += delegate { BeginRestoreAndClose(); };
-                AutomationProperties.SetName(retryButton, "Повторить восстановление исходных настроек");
+                AutomationProperties.SetName(retryButton, L.T("Повторить восстановление исходных настроек"));
                 buttons.Children.Add(retryButton);
                 preferredFocusButton = retryButton;
             }
             else
             {
-                var closeButton = MakeActionButton("Закрыть", false);
+                var closeButton = MakeActionButton(L.T("Закрыть"), false);
                 closeButton.Click += delegate { CloseApplication(); };
                 buttons.Children.Add(closeButton);
 
-                var skipButton = MakeActionButton("Без настройки", false);
+                var skipButton = MakeActionButton(L.T("Без настройки"), false);
                 skipButton.Margin = new Thickness(10, 0, 0, 0);
                 skipButton.Click += delegate { HideFlow(); };
                 AutomationProperties.SetName(
                     skipButton,
-                    "Продолжить без системной оптимизации");
+                    L.T("Продолжить без системной оптимизации"));
                 buttons.Children.Add(skipButton);
 
-                var retryButton = MakeActionButton("Повторить", true);
+                var retryButton = MakeActionButton(L.T("Повторить"), true);
                 retryButton.Margin = new Thickness(10, 0, 0, 0);
                 retryButton.IsDefault = true;
                 retryButton.Click += ContinueButtonClick;
@@ -1434,7 +1434,7 @@ namespace Boostix
                         {
                             if (process == null)
                             {
-                                throw new InvalidOperationException("Не удалось запустить PowerShell.");
+                                throw new InvalidOperationException(L.T("Не удалось запустить PowerShell."));
                             }
                             result.TimedOut = WaitForProcessExitSafely(
                                 process,
@@ -1535,7 +1535,7 @@ namespace Boostix
                 !IsPathFreeOfReparsePoints(fullPath))
             {
                 throw new InvalidDataException(
-                    "Сценарий оптимизации должен находиться рядом с программой и не может быть ссылкой.");
+                    L.T("Сценарий оптимизации должен находиться рядом с программой и не может быть ссылкой."));
             }
 
             var script = new FileStream(
@@ -1547,7 +1547,7 @@ namespace Boostix
             {
                 if (script.Length <= 0 || script.Length > 4 * 1024 * 1024)
                 {
-                    throw new InvalidDataException("Размер сценария оптимизации недопустим.");
+                    throw new InvalidDataException(L.T("Размер сценария оптимизации недопустим."));
                 }
 
                 string actualHash;
@@ -1559,7 +1559,7 @@ namespace Boostix
                 if (!string.Equals(actualHash, expectedSha256, StringComparison.Ordinal))
                 {
                     throw new InvalidDataException(
-                        "Сценарий оптимизации изменён или повреждён. Переустановите Boostix.");
+                        L.T("Сценарий оптимизации изменён или повреждён. Переустановите Boostix."));
                 }
                 script.Position = 0;
                 return script;
@@ -1578,7 +1578,7 @@ namespace Boostix
                 if (identity == null || identity.User == null)
                 {
                     throw new InvalidOperationException(
-                        "Не удалось определить текущую учётную запись Windows.");
+                        L.T("Не удалось определить текущую учётную запись Windows."));
                 }
                 return identity.User.Value;
             }
@@ -2199,15 +2199,15 @@ namespace Boostix
         private static readonly Dictionary<string, string> FriendlyNames =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                { "AllowNewsAndInterests", "фоновые виджеты" },
-                { "IsPrelaunchEnabled", "фоновые виджеты" },
-                { "EnableTransparency", "прозрачность окон" },
-                { "VisualFXSetting", "быстрые визуальные эффекты" },
-                { "AppCaptureEnabled", "отключение записи игр (Game DVR)" },
-                { "HistoricalCaptureEnabled", "отключение записи игр (Game DVR)" },
-                { "GameDVR_Enabled", "отключение записи игр (Game DVR)" },
-                { "AutoGameModeEnabled", "игровой режим" },
-                { "AllowAutoGameMode", "игровой режим" }
+                { "AllowNewsAndInterests", L.T("фоновые виджеты") },
+                { "IsPrelaunchEnabled", L.T("фоновые виджеты") },
+                { "EnableTransparency", L.T("прозрачность окон") },
+                { "VisualFXSetting", L.T("быстрые визуальные эффекты") },
+                { "AppCaptureEnabled", L.T("отключение записи игр (Game DVR)") },
+                { "HistoricalCaptureEnabled", L.T("отключение записи игр (Game DVR)") },
+                { "GameDVR_Enabled", L.T("отключение записи игр (Game DVR)") },
+                { "AutoGameModeEnabled", L.T("игровой режим") },
+                { "AllowAutoGameMode", L.T("игровой режим") }
             };
 
         internal static string[] ReadSkippedSettings(string resultJson)
@@ -2294,7 +2294,7 @@ namespace Boostix
                 string friendly;
                 if (!FriendlyNames.TryGetValue(valueName, out friendly))
                 {
-                    friendly = "параметр Windows «" + valueName + "»";
+                    friendly = L.T("параметр Windows «") + valueName + "»";
                 }
                 if (!names.Contains(friendly))
                 {
@@ -2304,14 +2304,14 @@ namespace Boostix
             if (names.Count > 0)
             {
                 notes.Add(
-                    "Windows не разрешила изменить: " + string.Join(", ", names) +
-                    ". Этот пункт пропущен, остальные настройки применены.");
+                    L.T("Windows не разрешила изменить: ") + string.Join(", ", names) +
+                    L.T(". Этот пункт пропущен, остальные настройки применены."));
             }
             if (!restorePointCreated)
             {
                 notes.Add(
-                    "Точка восстановления Windows не создана: обычно Windows делает " +
-                    "её не чаще раза в сутки. Откат Boostix работает и без неё.");
+                    L.T("Точка восстановления Windows не создана: обычно Windows делает ") +
+                    L.T("её не чаще раза в сутки. Откат Boostix работает и без неё."));
             }
             return notes;
         }

@@ -6,6 +6,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -51,14 +52,24 @@ namespace Boostix
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool SetDllDirectory(string path);
 
+        /// <summary>
+        /// Passed to the new instance when Boostix restarts itself to change
+        /// the interface language: it waits for the old instance to exit.
+        /// </summary>
+        internal const string RestartArgument = "--restarted";
+        private const int RestartMutexWaitMilliseconds = 15000;
+
         [STAThread]
         private static void Main(string[] args)
         {
+            // Nothing is read from disk before the DLL search is hardened, so
+            // the only possible early message follows --lang or Windows.
+            L.SetLanguage(L.FromArguments(args) ?? L.SystemDefault());
             if (!HardenNativeDllSearch())
             {
                 MessageBox.Show(
-                    "Boostix не смог безопасно подготовить запуск. " +
-                    "Установите актуальные обновления Windows и повторите попытку.",
+                    L.T("Boostix не смог безопасно подготовить запуск. ") +
+                    L.T("Установите актуальные обновления Windows и повторите попытку."),
                     ProductBrand.ProductName,
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
@@ -66,7 +77,18 @@ namespace Boostix
             }
 
             CrashLog.Configure(args);
+            // The language is fixed before any window or static text exists;
+            // changing it later restarts the app.
+            L.SetLanguage(ChooseStartupLanguage(args));
+            Run(args);
+        }
 
+        // Kept apart and never inlined: the JIT initialises the static fields
+        // of the types a method touches (theme names among them) when it
+        // compiles that method, which must happen after the language is set.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void Run(string[] args)
+        {
             using (var applicationMutex = new Mutex(
                 false,
                 GetApplicationMutexName(args)))
@@ -76,7 +98,9 @@ namespace Boostix
                 {
                     try
                     {
-                        ownsMutex = applicationMutex.WaitOne(0, false);
+                        ownsMutex = applicationMutex.WaitOne(
+                            HasArgument(args, RestartArgument) ? RestartMutexWaitMilliseconds : 0,
+                            false);
                     }
                     catch (AbandonedMutexException)
                     {
@@ -86,7 +110,7 @@ namespace Boostix
                     if (!ownsMutex)
                     {
                         MessageBox.Show(
-                            "Boostix уже запущен.",
+                            L.T("Boostix уже запущен."),
                             ProductBrand.ProductName,
                             MessageBoxButton.OK,
                             MessageBoxImage.Information);
@@ -94,6 +118,13 @@ namespace Boostix
                     }
 
                     var application = new Application();
+                    // The saved theme must be in place before the first colour
+                    // is read. The elevated installer probe never reads user files.
+                    bool healthProbe = HasArgument(args, UpdateHealthHandshake.ProbeArgument);
+                    if (!healthProbe && !CrashLog.IsCurrentProcessElevated())
+                    {
+                        BoostixDesignTokens.SetPalette(BoostWindow.ReadThemePreference());
+                    }
                     BoostixDesignTokens.GlassBackdrop = WindowBackdrop.IsAvailable;
                     BoostixDesignTokens.ApplyThemeResources(
                         application.Resources);
@@ -133,8 +164,8 @@ namespace Boostix
                     {
                         CrashLog.Write("Application.Run failed.", ex);
                         MessageBox.Show(
-                            "Boostix столкнулся с ошибкой и безопасно остановлен. " +
-                            "Диагностика сохранена в LocalAppData\\Boostix\\crash.log.",
+                            L.T("Boostix столкнулся с ошибкой и безопасно остановлен. ") +
+                            L.T("Диагностика сохранена в LocalAppData\\Boostix\\crash.log."),
                             ProductBrand.ProductName,
                             MessageBoxButton.OK,
                             MessageBoxImage.Error);
@@ -148,6 +179,38 @@ namespace Boostix
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// --lang wins. Test launches stay Russian because their checks read
+        /// Russian text. The elevated installer probe never reads user files.
+        /// Otherwise the saved choice, then the Windows language.
+        /// </summary>
+        internal static string ChooseStartupLanguage(string[] arguments)
+        {
+            string requested = L.FromArguments(arguments);
+            if (requested != null)
+            {
+                return requested;
+            }
+            if (HasArgument(arguments, "--demo"))
+            {
+                return L.Russian;
+            }
+            if (HasArgument(arguments, UpdateHealthHandshake.ProbeArgument) ||
+                CrashLog.IsCurrentProcessElevated())
+            {
+                return L.SystemDefault();
+            }
+            return BoostWindow.ReadLanguagePreference() ?? L.SystemDefault();
+        }
+
+        private static bool HasArgument(string[] arguments, string name)
+        {
+            return arguments != null && arguments.Any(argument => string.Equals(
+                argument,
+                name,
+                StringComparison.OrdinalIgnoreCase));
         }
 
         private static string GetApplicationMutexName(string[] arguments)
@@ -244,10 +307,16 @@ namespace Boostix
         private const double WorkAreaSafetyInset = 8;
         private const string GuidedProofScenarioId =
             "BOOSTIX-GUIDED-SAME-SCENE-V1";
-        private const string SessionPowerPlanStartActionTitle =
-            "ПЛАН ПИТАНИЯ СЕССИИ";
-        private const string SessionPowerPlanStopActionTitle =
-            "ВОССТАНОВЛЕНИЕ ПЛАНА ПИТАНИЯ";
+        // Report titles are read on use, never cached before the language is set.
+        private static string SessionPowerPlanStartActionTitle
+        {
+            get { return L.T("ПЛАН ПИТАНИЯ СЕССИИ"); }
+        }
+
+        private static string SessionPowerPlanStopActionTitle
+        {
+            get { return L.T("ВОССТАНОВЛЕНИЕ ПЛАНА ПИТАНИЯ"); }
+        }
         private const int SessionPowerPlanShutdownGraceMilliseconds = 500;
         private const int MonitorDefaultToNearest = 2;
         private const int SwpNoActivate = 0x0010;
@@ -379,9 +448,14 @@ namespace Boostix
         private UpdateFlowOverlay updateOverlay;
         private WhatsNewOverlay whatsNewOverlay;
         private BoostixTrayIcon trayIcon;
+        private BoostToast boostToast;
+        private bool startInTray;
+        private bool gaugeSelfTestPlayed;
+        private bool languageRestartPending;
         private HwndSource hotkeySource;
         private bool hotkeyRegistered;
         private BoostCenterOverlay boostCenterOverlay;
+        private readonly SystemLoadSampler loadSampler = new SystemLoadSampler();
         private DispatcherTimer readinessTimer;
         private DispatcherTimer activeBoostTimer;
         private DispatcherTimer autoBoostDiscoveryTimer;
@@ -404,7 +478,7 @@ namespace Boostix
         private bool preflightForBoost;
         private bool autoBoostStartPending;
         private string deactivationSessionStatus = "Completed";
-        private string deactivationSessionReason = "Boost остановлен пользователем.";
+        private string deactivationSessionReason = L.T("Boost остановлен пользователем.");
         private BoostCenterSettings centerSettings = new BoostCenterSettings
         {
             CheckBeforeBoost = true,
@@ -503,6 +577,7 @@ namespace Boostix
                     ex);
             }
             demoMode = HasLaunchArgument(launchArguments, "--demo");
+            startInTray = HasLaunchArgument(launchArguments, AutostartRegistration.TrayArgument);
             safeMode = HasLaunchArgument(launchArguments, "--safe-mode");
             updateHealthProbe = HasLaunchArgument(
                 launchArguments,
@@ -567,6 +642,13 @@ namespace Boostix
             WindowChrome.SetWindowChrome(this, chrome);
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ShowInTaskbar = true;
+            if (startInTray)
+            {
+                // Started with Windows: open quietly; Loaded hides the
+                // window to the tray once the tray icon exists.
+                WindowState = WindowState.Minimized;
+                ShowActivated = false;
+            }
             UseLayoutRounding = true;
             SnapsToDevicePixels = true;
             FontFamily = LoadAppFontFamily();
@@ -607,8 +689,8 @@ namespace Boostix
             }
             Loaded += BoostWindowLoaded;
             SourceInitialized += BoostWindowSourceInitialized;
-            Activated += delegate { ApplyWindowTint(true); };
-            Deactivated += delegate { ApplyWindowTint(false); };
+            Activated += delegate { FadeWindowTint(true); };
+            Deactivated += delegate { FadeWindowTint(false); };
             KeyDown += WindowKeyDown;
             PreviewMouseLeftButtonDown += WindowMouseLeftButtonDown;
             Closing += BoostWindowClosing;
@@ -675,12 +757,38 @@ namespace Boostix
             boostCenterOverlay.SettingsChanged += delegate
             {
                 centerSettings = boostCenterOverlay.Settings;
+                bool themeChanged = !string.Equals(
+                        centerSettings.Theme,
+                        BoostixDesignTokens.PaletteId,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    BoostixDesignTokens.SetPalette(centerSettings.Theme);
                 SaveBoostPreferences();
                 ApplyHotkeyPreference();
+                ApplyAutostartPreference();
+                if (themeChanged)
+                {
+                    ApplyRuntimeTheme();
+                }
                 if (boostActive)
                 {
                     RefreshActiveBoostMaintenance();
                 }
+            };
+            boostCenterOverlay.LanguageChangeRequested += delegate
+            {
+                // The choice is already saved. Restarting ends the window, so
+                // it waits while Boost or a measurement is running, and test
+                // launches never start a real instance.
+                if (demoMode ||
+                    boostActive ||
+                    animationRunning ||
+                    benchmarkCancellation != null ||
+                    string.Equals(centerSettings.Language, L.Language, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+                languageRestartPending = true;
+                Close();
             };
             boostCenterOverlay.RestoreRequested += delegate
             {
@@ -718,7 +826,7 @@ namespace Boostix
                     return;
                 }
                 PerformanceProofTransition transition = proofCoordinator.Cancel(
-                    "Замер FPS сброшен пользователем.");
+                    L.T("Замер FPS сброшен пользователем."));
                 string saveError;
                 if (!proofCheckpointStore.TrySave(proofCoordinator, out saveError))
                 {
@@ -730,7 +838,7 @@ namespace Boostix
                 boostCenterOverlay.SetPerformanceProofSnapshot(
                     proofCoordinator.GetSnapshot());
                 boostCenterOverlay.SetBenchmarkMessage(
-                    "Замер FPS сброшен",
+                    L.T("Замер FPS сброшен"),
                     transition.Message,
                     false);
             };
@@ -747,6 +855,10 @@ namespace Boostix
                 BoostCenterProfileAutoBoostChanged;
             boostCenterOverlay.ProfileRemoveRequested +=
                 BoostCenterProfileRemoveRequested;
+            boostCenterOverlay.InstalledGamesScanRequested +=
+                BoostCenterInstalledGamesScanRequested;
+            boostCenterOverlay.InstalledGameAddRequested +=
+                BoostCenterInstalledGameAddRequested;
             boostCenterOverlay.ExportDiagnosticsRequested +=
                 BoostCenterExportDiagnosticsRequested;
             Panel.SetZIndex(boostCenterOverlay, 10);
@@ -921,13 +1033,13 @@ namespace Boostix
             KeyboardNavigation.SetTabIndex(targetSelectorButton, 10);
             AutomationProperties.SetName(
                 targetSelectorButton,
-                "Выбрать игру для Boostix");
+                L.T("Выбрать игру для Boostix"));
             AutomationProperties.SetAutomationId(
                 targetSelectorButton,
                 "Boostix.Target.Select");
             AutomationProperties.SetHelpText(
                 targetSelectorButton,
-                "Покажет запущенные игры. Boostix запомнит выбранную игру по её файлу EXE.");
+                L.T("Покажет запущенные игры. Boostix запомнит выбранную игру по её файлу EXE."));
 
             var targetContent = new Grid();
             targetContent.ColumnDefinitions.Add(new ColumnDefinition
@@ -965,9 +1077,9 @@ namespace Boostix
                 Margin = new Thickness(14, 0, 12, 0),
                 VerticalAlignment = VerticalAlignment.Center
             };
-            texts.Children.Add(BoostixUi.FieldLabel("Шаг 1. Игра"));
+            texts.Children.Add(BoostixUi.FieldLabel(L.T("Шаг 1. Игра")));
             targetNameText = MakeText(
-                "Выберите игру",
+                L.T("Выберите игру"),
                 17,
                 "#FFEDEFF2",
                 FontWeights.SemiBold);
@@ -980,7 +1092,7 @@ namespace Boostix
             texts.Children.Add(targetNameText);
 
             targetDetailText = MakeText(
-                "Запустите игру, затем выберите её здесь",
+                L.T("Запустите игру, затем выберите её здесь"),
                 BoostixDesignTokens.MetadataTextSize,
                 "#FF8A929C",
                 FontWeights.Normal);
@@ -999,7 +1111,7 @@ namespace Boostix
                 VerticalAlignment = VerticalAlignment.Center
             };
             targetActionText = MakeText(
-                "Выбрать",
+                L.T("Выбрать"),
                 13.5,
                 ProductBrand.AccentTextHex,
                 FontWeights.SemiBold);
@@ -1009,10 +1121,10 @@ namespace Boostix
             targetActionText.FontFamily = LoadAppSemiboldFontFamily();
             targetActionText.VerticalAlignment = VerticalAlignment.Center;
             action.Children.Add(targetActionText);
-            FrameworkElement chevron = BoostixIcons.Create(
+            FrameworkElement chevron = BoostixIcons.CreateThemed(
                 BoostixIcons.ChevronRight,
                 16,
-                BoostixDesignTokens.AccentText);
+                BoostixDesignTokens.AccentTextBrushKey);
             chevron.Margin = new Thickness(4, 1, 0, 0);
             action.Children.Add(chevron);
             Grid.SetColumn(action, 2);
@@ -1067,10 +1179,10 @@ namespace Boostix
                 targetIconHost.Child = image;
                 return;
             }
-            FrameworkElement glyph = BoostixIcons.Create(
+            FrameworkElement glyph = BoostixIcons.CreateThemed(
                 BoostixIcons.Gamepad,
                 24,
-                BoostixDesignTokens.AccentText);
+                BoostixDesignTokens.AccentTextBrushKey);
             glyph.HorizontalAlignment = HorizontalAlignment.Center;
             glyph.VerticalAlignment = VerticalAlignment.Center;
             targetIconHost.Child = glyph;
@@ -1090,7 +1202,7 @@ namespace Boostix
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            TextBlock step = BoostixUi.FieldLabel("Шаг 2. Boost");
+            TextBlock step = BoostixUi.FieldLabel(L.T("Шаг 2. Boost"));
             step.HorizontalAlignment = HorizontalAlignment.Left;
             layout.Children.Add(step);
 
@@ -1101,7 +1213,7 @@ namespace Boostix
             layout.Children.Add(gauge);
 
             caption = MakeText(
-                "Boost выключен",
+                L.T("Boost выключен"),
                 15,
                 "#FFB4BBC3",
                 FontWeights.SemiBold);
@@ -1111,14 +1223,14 @@ namespace Boostix
             caption.FontFamily = LoadAppSemiboldFontFamily();
             caption.HorizontalAlignment = HorizontalAlignment.Center;
             caption.TextAlignment = TextAlignment.Center;
-            AutomationProperties.SetName(caption, "Состояние Boost");
+            AutomationProperties.SetName(caption, L.T("Состояние Boost"));
             AutomationProperties.SetAutomationId(caption, "Boostix.Status");
             AutomationProperties.SetLiveSetting(caption, AutomationLiveSetting.Polite);
             Grid.SetRow(caption, 2);
             layout.Children.Add(caption);
 
             var hint = MakeText(
-                "Нажмите на датчик или Enter",
+                L.T("Нажмите на датчик или Enter"),
                 BoostixDesignTokens.MetadataTextSize,
                 "#FF8A929C",
                 FontWeights.Normal);
@@ -1165,7 +1277,7 @@ namespace Boostix
             verdict.Children.Add(homeVerdictDot);
             var verdictTexts = new StackPanel();
             homeChecksText = MakeText(
-                "Проверяем компьютер…",
+                L.T("Проверяем компьютер…"),
                 17,
                 "#FFEDEFF2",
                 FontWeights.SemiBold);
@@ -1179,7 +1291,7 @@ namespace Boostix
             AutomationProperties.SetLiveSetting(homeChecksText, AutomationLiveSetting.Polite);
             verdictTexts.Children.Add(homeChecksText);
             homeChecksDetail = MakeText(
-                "Это займёт пару секунд",
+                L.T("Это займёт пару секунд"),
                 BoostixDesignTokens.BodyTextSize,
                 "#FF8A929C",
                 FontWeights.Normal);
@@ -1198,20 +1310,20 @@ namespace Boostix
             homeMeters = new StackPanel();
             AutomationProperties.SetAutomationId(homeMeters, "Boostix.SystemMeters");
             rows.Children.Add(homeMeters);
-            liveStateText = AddStatusRow(rows, "Сеанс", "Игра не выбрана");
-            liveTimerText = AddStatusRow(rows, "Время в игре", "00:00");
+            liveStateText = AddStatusRow(rows, L.T("Сеанс"), L.T("Игра не выбрана"));
+            liveTimerText = AddStatusRow(rows, L.T("Время в игре"), "00:00");
             Grid.SetRow(rows, 1);
             layout.Children.Add(rows);
 
             Button details = BoostixUi.ActionButton(
-                "Подробнее о проверке",
+                L.T("Подробнее о проверке"),
                 BoostixButtonKind.Ghost,
                 null);
             details.MinWidth = 0;
             details.HorizontalAlignment = HorizontalAlignment.Left;
             details.Padding = new Thickness(10, 0, 10, 0);
             details.Margin = new Thickness(-10, 0, 0, 0);
-            AutomationProperties.SetName(details, "Открыть раздел «Проверка ПК»");
+            AutomationProperties.SetName(details, L.T("Открыть раздел «Проверка ПК»"));
             AutomationProperties.SetAutomationId(details, "Boostix.OpenSystem");
             KeyboardNavigation.SetTabIndex(details, 12);
             details.Click += delegate
@@ -1241,7 +1353,7 @@ namespace Boostix
             if (snapshot != null && snapshot.MemoryAvailable && snapshot.PhysicalTotalBytes > 0)
             {
                 AddHomeMeter(
-                    "Свободно памяти",
+                    L.T("Свободно памяти"),
                     snapshot.PhysicalAvailableBytes,
                     snapshot.PhysicalTotalBytes,
                     snapshot.Pressure);
@@ -1253,8 +1365,8 @@ namespace Boostix
             Color color;
             if (report == null)
             {
-                verdict = "Проверяем компьютер…";
-                detail = "Это займёт пару секунд";
+                verdict = L.T("Проверяем компьютер…");
+                detail = L.T("Это займёт пару секунд");
                 color = BoostixDesignTokens.MutedText;
             }
             else
@@ -1265,20 +1377,20 @@ namespace Boostix
                     check => check.Severity == BoostCheckSeverity.Warning);
                 if (blocked != null)
                 {
-                    verdict = "Boost сейчас не запустится";
-                    detail = "Причина: " + LowerFirst(BoostixUi.DisplayCase(blocked.Title));
+                    verdict = L.T("Boost сейчас не запустится");
+                    detail = L.T("Причина: ") + LowerFirst(BoostixUi.DisplayCase(blocked.Title));
                     color = BoostixDesignTokens.Error;
                 }
                 else if (warning != null)
                 {
-                    verdict = "Можно играть, есть замечание";
-                    detail = "Замечание: " + LowerFirst(BoostixUi.DisplayCase(warning.Title));
+                    verdict = L.T("Можно играть, есть замечание");
+                    detail = L.T("Замечание: ") + LowerFirst(BoostixUi.DisplayCase(warning.Title));
                     color = BoostixDesignTokens.Warning;
                 }
                 else
                 {
-                    verdict = "Компьютер готов к игре";
-                    detail = "Все проверки пройдены";
+                    verdict = L.T("Компьютер готов к игре");
+                    detail = L.T("Все проверки пройдены");
                     color = BoostixDesignTokens.Success;
                 }
             }
@@ -1330,7 +1442,7 @@ namespace Boostix
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.SecondaryTextBrushKey);
             row.Children.Add(name);
-            string valueText = FormatMemoryCompact(freeBytes) + " из " +
+            string valueText = FormatMemoryCompact(freeBytes) + L.T(" из ") +
                 FormatMemoryCompact(totalBytes);
             var value = MakeText(
                 valueText,
@@ -1363,13 +1475,13 @@ namespace Boostix
             switch (pressure)
             {
                 case DiagnosticPressureLevel.Normal:
-                    return "Норма";
+                    return L.T("Норма");
                 case DiagnosticPressureLevel.Elevated:
-                    return "Повышенная";
+                    return L.T("Повышенная");
                 case DiagnosticPressureLevel.Critical:
-                    return "Критично";
+                    return L.T("Критично");
                 default:
-                    return "Нет данных";
+                    return L.T("Нет данных");
             }
         }
 
@@ -1446,7 +1558,7 @@ namespace Boostix
                 FontSize = BoostixDesignTokens.BodyTextSize,
                 HasDropShadow = false
             };
-            AutomationProperties.SetName(menu, "Запущенные игры и программы");
+            AutomationProperties.SetName(menu, L.T("Запущенные игры и программы"));
             Style itemStyle = BuildTargetMenuItemStyle();
 
             IList<GameTargetCandidate> candidates =
@@ -1454,7 +1566,7 @@ namespace Boostix
             if (candidates.Count == 0)
             {
                 var empty = MakeText(
-                    "Запущенных игр не нашли. Запустите игру и откройте список снова.",
+                    L.T("Запущенных игр не нашли. Запустите игру и откройте список снова."),
                     BoostixDesignTokens.BodyTextSize,
                     "#FF8A929C",
                     FontWeights.Normal);
@@ -1520,7 +1632,7 @@ namespace Boostix
                     };
                     AutomationProperties.SetName(
                         item,
-                        "Выбрать " + selectedCandidate.DisplayName +
+                        L.T("Выбрать ") + selectedCandidate.DisplayName +
                         ", PID " + selectedCandidate.Identity.ProcessId);
                     item.Click += delegate
                     {
@@ -1532,7 +1644,7 @@ namespace Boostix
                                 out error))
                         {
                             ClearSelectedTarget(
-                                "Список устарел. Откройте выбор игры снова");
+                                L.T("Список устарел. Откройте выбор игры снова"));
                             return;
                         }
                         SelectGameTarget(
@@ -1665,19 +1777,19 @@ namespace Boostix
                 ? identity.ProcessName
                 : displayName.Trim();
             targetNameText.Text = safeName;
-            targetDetailText.Text = "Игра запущена";
+            targetDetailText.Text = L.T("Игра запущена");
             targetDetailText.ToolTip = identity.ExecutablePath;
             SetTargetIcon(identity.ExecutablePath);
             if (targetActionText != null)
             {
-                targetActionText.Text = "Сменить";
+                targetActionText.Text = L.T("Сменить");
             }
             AutomationProperties.SetName(
                 targetSelectorButton,
-                "Выбрана игра " + safeName);
+                L.T("Выбрана игра ") + safeName);
             AutomationProperties.SetItemStatus(
                 targetSelectorButton,
-                "Выбрано");
+                L.T("Выбрано"));
 
             if (saveProfile)
             {
@@ -1711,19 +1823,19 @@ namespace Boostix
             {
                 return;
             }
-            targetNameText.Text = "Выберите игру";
+            targetNameText.Text = L.T("Выберите игру");
             targetDetailText.Text = string.IsNullOrWhiteSpace(detail)
-                ? "Запустите игру, затем выберите её здесь"
+                ? L.T("Запустите игру, затем выберите её здесь")
                 : detail;
             targetDetailText.ToolTip = null;
             SetTargetIcon(null);
             if (targetActionText != null)
             {
-                targetActionText.Text = "Выбрать";
+                targetActionText.Text = L.T("Выбрать");
             }
             AutomationProperties.SetName(
                 targetSelectorButton,
-                "Выбрать игру для Boostix");
+                L.T("Выбрать игру для Boostix"));
             AutomationProperties.SetItemStatus(
                 targetSelectorButton,
                 string.Empty);
@@ -1800,7 +1912,7 @@ namespace Boostix
                                 out error))
                         {
                             ClearSelectedTarget(
-                                "Сохранённая игра сейчас не запущена");
+                                L.T("Сохранённая игра сейчас не запущена"));
                         }
                     }
                     TrySelectSavedAutoBoostTarget();
@@ -1823,7 +1935,7 @@ namespace Boostix
                 controls,
                 "Boostix.TitleBar");
 
-            minimizeButton = MakeWindowButton("Свернуть", false);
+            minimizeButton = MakeWindowButton(L.T("Свернуть"), false);
             var minimize = minimizeButton;
             KeyboardNavigation.SetTabIndex(minimize, 90);
             AutomationProperties.SetAutomationId(
@@ -1832,7 +1944,7 @@ namespace Boostix
             minimize.Click += delegate { MinimizeWindow(); };
             controls.Children.Add(minimize);
 
-            closeButton = MakeWindowButton("Закрыть", true);
+            closeButton = MakeWindowButton(L.T("Закрыть"), true);
             var close = closeButton;
             close.Margin = new Thickness(4, 0, 0, 0);
             KeyboardNavigation.SetTabIndex(close, 91);
@@ -1857,10 +1969,10 @@ namespace Boostix
             boostButton.Cursor = Cursors.Hand;
             boostButton.Template = MakeTransparentButtonTemplate(BoostixDesignTokens.RadiusLarge);
             boostButton.FocusVisualStyle = BoostixUi.FocusVisual(BoostixDesignTokens.RadiusLarge);
-            AutomationProperties.SetName(boostButton, "Активировать Boost производительности");
+            AutomationProperties.SetName(boostButton, L.T("Активировать Boost производительности"));
             AutomationProperties.SetHelpText(
                 boostButton,
-                "Готовит Windows к игре. Все изменения отменяются при остановке.");
+                L.T("Готовит Windows к игре. Все изменения отменяются при остановке."));
             AutomationProperties.SetAutomationId(
                 boostButton,
                 "Boostix.Activate");
@@ -1882,7 +1994,7 @@ namespace Boostix
             boostGauge.SetState(state);
             if (state == BoostGaugeState.Idle)
             {
-                boostGauge.SetReadout("Пуск", string.Empty);
+                boostGauge.SetReadout(L.T("Пуск"), string.Empty);
             }
         }
 
@@ -1984,6 +2096,35 @@ namespace Boostix
             centerSettings.GlobalHotkey = !values.ContainsKey("GlobalHotkey") ||
                 GetPreference(values, "GlobalHotkey");
             centerSettings.MinimizeToTray = GetPreference(values, "MinimizeToTray");
+            centerSettings.GameSignals = !values.ContainsKey("GameSignals") ||
+                GetPreference(values, "GameSignals");
+            // Windows' own Run key decides start-up; test launches never touch it.
+            centerSettings.StartWithWindows = !demoMode && AutostartRegistration.IsEnabled();
+            // The theme itself was applied at start-up, before any colour was read.
+            centerSettings.Theme = BoostixDesignTokens.PaletteId;
+            // A choice saved while Boost ran waits for the next start; test
+            // launches show the language they run in.
+            centerSettings.Language = demoMode
+                ? L.Language
+                : ReadLanguagePreference() ?? L.Language;
+        }
+
+        private void ApplyAutostartPreference()
+        {
+            if (demoMode || centerSettings.StartWithWindows == AutostartRegistration.IsEnabled())
+            {
+                return;
+            }
+            if (!AutostartRegistration.Set(
+                    centerSettings.StartWithWindows,
+                    Assembly.GetExecutingAssembly().Location))
+            {
+                centerSettings.StartWithWindows = AutostartRegistration.IsEnabled();
+                if (boostCenterOverlay != null)
+                {
+                    boostCenterOverlay.SetSettings(centerSettings);
+                }
+            }
         }
 
         private void SaveBoostPreferences()
@@ -2004,7 +2145,10 @@ namespace Boostix
                         "KeepWallpaper=" + centerSettings.KeepWallpaper,
                         "KeepNvidiaOverlay=" + centerSettings.KeepNvidiaOverlay,
                         "GlobalHotkey=" + centerSettings.GlobalHotkey,
-                        "MinimizeToTray=" + centerSettings.MinimizeToTray
+                        "MinimizeToTray=" + centerSettings.MinimizeToTray,
+                        "GameSignals=" + centerSettings.GameSignals,
+                        "Theme=" + BoostixDesignTokens.PaletteId,
+                        "Language=" + (centerSettings.Language ?? L.Language)
                     }) + Environment.NewLine;
                 BoostSessionReportStore.WriteAllTextAtomic(
                     path,
@@ -2020,6 +2164,56 @@ namespace Boostix
         {
             bool value;
             return values.TryGetValue(name, out value) && value;
+        }
+
+        /// <summary>
+        /// The theme id saved in the preferences file, or null.
+        /// </summary>
+        internal static string ReadThemePreference()
+        {
+            return ReadTextPreference("Theme");
+        }
+
+        /// <summary>
+        /// The saved interface language, "ru" or "en", or null.
+        /// </summary>
+        internal static string ReadLanguagePreference()
+        {
+            string value = ReadTextPreference("Language");
+            if (string.Equals(value, L.English, StringComparison.OrdinalIgnoreCase))
+            {
+                return L.English;
+            }
+            if (string.Equals(value, L.Russian, StringComparison.OrdinalIgnoreCase))
+            {
+                return L.Russian;
+            }
+            return null;
+        }
+
+        private static string ReadTextPreference(string name)
+        {
+            string prefix = name + "=";
+            try
+            {
+                string path = GetPreferencesPath();
+                if (!File.Exists(path))
+                {
+                    return null;
+                }
+                foreach (string line in File.ReadAllLines(path, Encoding.UTF8))
+                {
+                    if (line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return line.Substring(prefix.Length).Trim();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not read the saved " + name + " preference.", ex);
+            }
+            return null;
         }
 
         private static string GetPreferencesPath()
@@ -2058,7 +2252,7 @@ namespace Boostix
             {
                 if (!animationRunning && caption != null)
                 {
-                    caption.Text = "Дождитесь окончания замера";
+                    caption.Text = L.T("Дождитесь окончания замера");
                     caption.SetResourceReference(
                         TextBlock.ForegroundProperty,
                         BoostixDesignTokens.AccentTextBrushKey);
@@ -2084,7 +2278,7 @@ namespace Boostix
                 return;
             }
             GameProcessSnapshot targetSnapshot;
-            string targetError = "Выбранная игра больше не запущена.";
+            string targetError = L.T("Выбранная игра больше не запущена.");
             if (selectedTarget == null ||
                 !gameTargetService.TryResolve(
                     selectedTarget,
@@ -2093,9 +2287,9 @@ namespace Boostix
             {
                 if (selectedTarget != null)
                 {
-                    ClearSelectedTarget("Выбранная игра закрыта или была перезапущена");
+                    ClearSelectedTarget(L.T("Выбранная игра закрыта или была перезапущена"));
                 }
-                caption.Text = "Сначала выберите игру";
+                caption.Text = L.T("Сначала выберите игру");
                 caption.SetResourceReference(
                     TextBlock.ForegroundProperty,
                     BoostixDesignTokens.AccentTextBrushKey);
@@ -2169,7 +2363,7 @@ namespace Boostix
             }
             else if (!IsVisible || WindowState == WindowState.Minimized)
             {
-                Notify("Перед запуском Boost есть замечания. Откройте Boostix.");
+                Notify(L.T("Перед запуском Boost есть замечания. Откройте Boostix."));
                 RestoreWindow();
             }
         }
@@ -2191,8 +2385,8 @@ namespace Boostix
                         out targetError))
                 {
                     ClearSelectedTarget(
-                        "Игра перезапустилась. Выберите её снова");
-                    caption.Text = "Игра недоступна";
+                        L.T("Игра перезапустилась. Выберите её снова"));
+                    caption.Text = L.T("Игра недоступна");
                     caption.SetResourceReference(
                         TextBlock.ForegroundProperty,
                         BoostixDesignTokens.ErrorBrushKey);
@@ -2212,16 +2406,16 @@ namespace Boostix
             departureFinished = false;
             boostReady = false;
             boostButton.IsEnabled = false;
-            caption.Text = "Запускаю Boost…";
+            caption.Text = L.T("Запускаю Boost…");
             SetGaugeState(BoostGaugeState.Working);
-            boostGauge.SetReadout(string.Empty, "подготовка");
+            boostGauge.SetReadout(string.Empty, L.T("подготовка"));
             caption.SetResourceReference(
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.AccentTextBrushKey);
 
             if (!LaunchBoostScript())
             {
-                HandleBoostFailure("Boost не запущен");
+                HandleBoostFailure(L.T("Boost не запущен"));
                 return;
             }
 
@@ -2249,7 +2443,7 @@ namespace Boostix
                 string scriptPath = System.IO.Path.Combine(baseDirectory, "Boost-Session.ps1");
                 if (!File.Exists(scriptPath))
                 {
-                    throw new FileNotFoundException("Boost-Session.ps1 не найден рядом с приложением.", scriptPath);
+                    throw new FileNotFoundException(L.T("Boost-Session.ps1 не найден рядом с приложением."), scriptPath);
                 }
 
                 readinessSignalPath = System.IO.Path.Combine(
@@ -2352,7 +2546,7 @@ namespace Boostix
             if (processFailed || DateTime.UtcNow >= readinessDeadline)
             {
                 readinessTimer.Stop();
-                HandleBoostFailure("Boost не запущен");
+                HandleBoostFailure(L.T("Boost не запущен"));
             }
         }
 
@@ -2383,13 +2577,13 @@ namespace Boostix
             {
                 currentSession.Status = "Active";
                 currentSession.AddAction(
-                    "ОДНОРАЗОВАЯ ПОДГОТОВКА",
-                    "Закрыли программы, отмеченные в настройках.",
+                    L.T("ОДНОРАЗОВАЯ ПОДГОТОВКА"),
+                    L.T("Закрыли программы, отмеченные в настройках."),
                     BoostActionOutcome.Changed);
                 ImportBoostScriptResult(currentSession);
                 SaveCurrentSession();
             }
-            caption.Text = "Boost включён";
+            caption.Text = L.T("Boost включён");
             caption.SetResourceReference(
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.SuccessBrushKey);
@@ -2454,15 +2648,17 @@ namespace Boostix
             deactivationSessionStatus = string.IsNullOrWhiteSpace(sessionStatus)
                 ? "Completed"
                 : sessionStatus;
-            deactivationSessionReason = sessionReason ?? string.Empty;
+            // Reasons passed by callers are already translated; L.T leaves
+            // text that is not a Russian source string unchanged.
+            deactivationSessionReason = L.T(sessionReason ?? string.Empty);
             animationRunning = true;
             boostButton.IsEnabled = false;
             boostActive = false;
             StopActiveBoostMaintenance();
             StopBoostProcess();
-            caption.Text = "Останавливаю Boost…";
+            caption.Text = L.T("Останавливаю Boost…");
             SetGaugeState(BoostGaugeState.Working);
-            boostGauge.SetReadout(string.Empty, "остановка");
+            boostGauge.SetReadout(string.Empty, L.T("остановка"));
             caption.SetResourceReference(
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.AccentTextBrushKey);
@@ -2480,7 +2676,7 @@ namespace Boostix
             {
                 targetSelectorButton.IsEnabled = true;
             }
-            caption.Text = "Boost выключен";
+            caption.Text = L.T("Boost выключен");
             caption.SetResourceReference(
                 TextBlock.ForegroundProperty,
                 BoostixDesignTokens.SecondaryTextBrushKey);
@@ -2495,7 +2691,7 @@ namespace Boostix
                 deactivationSessionStatus,
                 deactivationSessionReason);
             deactivationSessionStatus = "Completed";
-            deactivationSessionReason = "Boost остановлен пользователем.";
+            deactivationSessionReason = L.T("Boost остановлен пользователем.");
             preflightAccepted = false;
 
             if (showCrashReport && boostCenterOverlay != null)
@@ -2590,7 +2786,7 @@ namespace Boostix
                     }
                     NotifySelectedTargetEnded(
                         generation,
-                        "Выбранная игра завершилась.",
+                        L.T("Выбранная игра завершилась."),
                         exitedUtc,
                         exitCode);
                 };
@@ -2786,10 +2982,10 @@ namespace Boostix
                 SessionGuardPressureDecision.CriticalAlertRaised)
             {
                 RecordSessionAction(
-                    "SESSION GUARD — ДАВЛЕНИЕ ПАМЯТИ",
-                    "Памяти долго не хватает. " +
-                    "Закройте лишние программы или увеличьте " +
-                    "файл подкачки.",
+                    L.T("SESSION GUARD — ДАВЛЕНИЕ ПАМЯТИ"),
+                    L.T("Памяти долго не хватает. ") +
+                    L.T("Закройте лишние программы или увеличьте ") +
+                    L.T("файл подкачки."),
                     BoostActionOutcome.Skipped);
             }
             UpdateLiveSessionSummaryOnDispatcher();
@@ -2937,10 +3133,10 @@ namespace Boostix
                     sessionGuardPressureState.CriticalAlertActive;
             }
             string state = selectedTarget == null
-                ? "Игра не выбрана"
+                ? L.T("Игра не выбрана")
                 : (boostActive
-                    ? (pressure ? "Мало памяти" : "Boost включён")
-                    : "Готов к запуску");
+                    ? (pressure ? L.T("Мало памяти") : L.T("Boost включён"))
+                    : L.T("Готов к запуску"));
             liveStateText.Text = state;
             liveStateText.Foreground = BoostixDesignTokens.Brush(
                 pressure
@@ -2958,14 +3154,18 @@ namespace Boostix
                 duration.Seconds);
             if (boostGauge != null && boostActive && !animationRunning)
             {
-                boostGauge.SetReadout(liveTimerText.Text, "остановить");
+                boostGauge.SetReadout(liveTimerText.Text, L.T("остановить"));
+                if (IsVisible && WindowState != WindowState.Minimized)
+                {
+                    boostGauge.SetLiveLoad(loadSampler.Sample());
+                }
             }
             AutomationProperties.SetName(
                 liveStateText,
-                "Состояние сеанса: " + state);
+                L.T("Состояние сеанса: ") + state);
             AutomationProperties.SetName(
                 liveTimerText,
-                "Время в игре: " + liveTimerText.Text);
+                L.T("Время в игре: ") + liveTimerText.Text);
             UpdateBoostCenterSessionData();
         }
 
@@ -3035,7 +3235,7 @@ namespace Boostix
             impactScanCancellation = cancellation;
             boostCenterOverlay.SetImpactResults(
                 null,
-                "Проверяем фоновые программы…",
+                L.T("Проверяем фоновые программы…"),
                 true);
             try
             {
@@ -3051,15 +3251,15 @@ namespace Boostix
                 boostCenterOverlay.SetImpactResults(
                     lastImpactResults,
                     lastImpactResults.Count == 0
-                        ? "Заметной фоновой нагрузки нет."
-                        : "Закрыть программу можно кнопкой в её строке.",
+                        ? L.T("Заметной фоновой нагрузки нет.")
+                        : L.T("Закрыть программу можно кнопкой в её строке."),
                     false);
             }
             catch (OperationCanceledException)
             {
                 boostCenterOverlay.SetImpactResults(
                     null,
-                    "Проверка отменена.",
+                    L.T("Проверка отменена."),
                     false);
             }
             catch (Exception ex)
@@ -3067,7 +3267,7 @@ namespace Boostix
                 CrashLog.Write("Background impact scan failed.", ex);
                 boostCenterOverlay.SetImpactResults(
                     null,
-                    "Проверка не завершилась. Попробуйте ещё раз.",
+                    L.T("Проверка не завершилась. Попробуйте ещё раз."),
                     false);
             }
             finally
@@ -3099,7 +3299,7 @@ namespace Boostix
             {
                 boostCenterOverlay.SetImpactResults(
                     lastImpactResults,
-                    "Программа не закрылась.",
+                    L.T("Программа не закрылась."),
                     false);
                 return;
             }
@@ -3114,14 +3314,14 @@ namespace Boostix
             }
             string processName = string.IsNullOrWhiteSpace(
                 e.Identity.ProcessName)
-                ? "Приложение"
+                ? L.T("Приложение")
                 : e.Identity.ProcessName;
             boostCenterOverlay.SetImpactResults(
                 lastImpactResults,
                 processName + ": " + closeResult.Message,
                 false);
             RecordSessionAction(
-                processName + " — ФОНОВОЕ ПРИЛОЖЕНИЕ",
+                processName + L.T(" — ФОНОВОЕ ПРИЛОЖЕНИЕ"),
                 closeResult.Message,
                 closeResult.Exited
                     ? BoostActionOutcome.Changed
@@ -3145,13 +3345,53 @@ namespace Boostix
                         e.Enabled))
                 {
                     throw new InvalidOperationException(
-                        "Профиль уже удалён или изменён.");
+                        L.T("Профиль уже удалён или изменён."));
                 }
                 gameProfilesDirty = true;
             }
             catch (Exception ex)
             {
                 CrashLog.Write("Could not update Auto Boost profile state.", ex);
+            }
+            UpdateBoostCenterSessionData();
+        }
+
+        private async void BoostCenterInstalledGamesScanRequested(
+            object sender,
+            EventArgs e)
+        {
+            List<InstalledGame> games;
+            try
+            {
+                games = await Task.Run(delegate { return GameLibraryScanner.Scan(); });
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Installed games could not be listed.", ex);
+                games = new List<InstalledGame>();
+            }
+            if (boostCenterOverlay != null)
+            {
+                boostCenterOverlay.SetInstalledGames(games, false);
+            }
+        }
+
+        private void BoostCenterInstalledGameAddRequested(
+            object sender,
+            InstalledGameEventArgs e)
+        {
+            if (e == null || e.Game == null)
+            {
+                return;
+            }
+            try
+            {
+                gameProfileStore.AddExecutable(e.Game.ExecutablePath, e.Game.Name);
+                gameProfilesDirty = true;
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not add a found game.", ex);
             }
             UpdateBoostCenterSessionData();
         }
@@ -3244,7 +3484,7 @@ namespace Boostix
 
             GameTargetIdentity exactTarget = selectedTarget;
             GameProcessSnapshot targetSnapshot;
-            string targetError = "Выбранная игра больше не запущена.";
+            string targetError = L.T("Выбранная игра больше не запущена.");
             if (exactTarget == null ||
                 !gameTargetService.TryResolve(
                     exactTarget,
@@ -3283,7 +3523,7 @@ namespace Boostix
                     RestoreOwnedTargetPriorities();
                     NotifySelectedTargetEnded(
                         generation,
-                        "Windows переиспользовала PID или исполняемый файл изменился.");
+                        L.T("Windows переиспользовала PID или исполняемый файл изменился."));
                     return;
                 }
                 string actualName = target.ProcessName;
@@ -3328,8 +3568,8 @@ namespace Boostix
                 if (!canRaise)
                 {
                     RecordSessionAction(
-                        actualName + " — ПРИОРИТЕТ",
-                        "Существующий приоритет " + originalPriority + " сохранён.",
+                        actualName + L.T(" — ПРИОРИТЕТ"),
+                        L.T("Существующий приоритет ") + originalPriority + L.T(" сохранён."),
                         BoostActionOutcome.AlreadyOptimal);
                     return;
                 }
@@ -3360,8 +3600,8 @@ namespace Boostix
                 if (!priorityChanged)
                 {
                     RecordSessionAction(
-                        actualName + " — ПРИОРИТЕТ",
-                        "Внешнее изменение приоритета сохранено.",
+                        actualName + L.T(" — ПРИОРИТЕТ"),
+                        L.T("Внешнее изменение приоритета сохранено."),
                         BoostActionOutcome.ExternalOverridePreserved);
                     return;
                 }
@@ -3369,9 +3609,9 @@ namespace Boostix
                     "Set foreground target " + actualName + " (PID " +
                     processId + ") priority to AboveNormal.");
                 RecordSessionAction(
-                    actualName + " — ПРИОРИТЕТ",
-                    "Приоритет " + originalPriority +
-                    " → AboveNormal. Исходное значение сохранено.",
+                    actualName + L.T(" — ПРИОРИТЕТ"),
+                    L.T("Приоритет ") + originalPriority +
+                    L.T(" → AboveNormal. Исходное значение сохранено."),
                     BoostActionOutcome.Changed);
                 if (currentSession != null)
                 {
@@ -3398,8 +3638,8 @@ namespace Boostix
                 if (firstFailure)
                 {
                     RecordSessionAction(
-                        "ЦЕЛЕВОЕ ПРИЛОЖЕНИЕ — ПРИОРИТЕТ",
-                        "Не удалось изменить приоритет: " + ex.Message,
+                        L.T("ЦЕЛЕВОЕ ПРИЛОЖЕНИЕ — ПРИОРИТЕТ"),
+                        L.T("Не удалось изменить приоритет: ") + ex.Message,
                         BoostActionOutcome.Skipped);
                 }
             }
@@ -3462,10 +3702,10 @@ namespace Boostix
                     {
                         StartBoostDeactivation(
                             "TargetExited",
-                            "Выбранная игра завершилась. Boostix проверяет журнал Windows.");
+                            L.T("Выбранная игра завершилась. Boostix проверяет журнал Windows."));
                     }
                     ClearSelectedTarget(
-                        "Игра закрылась. Выберите её снова после запуска");
+                        L.T("Игра закрылась. Выберите её снова после запуска"));
                 }));
             }
             catch (InvalidOperationException)
@@ -3521,7 +3761,7 @@ namespace Boostix
                     {
                         Status = CrashCorrelationStatus.ProviderUnavailable,
                         Summary =
-                            "Журнал Windows недоступен. Причина завершения не определена."
+                            L.T("Журнал Windows недоступен. Причина завершения не определена.")
                     };
                 }
 
@@ -3584,7 +3824,7 @@ namespace Boostix
                 report.TargetCrashOffset = correlation.FaultOffset;
                 report.StopReason = correlation.Summary;
                 report.AddAction(
-                    "СВИДЕТЕЛЬСТВО СБОЯ WINDOWS",
+                    L.T("СВИДЕТЕЛЬСТВО СБОЯ WINDOWS"),
                     BuildCrashEvidenceDetail(correlation),
                     BoostActionOutcome.Failed);
             }
@@ -3593,11 +3833,11 @@ namespace Boostix
                 report.TargetCrashUtc = null;
                 report.Status = "TargetExited";
                 report.StopReason =
-                    "Игра закрылась. Сбоя Windows не зафиксировала.";
+                    L.T("Игра закрылась. Сбоя Windows не зафиксировала.");
                 report.AddAction(
-                    "ЗАВЕРШЕНИЕ ИГРЫ",
+                    L.T("ЗАВЕРШЕНИЕ ИГРЫ"),
                     (correlation == null
-                        ? "Причина завершения не определена."
+                        ? L.T("Причина завершения не определена.")
                         : correlation.Summary) +
                     (string.IsNullOrWhiteSpace(resolutionError)
                         ? string.Empty
@@ -3628,21 +3868,21 @@ namespace Boostix
             var parts = new List<string>();
             if (!string.IsNullOrWhiteSpace(correlation.ExceptionCode))
             {
-                parts.Add("код " + correlation.ExceptionCode);
+                parts.Add(L.T("код ") + correlation.ExceptionCode);
             }
             if (!string.IsNullOrWhiteSpace(correlation.FaultingModule))
             {
-                parts.Add("модуль " + correlation.FaultingModule);
+                parts.Add(L.T("модуль ") + correlation.FaultingModule);
             }
             if (!string.IsNullOrWhiteSpace(correlation.FaultOffset))
             {
-                parts.Add("смещение " + correlation.FaultOffset);
+                parts.Add(L.T("смещение ") + correlation.FaultOffset);
             }
             string evidence = parts.Count == 0
-                ? "Windows зафиксировала совпадающее событие."
-                : "Windows зафиксировала: " + string.Join(", ", parts) + ".";
+                ? L.T("Windows зафиксировала совпадающее событие.")
+                : L.T("Windows зафиксировала: ") + string.Join(", ", parts) + ".";
             return evidence +
-                " Это свидетельство журнала, а не автоматический диагноз.";
+                L.T(" Это свидетельство журнала, а не автоматический диагноз.");
         }
 
         private void UpdateTargetMemoryTelemetry(
@@ -3685,7 +3925,7 @@ namespace Boostix
         {
             if (bytes <= 0)
             {
-                return "0 МБ";
+                return L.T("0 МБ");
             }
             return BoostCenterOverlay.FormatBytesCompact(bytes);
         }
@@ -3717,15 +3957,15 @@ namespace Boostix
                     if (current != ProcessPriorityClass.AboveNormal)
                     {
                         RecordSessionAction(
-                            item.ProcessName + " — ПРИОРИТЕТ",
-                            "Внешнее изменение " + current + " сохранено; Boost его не перезаписал.",
+                            item.ProcessName + L.T(" — ПРИОРИТЕТ"),
+                            L.T("Внешнее изменение ") + current + L.T(" сохранено; Boost его не перезаписал."),
                             BoostActionOutcome.ExternalOverridePreserved);
                         continue;
                     }
                     process.PriorityClass = item.OriginalPriority;
                     RecordSessionAction(
-                        item.ProcessName + " — ПРИОРИТЕТ",
-                        "Восстановлен исходный приоритет " + item.OriginalPriority + ".",
+                        item.ProcessName + L.T(" — ПРИОРИТЕТ"),
+                        L.T("Восстановлен исходный приоритет ") + item.OriginalPriority + ".",
                         BoostActionOutcome.Restored);
                 }
                 catch
@@ -3800,7 +4040,7 @@ namespace Boostix
         {
             if (currentSession != null)
             {
-                CompleteCurrentSession("Interrupted", "Начата новая сессия Boost.");
+                CompleteCurrentSession("Interrupted", L.T("Начата новая сессия Boost."));
             }
             currentSession = BoostSessionReport.Start(trigger);
             lock (activeMaintenanceSync)
@@ -3808,29 +4048,29 @@ namespace Boostix
                 priorityFailureTargetKey = null;
             }
             currentSession.AddAction(
-                "ПАМЯТЬ ДО ЗАПУСКА",
+                L.T("ПАМЯТЬ ДО ЗАПУСКА"),
                 FormatMemory(currentSession.AvailableMemoryStartBytes) +
-                " доступно; сюда уже входит освобождаемый кэш Windows.",
+                L.T(" доступно; сюда уже входит освобождаемый кэш Windows."),
                 BoostActionOutcome.AlreadyOptimal);
             if (centerSettings.KeepDiscord)
             {
                 currentSession.AddAction(
                     "DISCORD",
-                    "Сохранён по вашему выбору.",
+                    L.T("Сохранён по вашему выбору."),
                     BoostActionOutcome.Preserved);
             }
             if (centerSettings.KeepEpic)
             {
                 currentSession.AddAction(
                     "EPIC GAMES",
-                    "Сохранён по вашему выбору.",
+                    L.T("Сохранён по вашему выбору."),
                     BoostActionOutcome.Preserved);
             }
             if (centerSettings.KeepSteam)
             {
                 currentSession.AddAction(
                     "STEAM",
-                    "Сохранён по вашему выбору.",
+                    L.T("Сохранён по вашему выбору."),
                     BoostActionOutcome.Preserved);
             }
             SaveCurrentSession();
@@ -3850,8 +4090,8 @@ namespace Boostix
                 sessionId == Guid.Empty)
             {
                 currentSession.AddAction(
-                    "ПЛАН ПИТАНИЯ",
-                    "Идентификатор сессии не прошёл проверку; план Windows не менялся.",
+                    L.T("ПЛАН ПИТАНИЯ"),
+                    L.T("Идентификатор сессии не прошёл проверку; план Windows не менялся."),
                     BoostActionOutcome.Failed);
                 SaveCurrentSession();
                 return;
@@ -4204,8 +4444,8 @@ namespace Boostix
             report.AddAction(
                 SessionPowerPlanStartActionTitle,
                 failure == null
-                    ? "Результат включения плана питания недоступен."
-                    : "Включение плана питания завершилось ошибкой; восстановление всё равно было запрошено.",
+                    ? L.T("Результат включения плана питания недоступен.")
+                    : L.T("Включение плана питания завершилось ошибкой; восстановление всё равно было запрошено."),
                 BoostActionOutcome.Failed);
         }
 
@@ -4269,32 +4509,32 @@ namespace Boostix
         {
             if (result == null)
             {
-                return "Результат операции недоступен; состояние Windows не подтверждено.";
+                return L.T("Результат операции недоступен; состояние Windows не подтверждено.");
             }
             switch (result.Status)
             {
                 case SessionPowerPlanStatus.Activated:
-                    return "Профиль Boostix Performance включён только на время этой игровой сессии.";
+                    return L.T("Профиль Boostix Performance включён только на время этой игровой сессии.");
                 case SessionPowerPlanStatus.Restored:
                 case SessionPowerPlanStatus.Recovered:
-                    return "Исходный план питания Windows восстановлен.";
+                    return L.T("Исходный план питания Windows восстановлен.");
                 case SessionPowerPlanStatus.AlreadyActive:
-                    return "План Boostix уже был активен до сессии и не был присвоен приложением.";
+                    return L.T("План Boostix уже был активен до сессии и не был присвоен приложением.");
                 case SessionPowerPlanStatus.AlreadyStopped:
                 case SessionPowerPlanStatus.NoRecoveryNeeded:
-                    return "Управляемых изменений плана питания нет.";
+                    return L.T("Управляемых изменений плана питания нет.");
                 case SessionPowerPlanStatus.ExternalOverridePreserved:
-                    return "Пользователь или Windows сменили план питания; внешний выбор сохранён.";
+                    return L.T("Пользователь или Windows сменили план питания; внешний выбор сохранён.");
                 case SessionPowerPlanStatus.SkippedOnBattery:
-                    return "Ноутбук работает от батареи; план питания не менялся.";
+                    return L.T("Ноутбук работает от батареи; план питания не менялся.");
                 case SessionPowerPlanStatus.PowerSourceUnavailable:
-                    return "Источник питания не удалось подтвердить; план не менялся.";
+                    return L.T("Источник питания не удалось подтвердить; план не менялся.");
                 case SessionPowerPlanStatus.TrustedStateMissing:
-                    return "Проверенный профиль ещё не подготовлен; план питания не менялся.";
+                    return L.T("Проверенный профиль ещё не подготовлен; план питания не менялся.");
                 case SessionPowerPlanStatus.LiveSessionPreserved:
-                    return "Обнаружена другая живая сессия Boostix; её план не изменён.";
+                    return L.T("Обнаружена другая живая сессия Boostix; её план не изменён.");
                 default:
-                    return "Операция остановлена безопасно: " + result.Status + ".";
+                    return L.T("Операция остановлена безопасно: ") + result.Status + ".";
             }
         }
 
@@ -4361,14 +4601,14 @@ namespace Boostix
                         string processName = parts.Length > 0 ? parts[0] : value;
                         report.AddAction(
                             processName.ToUpperInvariant(),
-                            "Закрыт во время одноразовой подготовки.",
+                            L.T("Закрыт во время одноразовой подготовки."),
                             BoostActionOutcome.Changed);
                         stopped++;
                     }
                     else if (IsIndexedResultKey(key, "Warning"))
                     {
                         report.AddAction(
-                            "ПРЕДУПРЕЖДЕНИЕ ПОДГОТОВКИ",
+                            L.T("ПРЕДУПРЕЖДЕНИЕ ПОДГОТОВКИ"),
                             value,
                             BoostActionOutcome.Failed);
                     }
@@ -4376,16 +4616,16 @@ namespace Boostix
                 if (stopped == 0)
                 {
                     report.AddAction(
-                        "ФОНОВЫЕ ПРОЦЕССЫ",
-                        "Выбранные процессы уже не были запущены.",
+                        L.T("ФОНОВЫЕ ПРОЦЕССЫ"),
+                        L.T("Выбранные процессы уже не были запущены."),
                         BoostActionOutcome.AlreadyOptimal);
                 }
             }
             catch (Exception ex)
             {
                 report.AddAction(
-                    "ОТЧЁТ ПОДГОТОВКИ",
-                    "Не удалось прочитать подробности: " + ex.Message,
+                    L.T("ОТЧЁТ ПОДГОТОВКИ"),
+                    L.T("Не удалось прочитать подробности: ") + ex.Message,
                     BoostActionOutcome.Skipped);
             }
             finally
@@ -4487,16 +4727,25 @@ namespace Boostix
             currentSession.MemoryReliefBytes = 0;
             currentSession.Complete(status, reason);
             currentSession.AddAction(
-                "ПАМЯТЬ ПОСЛЕ СЕССИИ",
+                L.T("ПАМЯТЬ ПОСЛЕ СЕССИИ"),
                 FormatMemory(currentSession.AvailableMemoryEndBytes) +
-                " доступно. Минимум за сессию: " +
+                L.T(" доступно. Минимум за сессию: ") +
                 FormatMemory(currentSession.MinimumAvailableMemoryBytes) +
-                "; минимальный резерв памяти: " +
+                L.T("; минимальный резерв памяти: ") +
                 FormatMemory(currentSession.MinimumCommitHeadroomBytes) + ".",
                 BoostActionOutcome.AlreadyOptimal);
             try { BoostSessionReportStore.Save(currentSession); }
             catch { }
             lastSession = currentSession;
+            if (string.Equals(status, "TargetExited", StringComparison.OrdinalIgnoreCase) &&
+                centerSettings.GameSignals &&
+                trayIcon != null)
+            {
+                trayIcon.Notify(SessionSummary.Describe(
+                    lastSession.TargetName,
+                    (lastSession.EndedUtc ?? DateTime.UtcNow) - lastSession.StartedUtc,
+                    lastSession.WorstResourcePressure));
+            }
             // Captures the already-completed report and returns immediately;
             // activation completion, restore and result persistence run off UI.
             StopSessionPowerPlan();
@@ -4512,9 +4761,9 @@ namespace Boostix
         {
             if (bytes <= 0)
             {
-                return "данные недоступны";
+                return L.T("данные недоступны");
             }
-            return (bytes / 1073741824d).ToString("0.0") + " ГБ";
+            return (bytes / 1073741824d).ToString("0.0") + L.T(" ГБ");
         }
 
         private async void BoostCenterExportDiagnosticsRequested(
@@ -4528,8 +4777,8 @@ namespace Boostix
 
             var dialog = new Microsoft.Win32.SaveFileDialog
             {
-                Title = "Сохранить диагностику Boostix",
-                Filter = "Архив диагностики (*.zip)|*.zip",
+                Title = L.T("Сохранить диагностику Boostix"),
+                Filter = L.T("Архив диагностики (*.zip)|*.zip"),
                 DefaultExt = ".zip",
                 AddExtension = true,
                 OverwritePrompt = true,
@@ -4545,8 +4794,8 @@ namespace Boostix
             }
 
             boostCenterOverlay.SetDiagnosticExportMessage(
-                "Собираем диагностику",
-                "Получаем показатели Windows и журналы Boostix, удаляем личные данные.",
+                L.T("Собираем диагностику"),
+                L.T("Получаем показатели Windows и журналы Boostix, удаляем личные данные."),
                 false);
             try
             {
@@ -4588,10 +4837,10 @@ namespace Boostix
                 boostCenterOverlay.SetDiagnosticSnapshot(snapshot);
                 boostCenterOverlay.SetSessionHistory(reports);
                 boostCenterOverlay.SetDiagnosticExportMessage(
-                    "Диагностика сохранена",
-                    "Архив " + System.IO.Path.GetFileName(destination) +
-                        " готов: отчёт и журналы Boostix без имени пользователя, " +
-                        "личных папок и секретов. Его можно отправить в поддержку.",
+                    L.T("Диагностика сохранена"),
+                    L.T("Архив ") + System.IO.Path.GetFileName(destination) +
+                        L.T(" готов: отчёт и журналы Boostix без имени пользователя, ") +
+                        L.T("личных папок и секретов. Его можно отправить в поддержку."),
                     false);
                 ShowFileInExplorer(destination);
             }
@@ -4599,9 +4848,9 @@ namespace Boostix
             {
                 CrashLog.Write("Diagnostic export failed.", ex);
                 boostCenterOverlay.SetDiagnosticExportMessage(
-                    "Не удалось сохранить диагностику",
-                    "Windows вернул ошибку " + ex.GetType().Name +
-                        ". Выберите другую доступную папку и повторите.",
+                    L.T("Не удалось сохранить диагностику"),
+                    L.T("Windows вернул ошибку ") + ex.GetType().Name +
+                        L.T(". Выберите другую доступную папку и повторите."),
                     true);
             }
         }
@@ -4682,12 +4931,12 @@ namespace Boostix
                     boostCenterOverlay.SetBenchmarkProgress(
                         issuedStep == null
                             ? "PROOF MODE"
-                            : "PROOF MODE · ШАГ " +
+                            : L.T("PROOF MODE · ШАГ ") +
                                 issuedStep.StepNumber.ToString(
                                     CultureInfo.CurrentCulture) + "/" +
                                 issuedStep.TotalSteps.ToString(
                                     CultureInfo.CurrentCulture),
-                        item == null ? "Готовим замер." : item.Message,
+                        item == null ? L.T("Готовим замер.") : item.Message,
                         item == null ? 0 : item.Percent);
                 }
             });
@@ -4707,8 +4956,8 @@ namespace Boostix
                 if (captureTarget == null)
                 {
                     boostCenterOverlay.SetBenchmarkMessage(
-                        "СНАЧАЛА ВЫБЕРИТЕ ИГРУ",
-                        "Для замера FPS выберите запущенную игру.",
+                        L.T("СНАЧАЛА ВЫБЕРИТЕ ИГРУ"),
+                        L.T("Для замера FPS выберите запущенную игру."),
                         true);
                     return;
                 }
@@ -4731,8 +4980,8 @@ namespace Boostix
                     string.IsNullOrWhiteSpace(frozenContextKey))
                 {
                     boostCenterOverlay.SetBenchmarkMessage(
-                        "НЕ УДАЛОСЬ ЗАФИКСИРОВАТЬ СЦЕНАРИЙ",
-                        "Проверьте доступ к исполняемому файлу игры и повторите попытку.",
+                        L.T("НЕ УДАЛОСЬ ЗАФИКСИРОВАТЬ СЦЕНАРИЙ"),
+                        L.T("Проверьте доступ к исполняемому файлу игры и повторите попытку."),
                         true);
                     return;
                 }
@@ -4752,7 +5001,7 @@ namespace Boostix
                             out startError))
                     {
                         boostCenterOverlay.SetBenchmarkMessage(
-                            "PROOF MODE НЕ ЗАПУЩЕН",
+                            L.T("PROOF MODE НЕ ЗАПУЩЕН"),
                             startError,
                             true);
                         return;
@@ -4763,7 +5012,7 @@ namespace Boostix
                             out initialSaveError))
                     {
                         boostCenterOverlay.SetBenchmarkMessage(
-                            "НЕ УДАЛОСЬ СОХРАНИТЬ ТЕСТ",
+                            L.T("НЕ УДАЛОСЬ СОХРАНИТЬ ТЕСТ"),
                             initialSaveError,
                             true);
                         return;
@@ -4783,7 +5032,7 @@ namespace Boostix
                         StringComparison.Ordinal))
                 {
                     PerformanceProofTransition cancelled = proofCoordinator.Cancel(
-                        "Игра, монитор или настройки изменились. Начните новый замер FPS.");
+                        L.T("Игра, монитор или настройки изменились. Начните новый замер FPS."));
                     string ignoredSaveError;
                     proofCheckpointStore.TrySave(
                         proofCoordinator,
@@ -4791,7 +5040,7 @@ namespace Boostix
                     boostCenterOverlay.SetPerformanceProofSnapshot(
                         proofCoordinator.GetSnapshot());
                     boostCenterOverlay.SetBenchmarkMessage(
-                        "СЦЕНАРИЙ ИЗМЕНИЛСЯ",
+                        L.T("СЦЕНАРИЙ ИЗМЕНИЛСЯ"),
                         cancelled.Message,
                         true);
                     return;
@@ -4801,7 +5050,7 @@ namespace Boostix
                 if (issuedStep == null)
                 {
                     boostCenterOverlay.SetBenchmarkMessage(
-                        "PROOF MODE ЗАВЕРШЁН",
+                        L.T("PROOF MODE ЗАВЕРШЁН"),
                         snapshot.Message,
                         false);
                     return;
@@ -4811,10 +5060,10 @@ namespace Boostix
                 {
                     boostCenterOverlay.SetBenchmarkMessage(
                         issuedStep.RequiresBoost
-                            ? "ВКЛЮЧИТЕ BOOSTIX"
-                            : "ОТКЛЮЧИТЕ BOOSTIX",
+                            ? L.T("ВКЛЮЧИТЕ BOOSTIX")
+                            : L.T("ОТКЛЮЧИТЕ BOOSTIX"),
                         issuedStep.Instruction +
-                            " После смены состояния нажмите кнопку этапа ещё раз.",
+                            L.T(" После смены состояния нажмите кнопку этапа ещё раз."),
                         false);
                     return;
                 }
@@ -4893,8 +5142,8 @@ namespace Boostix
                             boostCenterOverlay.SetPerformanceProofSnapshot(
                                 proofCoordinator.GetSnapshot());
                             boostCenterOverlay.SetBenchmarkMessage(
-                                "ЭТАП НЕ СОХРАНЁН",
-                                saveError + " Повторите текущий этап.",
+                                L.T("ЭТАП НЕ СОХРАНЁН"),
+                                saveError + L.T(" Повторите текущий этап."),
                                 true);
                             return;
                         }
@@ -4916,7 +5165,7 @@ namespace Boostix
                         transition.FinalResult != null)
                     {
                         boostCenterOverlay.SetBenchmarkMessage(
-                            "PROOF MODE ЗАВЕРШЁН",
+                            L.T("PROOF MODE ЗАВЕРШЁН"),
                             FormatPerformanceProofSummary(transition.FinalResult),
                             transition.FinalResult.Verdict ==
                                 PerformanceProofVerdict.Negative);
@@ -4924,10 +5173,10 @@ namespace Boostix
                     else if (transition.Status == PerformanceProofSubmissionStatus.Accepted)
                     {
                         boostCenterOverlay.SetBenchmarkMessage(
-                            "ЭТАП " + issuedStep.StepNumber.ToString(
+                            L.T("ЭТАП ") + issuedStep.StepNumber.ToString(
                                 CultureInfo.CurrentCulture) + "/" +
                                 issuedStep.TotalSteps.ToString(
-                                    CultureInfo.CurrentCulture) + " ПРИНЯТ",
+                                    CultureInfo.CurrentCulture) + L.T(" ПРИНЯТ"),
                             transition.NextStep == null
                                 ? transition.Message
                                 : transition.NextStep.Instruction,
@@ -4937,8 +5186,8 @@ namespace Boostix
                     {
                         boostCenterOverlay.SetBenchmarkMessage(
                             transition.Status == PerformanceProofSubmissionStatus.Failed
-                                ? "PROOF MODE ОСТАНОВЛЕН"
-                                : "ЭТАП НЕ ПРИНЯТ",
+                                ? L.T("PROOF MODE ОСТАНОВЛЕН")
+                                : L.T("ЭТАП НЕ ПРИНЯТ"),
                             transition.Message,
                             transition.Status == PerformanceProofSubmissionStatus.Failed);
                     }
@@ -4950,24 +5199,24 @@ namespace Boostix
                 else
                 {
                     boostCenterOverlay.SetBenchmarkMessage(
-                        "ЗАМЕР НЕ ВЫПОЛНЕН",
-                        result == null ? "PresentMon не вернул результат." : result.Message,
+                        L.T("ЗАМЕР НЕ ВЫПОЛНЕН"),
+                        result == null ? L.T("PresentMon не вернул результат.") : result.Message,
                         true);
                 }
             }
             catch (OperationCanceledException)
             {
                 boostCenterOverlay.SetBenchmarkMessage(
-                    "ЗАМЕР ОТМЕНЁН",
-                    "Измерение производительности остановлено.",
+                    L.T("ЗАМЕР ОТМЕНЁН"),
+                    L.T("Измерение производительности остановлено."),
                     true);
             }
             catch (Exception ex)
             {
                 CrashLog.Write("Proof Mode capture failed.", ex);
                 boostCenterOverlay.SetBenchmarkMessage(
-                    "ЗАМЕР НЕ ВЫПОЛНЕН",
-                    "Замер не получился. Повторите этот проход.",
+                    L.T("ЗАМЕР НЕ ВЫПОЛНЕН"),
+                    L.T("Замер не получился. Повторите этот проход."),
                     true);
             }
             finally
@@ -4988,11 +5237,11 @@ namespace Boostix
         {
             if (result == null)
             {
-                return "Сравнение не вернуло результат.";
+                return L.T("Сравнение не вернуло результат.");
             }
             return string.Format(
                 CultureInfo.CurrentCulture,
-                "{0} Средний FPS: {1:+0.0;-0.0;0.0}%, 1% low: {2:+0.0;-0.0;0.0} FPS, P95: {3:+0.0;-0.0;0.0} мс, разброс ±{4:0.0}%.",
+                L.T("{0} Средний FPS: {1:+0.0;-0.0;0.0}%, 1% low: {2:+0.0;-0.0;0.0} FPS, P95: {3:+0.0;-0.0;0.0} мс, разброс ±{4:0.0}%."),
                 result.Summary ?? string.Empty,
                 result.AverageFpsDeltaPercent,
                 result.OnePercentLowFpsDelta,
@@ -5181,8 +5430,8 @@ namespace Boostix
             {
                 currentSession.Performance = performance;
                 currentSession.AddAction(
-                    "ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ",
-                    performance.Frames + " кадров проанализировано.",
+                    L.T("ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ"),
+                    performance.Frames + L.T(" кадров проанализировано."),
                     BoostActionOutcome.Changed);
                 SaveCurrentSession();
                 return;
@@ -5191,12 +5440,12 @@ namespace Boostix
             BoostSessionReport report = lastSession ?? BoostSessionReport.Start("Benchmark");
             report.Performance = performance;
             report.AddAction(
-                "ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ",
-                performance.Frames + " кадров проанализировано.",
+                L.T("ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ"),
+                performance.Frames + L.T(" кадров проанализировано."),
                 BoostActionOutcome.Changed);
             if (!report.EndedUtc.HasValue)
             {
-                report.Complete("Completed", "Ручной тест производительности.");
+                report.Complete("Completed", L.T("Ручной тест производительности."));
             }
             BoostSessionReportStore.Save(report);
             lastSession = report;
@@ -5218,6 +5467,25 @@ namespace Boostix
                 return !updateHealthProbe &&
                     (!demoMode || HasLaunchArgument(launchArguments, "--demo-tray"));
             }
+        }
+
+        /// <summary>
+        /// The dashboard self-test plays once, after the first frame is on
+        /// screen, so it is seen from its first degree.
+        /// </summary>
+        private void QueueGaugeSelfTest()
+        {
+            Dispatcher.BeginInvoke(
+                DispatcherPriority.ContextIdle,
+                new Action(delegate
+                {
+                    if (boostGauge != null && !gaugeSelfTestPlayed &&
+                        IsVisible && WindowState != WindowState.Minimized)
+                    {
+                        gaugeSelfTestPlayed = true;
+                        boostGauge.PlaySelfTest();
+                    }
+                }));
         }
 
         private void StartTrayAndHotkey()
@@ -5289,19 +5557,65 @@ namespace Boostix
         {
             if (!boostActive && !animationRunning && selectedTarget == null && !demoMode)
             {
-                Notify("Сначала выберите игру в Boostix");
+                Notify(L.T("Сначала выберите игру в Boostix"));
                 RestoreWindow();
                 OpenTargetSelector();
                 return;
+            }
+            if (!boostActive && !animationRunning && centerSettings.GameSignals &&
+                TrayAndHotkeyEnabled && IsAwayFromWindow)
+            {
+                // Preparing takes a few seconds: show at once that the
+                // shortcut was heard.
+                if (boostToast == null)
+                {
+                    boostToast = new BoostToast();
+                }
+                boostToast.ShowMessage(L.T("Запускаю Boost…"), false);
             }
             ToggleBoost();
         }
 
         private void Notify(string text)
         {
-            if (trayIcon != null && (!IsVisible || WindowState == WindowState.Minimized || !IsActive))
+            if (trayIcon != null && IsAwayFromWindow)
             {
                 trayIcon.Notify(text);
+            }
+        }
+
+        private bool IsAwayFromWindow
+        {
+            get { return !IsVisible || WindowState == WindowState.Minimized || !IsActive; }
+        }
+
+        /// <summary>
+        /// While the user is in a game, Boost changes are confirmed with the
+        /// badge and a short chime; with signals off, a notification as before.
+        /// </summary>
+        private void SignalBoostState(string text, bool lit, bool chime)
+        {
+            if (!IsAwayFromWindow)
+            {
+                return;
+            }
+            if (!centerSettings.GameSignals || !TrayAndHotkeyEnabled)
+            {
+                Notify(text);
+                return;
+            }
+            if (!chime)
+            {
+                return;
+            }
+            if (boostToast == null)
+            {
+                boostToast = new BoostToast();
+            }
+            boostToast.ShowMessage(text, lit);
+            if (!demoMode)
+            {
+                ConfirmationSound.Play(lit);
             }
         }
 
@@ -5310,7 +5624,7 @@ namespace Boostix
             if (centerSettings.MinimizeToTray && trayIcon != null)
             {
                 Hide();
-                trayIcon.Notify("Boostix работает в трее. " + BoostHotkey.DisplayText + " включает Boost.");
+                trayIcon.Notify(L.T("Boostix работает в трее. ") + BoostHotkey.DisplayText + L.T(" включает Boost."));
                 return;
             }
             WindowState = WindowState.Minimized;
@@ -5327,6 +5641,7 @@ namespace Boostix
                 WindowState = WindowState.Normal;
             }
             Activate();
+            QueueGaugeSelfTest();
         }
 
         private void SetBoostAutomationState(bool active)
@@ -5335,15 +5650,21 @@ namespace Boostix
             {
                 trayIcon.SetBoostState(active);
             }
-            Notify(active ? "Boost включён" : "Boost выключен");
+            // A game closing switches Boost off by itself; the summary after
+            // the game says that, so only user switches get the badge.
+            bool userSwitch = active || string.Equals(
+                deactivationSessionStatus,
+                "Completed",
+                StringComparison.OrdinalIgnoreCase);
+            SignalBoostState(active ? L.T("Boost включён") : L.T("Boost выключен"), active, userSwitch);
             AutomationProperties.SetName(
                 boostButton,
-                active ? "Отключить Boost производительности" : "Активировать Boost производительности");
+                active ? L.T("Отключить Boost производительности") : L.T("Активировать Boost производительности"));
             AutomationProperties.SetHelpText(
                 boostButton,
                 active
-                    ? "Останавливает Boost и возвращает план электропитания."
-                    : "Подготавливает Windows к высокой нагрузке и поддерживает приоритет активного полноэкранного приложения.");
+                    ? L.T("Останавливает Boost и возвращает план электропитания.")
+                    : L.T("Подготавливает Windows к высокой нагрузке и поддерживает приоритет активного полноэкранного приложения."));
         }
 
         private void RememberBoostCenterFocusReturn(IInputElement preferred)
@@ -5740,13 +6061,44 @@ namespace Boostix
             ApplyRuntimeTheme();
         }
 
-        private static void ApplyWindowTint(bool active)
+        /// <summary>
+        /// Fades the window and sidebar tint the way DWM fades its backdrop
+        /// when the window gains or loses focus. Theme refreshes still set the
+        /// tint at once through BoostixDesignTokens.ApplyWindowTint.
+        /// </summary>
+        private static void FadeWindowTint(bool active)
         {
             Application application = Application.Current;
-            if (application != null)
+            if (application == null)
             {
-                BoostixDesignTokens.ApplyWindowTint(application.Resources, active);
+                return;
             }
+            FadeTintResource(
+                application.Resources,
+                BoostixDesignTokens.WindowTintBrushKey,
+                active ? BoostixDesignTokens.WindowTint : BoostixDesignTokens.Background);
+            FadeTintResource(
+                application.Resources,
+                BoostixDesignTokens.SidebarTintBrushKey,
+                active ? BoostixDesignTokens.SidebarTint : BoostixDesignTokens.Sidebar);
+        }
+
+        private static void FadeTintResource(
+            ResourceDictionary resources,
+            string key,
+            Color target)
+        {
+            var brush = resources[key] as SolidColorBrush;
+            if (brush == null || brush.IsFrozen)
+            {
+                brush = new SolidColorBrush(brush == null ? target : brush.Color);
+                resources[key] = brush;
+            }
+            BoostixUi.AnimateColor(
+                brush,
+                target,
+                BoostixDesignTokens.MotionStandardMilliseconds,
+                true);
         }
 
         /// <summary>
@@ -6099,6 +6451,11 @@ namespace Boostix
 
             ShowWhatsNewIfUpdated();
             StartTrayAndHotkey();
+            if (startInTray && trayIcon != null)
+            {
+                Hide();
+            }
+            QueueGaugeSelfTest();
 
             if (!demoMode && sessionPowerPlanManager != null)
             {
@@ -6140,27 +6497,27 @@ namespace Boostix
             }
             if (safeMode)
             {
-                caption.Text = "Безопасный режим";
+                caption.Text = L.T("Безопасный режим");
                 caption.SetResourceReference(
                     TextBlock.ForegroundProperty,
                     BoostixDesignTokens.AccentTextBrushKey);
                 AutomationProperties.SetName(
                     boostButton,
-                    "Boostix недоступен в безопасном режиме");
+                    L.T("Boostix недоступен в безопасном режиме"));
                 AutomationProperties.SetHelpText(
                     boostButton,
-                    "В безопасном режиме Boost не запускается и Windows не меняется.");
+                    L.T("В безопасном режиме Boost не запускается и Windows не меняется."));
             }
             lastSession = BoostSessionReportStore.LoadLast();
             if (lastSession != null && !lastSession.EndedUtc.HasValue)
             {
                 lastSession.AddAction(
-                    "ПРЕДЫДУЩАЯ СЕССИЯ",
-                    "Сеанс завершён при следующем запуске Boostix.",
+                    L.T("ПРЕДЫДУЩАЯ СЕССИЯ"),
+                    L.T("Сеанс завершён при следующем запуске Boostix."),
                     BoostActionOutcome.Skipped);
                 lastSession.Complete(
                     "Interrupted",
-                    "Предыдущая сессия завершилась вместе с приложением или Windows.");
+                    L.T("Предыдущая сессия завершилась вместе с приложением или Windows."));
                 try
                 {
                     BoostSessionReportStore.Save(lastSession);
@@ -6183,7 +6540,7 @@ namespace Boostix
             }
             else if (!string.IsNullOrWhiteSpace(proofLoadError) &&
                      proofLoadError.IndexOf(
-                         "не найден",
+                         L.T("не найден"),
                          StringComparison.OrdinalIgnoreCase) < 0)
             {
                 CrashLog.Write(
@@ -6255,7 +6612,7 @@ namespace Boostix
                         displayPath,
                         comparisonPath,
                         process.ProcessName),
-                    "Демо-игра",
+                    L.T("Демо-игра"),
                     false);
             }
             catch (Exception ex)
@@ -6318,6 +6675,31 @@ namespace Boostix
             {
                 e.Cancel = true;
             }
+            if (e.Cancel)
+            {
+                languageRestartPending = false;
+            }
+        }
+
+        /// <summary>
+        /// Starts the next instance for a language change once this window has
+        /// really closed. It waits on the application mutex for this one to exit.
+        /// </summary>
+        private static void StartRestartedInstance()
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = Assembly.GetExecutingAssembly().Location,
+                    Arguments = Program.RestartArgument,
+                    UseShellExecute = false
+                });
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not restart Boostix to change the language.", ex);
+            }
         }
 
         private void WindowMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -6358,6 +6740,11 @@ namespace Boostix
             {
                 backdropSource.RemoveHook(BackdropMessageHook);
                 backdropSource = null;
+            }
+            if (boostToast != null)
+            {
+                boostToast.Close();
+                boostToast = null;
             }
             if (hotkeyRegistered)
             {
@@ -6402,11 +6789,16 @@ namespace Boostix
             CompleteCurrentSession(
                 sessionWasRunning ? "Interrupted" : "Completed",
                 sessionWasRunning
-                    ? "Приложение закрыто до штатного завершения Boost."
-                    : "Приложение закрыто.");
+                    ? L.T("Приложение закрыто до штатного завершения Boost.")
+                    : L.T("Приложение закрыто."));
             GiveSessionPowerPlanStopShutdownGrace();
             TryDeleteReadinessSignal();
             StopBoostProcess();
+            if (languageRestartPending)
+            {
+                languageRestartPending = false;
+                StartRestartedInstance();
+            }
         }
 
         private void TryDeleteReadinessSignal()

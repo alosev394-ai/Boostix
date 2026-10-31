@@ -6,7 +6,16 @@ param(
         $env:BOOSTIX_AUTHENTICODE_THUMBPRINT,
     [string]$AuthenticodeTimestampServer =
         'http://timestamp.digicert.com',
-    [switch]$RequireAuthenticode
+    [switch]$RequireAuthenticode,
+    # SignPath signs on GitHub Actions one file at a time, and each signed
+    # file goes inside the next one: App, then Setup around the signed app,
+    # then Bridge around the signed setup, then Release puts the three signed
+    # files into dist. All builds everything in one go, as before.
+    [ValidateSet('All', 'App', 'Setup', 'Bridge', 'Release')]
+    [string]$Stage = 'All',
+    [string]$SignedAppPath,
+    [string]$SignedSetupPath,
+    [string]$SignedBridgePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -108,6 +117,36 @@ function Invoke-BoostixAuthenticodeSigning {
         throw "Authenticode verification failed for $Path with exit code $LASTEXITCODE."
     }
 }
+
+# A file signed outside this script (SignPath) must carry a valid Authenticode
+# signature and this release's version before it is built into anything.
+function Use-BoostixSignedFile {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+    if ([string]::IsNullOrWhiteSpace($Source) -or
+        -not (Test-Path -LiteralPath $Source -PathType Leaf)) {
+        throw "Signed file for stage $Stage is missing: $Source"
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Source
+    if ($signature.Status -ne [Management.Automation.SignatureStatus]::Valid) {
+        throw "Signed file $Source has Authenticode status $($signature.Status)."
+    }
+    $fileVersion = (Get-Item -LiteralPath $Source).VersionInfo.FileVersion
+    if ($fileVersion -cne "$releaseVersion.0") {
+        throw "Signed file $Source is version $fileVersion, expected $releaseVersion.0."
+    }
+    Copy-Item -LiteralPath $Source -Destination $Destination -Force
+}
+
+function Complete-BoostixStage {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    Write-Host "Stage $Stage built $Path"
+    Get-FileHash -Algorithm SHA256 -LiteralPath $Path | Format-Table -AutoSize
+    exit 0
+}
+
 $systemPowerShell = Join-Path ([Environment]::SystemDirectory) `
     'WindowsPowerShell\v1.0\powershell.exe'
 
@@ -138,6 +177,7 @@ foreach ($licensePath in @($presentMonLicensePath, $presentMonThirdPartyPath)) {
 # dist; published release history remains recoverable from immutable GitHub
 # releases and from Git itself.
 $resolvedDistDirectory = [IO.Path]::GetFullPath($distDirectory)
+$cleansDist = $Stage -in @('All', 'Release')
 # The frozen update-v2.json (retired v1 key) still sends 1.9.x/2.0.x clients
 # to the Boostix installer it names, so that one file must stay published.
 $frozenChannelInstaller = $null
@@ -149,7 +189,8 @@ if (Test-Path -LiteralPath $frozenChannelPath -PathType Leaf) {
         $frozenChannelInstaller = 'Boostix-Setup-' + $frozenChannelVersion + '.exe'
     }
 }
-foreach ($legacyArtifact in Get-ChildItem -LiteralPath $resolvedDistDirectory -File) {
+foreach ($legacyArtifact in @(Get-ChildItem -LiteralPath $resolvedDistDirectory -File |
+        Where-Object { $cleansDist })) {
     $knownLegacyArtifact =
         $legacyArtifact.Name -cmatch
             '^MajesticBoost(?:-Setup-(?:Latest|[0-9]+\.[0-9]+\.[0-9]+))?\.exe$'
@@ -184,6 +225,7 @@ $appArguments = @(
     "/reference:$wpfRoot\UIAutomationProvider.dll",
     "/reference:$wpfRoot\UIAutomationTypes.dll",
     "/resource:$projectRoot\CHANGELOG.md,Boostix.Changelog.md",
+    "/resource:$projectRoot\CHANGELOG.en.md,Boostix.Changelog.en.md",
     "/out:$appOutput",
     "$projectRoot\ProductBrand.cs",
     "$projectRoot\Boostix\DesignTokens.cs",
@@ -205,14 +247,26 @@ $appArguments = @(
     "$projectRoot\Boostix\UpdateFlow.cs",
     "$projectRoot\Boostix\WhatsNew.cs",
     "$projectRoot\Boostix\TrayIntegration.cs",
-    "$projectRoot\Boostix\WindowBackdrop.cs"
+    "$projectRoot\Boostix\WindowBackdrop.cs",
+    "$projectRoot\Boostix\GameSignals.cs",
+    "$projectRoot\Boostix\GameLibraryScanner.cs",
+    "$projectRoot\Boostix\Localization.cs",
+    "$projectRoot\Boostix\LocalizationEnglish.cs"
 )
 
-& $compiler @appArguments
-if ($LASTEXITCODE -ne 0) {
-    throw "Boostix compilation failed with exit code $LASTEXITCODE."
+if ($Stage -in @('All', 'App')) {
+    & $compiler @appArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Boostix compilation failed with exit code $LASTEXITCODE."
+    }
+    Invoke-BoostixAuthenticodeSigning -Path $appOutput
 }
-Invoke-BoostixAuthenticodeSigning -Path $appOutput
+else {
+    Use-BoostixSignedFile -Source $SignedAppPath -Destination $appOutput
+}
+if ($Stage -eq 'App') {
+    Complete-BoostixStage -Path $appOutput
+}
 
 $setupArguments = @(
     '/nologo',
@@ -233,14 +287,24 @@ $setupArguments = @(
     "/resource:$presentMonThirdPartyPath,Boostix.PresentMon.ThirdParty.txt",
     "/out:$setupOutput",
     "$projectRoot\ProductBrand.cs",
-    "$projectRoot\BoostixInstaller\Program.cs"
+    "$projectRoot\BoostixInstaller\Program.cs",
+    "$projectRoot\Boostix\Localization.cs",
+    "$projectRoot\Boostix\LocalizationEnglish.cs"
 )
 
-& $compiler @setupArguments
-if ($LASTEXITCODE -ne 0) {
-    throw "Boostix installer compilation failed with exit code $LASTEXITCODE."
+if ($Stage -in @('All', 'Setup')) {
+    & $compiler @setupArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Boostix installer compilation failed with exit code $LASTEXITCODE."
+    }
+    Invoke-BoostixAuthenticodeSigning -Path $setupOutput
 }
-Invoke-BoostixAuthenticodeSigning -Path $setupOutput
+else {
+    Use-BoostixSignedFile -Source $SignedSetupPath -Destination $setupOutput
+}
+if ($Stage -eq 'Setup') {
+    Complete-BoostixStage -Path $setupOutput
+}
 
 $legacySetupArguments = @(
     '/define:LEGACY_UPDATE_BRIDGE',
@@ -250,11 +314,19 @@ $legacySetupArguments = @(
     $setupArguments | Where-Object {
         -not $_.StartsWith('/out:', [StringComparison]::OrdinalIgnoreCase)
     })
-& $compiler @legacySetupArguments
-if ($LASTEXITCODE -ne 0) {
-    throw "Boostix compatibility bridge compilation failed with exit code $LASTEXITCODE."
+if ($Stage -in @('All', 'Bridge')) {
+    & $compiler @legacySetupArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Boostix compatibility bridge compilation failed with exit code $LASTEXITCODE."
+    }
+    Invoke-BoostixAuthenticodeSigning -Path $legacySetupOutput
 }
-Invoke-BoostixAuthenticodeSigning -Path $legacySetupOutput
+else {
+    Use-BoostixSignedFile -Source $SignedBridgePath -Destination $legacySetupOutput
+}
+if ($Stage -eq 'Bridge') {
+    Complete-BoostixStage -Path $legacySetupOutput
+}
 
 Copy-Item -LiteralPath $appOutput -Destination (Join-Path $distDirectory 'Boostix.exe') -Force
 Copy-Item -LiteralPath $setupOutput -Destination $versionedSetupOutput -Force

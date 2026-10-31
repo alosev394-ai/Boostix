@@ -91,7 +91,9 @@ internal static class Harness
 try {
     $output = & $compiler /nologo /target:exe /optimize+ `
         /reference:System.dll /reference:System.Core.dll `
-        "/out:$outputPath" $sourcePath $harnessPath 2>&1
+        "/out:$outputPath" $sourcePath $harnessPath `
+        (Join-Path $projectRoot 'Boostix\Localization.cs') `
+        (Join-Path $projectRoot 'Boostix\LocalizationEnglish.cs') 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Background impact harness did not compile:`n$($output -join [Environment]::NewLine)"
     }

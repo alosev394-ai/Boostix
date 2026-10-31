@@ -18,7 +18,9 @@ $features = [IO.File]::ReadAllText(
 
 foreach ($required in @(
     'Local\SilasSuspect.Boostix.Application',
-    'applicationMutex.WaitOne(0, false)',
+    # A second launch gives up at once; only a language restart waits for the
+    # previous instance to exit.
+    'HasArgument(args, RestartArgument) ? RestartMutexWaitMilliseconds : 0,',
     'catch (AbandonedMutexException)',
     'applicationMutex.ReleaseMutex()',
     'DispatcherUnhandledException',

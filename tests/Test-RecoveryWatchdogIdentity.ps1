@@ -11,6 +11,9 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $installerSource = Join-Path $projectRoot 'BoostixInstaller\Program.cs'
 $brandSource = Join-Path $projectRoot 'ProductBrand.cs'
+$localizationSources = @(
+    (Join-Path $projectRoot 'Boostix\Localization.cs'),
+    (Join-Path $projectRoot 'Boostix\LocalizationEnglish.cs'))
 $frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $compiler = Join-Path $frameworkRoot 'csc.exe'
 if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
@@ -191,6 +194,7 @@ try {
         /reference:System.Windows.Forms.dll `
         /reference:System.Security.dll `
         $brandSource `
+        $localizationSources `
         $installerSource 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Installer watchdog harness did not compile:`r`n$($installerCompilerOutput -join [Environment]::NewLine)"

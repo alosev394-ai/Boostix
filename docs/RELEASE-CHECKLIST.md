@@ -176,6 +176,11 @@
 ### Открытые пункты (3.0 выпущена без них по решению автора)
 
 - [ ] EXE подписаны доверенным Authenticode-сертификатом с RFC 3161 timestamp.
+  Бесплатный путь — SignPath Foundation через workflow
+  `signpath-release.yml`; порядок и настройка — в
+  [`CODE_SIGNING.md`](../CODE_SIGNING.md).
+- [ ] Чистая установка, первый запуск и удаление прошли в Windows Sandbox:
+  `tools\Sandbox\Invoke-SandboxInstallTest.ps1`.
 - [ ] Windows подтверждает ожидаемого издателя для каждого EXE.
 - [ ] Завершена вся [`TEST-MATRIX.md`](TEST-MATRIX.md), включая ARM64-решение,
   proxy/EDR/UAC и accessibility.

@@ -13,6 +13,9 @@ $installerSource = Join-Path $projectRoot 'BoostixInstaller\Program.cs'
 $updateSource = Join-Path $projectRoot 'Boostix\UpdateFlow.cs'
 $applicationSource = Join-Path $projectRoot 'Boostix\Program.cs'
 $brandSource = Join-Path $projectRoot 'ProductBrand.cs'
+$localizationSources = @(
+    (Join-Path $projectRoot 'Boostix\Localization.cs'),
+    (Join-Path $projectRoot 'Boostix\LocalizationEnglish.cs'))
 $designTokensSource = Join-Path $projectRoot 'Boostix\DesignTokens.cs'
 $brandText = [IO.File]::ReadAllText($brandSource)
 $assemblyVersionMatch = [regex]::Match(
@@ -109,6 +112,7 @@ try {
         /reference:System.Windows.Forms.dll `
         /reference:System.Security.dll `
         $brandSource `
+        $localizationSources `
         $installerSource 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Installer rollback harness did not compile:`r`n$($installerCompilerOutput -join [Environment]::NewLine)"
@@ -126,6 +130,7 @@ try {
         "/reference:$wpfRoot\PresentationCore.dll" `
         "/reference:$wpfRoot\PresentationFramework.dll" `
         $brandSource `
+        $localizationSources `
         $designTokensSource `
         $updateSource 2>&1
     if ($LASTEXITCODE -ne 0) {

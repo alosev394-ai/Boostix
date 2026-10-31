@@ -15,6 +15,8 @@ $signingPath = Join-Path $projectRoot 'tools\Sign-UpdateManifest.ps1'
 $workflowPath = Join-Path $projectRoot '.github\workflows\ci.yml'
 $canaryWorkflowPath = Join-Path $projectRoot (
     '.github\workflows\public-update-channel-canary.yml')
+$signPathWorkflowPath = Join-Path $projectRoot (
+    '.github\workflows\signpath-release.yml')
 $dependabotPath = Join-Path $projectRoot '.github\dependabot.yml'
 $runAllPath = Join-Path $PSScriptRoot 'Run-All.ps1'
 $releaseChannelTestPath = Join-Path $PSScriptRoot 'Test-ReleaseUpdateChannel.ps1'
@@ -25,6 +27,7 @@ foreach ($requiredPath in @(
     $signingPath,
     $workflowPath,
     $canaryWorkflowPath,
+    $signPathWorkflowPath,
     $dependabotPath,
     $runAllPath,
     $releaseChannelTestPath
@@ -79,6 +82,7 @@ if (-not [regex]::IsMatch(
 $workflow = [IO.File]::ReadAllText($workflowPath)
 $gitAttributes = [IO.File]::ReadAllText($gitAttributesPath)
 $canaryWorkflow = [IO.File]::ReadAllText($canaryWorkflowPath)
+$signPathWorkflow = [IO.File]::ReadAllText($signPathWorkflowPath)
 foreach ($requiredWorkflowContract in @(
     'ProductBrand.cs',
     'BOOSTIX_PRODUCT_VERSION',
@@ -146,7 +150,7 @@ if ($workflow.Contains(
         'a failure after the script returned successfully.')
 }
 
-$workflowSources = @($workflow, $canaryWorkflow)
+$workflowSources = @($workflow, $canaryWorkflow, $signPathWorkflow)
 $usesLines = @($workflowSources | ForEach-Object {
     [regex]::Matches($_, '(?m)^\s*uses:\s*.+$')
 })
@@ -157,7 +161,7 @@ foreach ($usesLine in $usesLines) {
     if (-not [regex]::IsMatch(
         $usesLine.Value,
         '^\s*uses:\s*[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}' +
-        '\s+#\s+v\d+\.\d+\.\d+\s*$')) {
+        '\s+#\s+v\d+\.\d+(?:\.\d+)?\s*$')) {
         throw 'Every CI action must use a full SHA with a version comment: ' +
             $usesLine.Value.Trim()
     }

@@ -14,6 +14,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
+using Boostix;
 using Boostix.Branding;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
@@ -54,13 +55,15 @@ namespace BoostixSetup
         [STAThread]
         private static void Main(string[] args)
         {
+            // The app passes its own language when it starts an update.
+            L.SetLanguage(L.FromArguments(args) ?? L.SystemDefault());
             try
             {
                 if (!HardenNativeDllSearch())
                 {
                     MessageBox.Show(
-                        "Boostix Setup не смог безопасно подготовить запуск. " +
-                        "Установите актуальные обновления Windows и повторите попытку.",
+                        L.T("Boostix Setup не смог безопасно подготовить запуск. ") +
+                        L.T("Установите актуальные обновления Windows и повторите попытку."),
                         "Boostix Setup",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
@@ -77,8 +80,8 @@ namespace BoostixSetup
                 if (!IsSilentInvocation(args))
                 {
                     MessageBox.Show(
-                        "Boostix Setup не смог завершить операцию.\r\n\r\n" +
-                        exception.Message + "\r\n\r\nЖурнал: " +
+                        L.T("Boostix Setup не смог завершить операцию.\r\n\r\n") +
+                        exception.Message + L.T("\r\n\r\nЖурнал: ") +
                         InstallerDiagnostics.LogPath,
                         "Boostix Setup",
                         MessageBoxButtons.OK,
@@ -116,7 +119,7 @@ namespace BoostixSetup
                         if (!ownsMutex)
                         {
                             MessageBox.Show(
-                                "Установка или удаление Boostix уже выполняется. Дождитесь завершения открытого установщика.",
+                                L.T("Установка или удаление Boostix уже выполняется. Дождитесь завершения открытого установщика."),
                                 "Boostix Setup",
                                 MessageBoxButtons.OK,
                                 MessageBoxIcon.Information);
@@ -965,7 +968,7 @@ namespace BoostixSetup
             InstallerDiagnostics.Write(
                 "Install requested. DesktopShortcut=" + createDesktopShortcut + ".");
             using (IDisposable systemTransactionGuard =
-                AcquireSystemTransactionGuard("установку или обновление"))
+                AcquireSystemTransactionGuard(L.T("установку или обновление")))
             {
                 RecoverInterruptedUpdateTransactions(false);
                 bool boostixInstalled = File.Exists(InstalledExe);
@@ -1080,7 +1083,7 @@ namespace BoostixSetup
             bool legacyMigration)
         {
             StopInstalledApplication();
-            ReportProgress(progress, 1, "Сохранение предыдущей версии");
+            ReportProgress(progress, 1, L.T("Сохранение предыдущей версии"));
             UpdateRollbackTransaction transaction =
                 CreateUpdateRollbackTransaction(legacyMigration);
             Process watchdog = null;
@@ -1107,7 +1110,7 @@ namespace BoostixSetup
                     createDesktopShortcut,
                     boundedProgress);
 
-                ReportProgress(progress, 92, "Проверка запуска новой версии");
+                ReportProgress(progress, 92, L.T("Проверка запуска новой версии"));
                 string token = CreateCryptographicToken();
                 WriteHealthRequest(transaction, token);
                 SetUpdateRollbackStatus(transaction, UpdateRollbackStatus.AwaitingReady);
@@ -1119,14 +1122,14 @@ namespace BoostixSetup
                     TryDeleteUpdateTransaction(transaction.RootDirectory);
                     LaunchPreviousInstalledApplication(transaction.State);
                     throw new UpdateRolledBackException(
-                        "Новая версия не подтвердила готовность. " +
-                        "Предыдущая версия автоматически восстановлена и запущена.");
+                        L.T("Новая версия не подтвердила готовность. ") +
+                        L.T("Предыдущая версия автоматически восстановлена и запущена."));
                 }
 
                 SetUpdateRollbackStatus(transaction, UpdateRollbackStatus.Committed);
                 committed = true;
                 TryDeleteUpdateTransaction(transaction.RootDirectory);
-                ReportProgress(progress, 100, "Обновление проверено");
+                ReportProgress(progress, 100, L.T("Обновление проверено"));
             }
             catch
             {
@@ -1172,12 +1175,12 @@ namespace BoostixSetup
             bool createDesktopShortcut,
             Action<int, string> progress)
         {
-            ReportProgress(progress, 0, "Подготовка обновления");
+            ReportProgress(progress, 0, L.T("Подготовка обновления"));
             EnsureInstallIsNotDowngrade();
             Directory.CreateDirectory(InstallDirectory);
             ValidateDirectoryTreeWithoutReparse(InstallDirectory);
             EnsureSufficientDiskSpace();
-            ReportProgress(progress, 5, "Подготовка папки установки");
+            ReportProgress(progress, 5, L.T("Подготовка папки установки"));
 
             InstallPayloadsAtomically(progress, delegate
             {
@@ -1185,7 +1188,7 @@ namespace BoostixSetup
                 CapturePostInstallRegistration();
             try
             {
-            ReportProgress(progress, 76, "Обновление компонентов удаления");
+            ReportProgress(progress, 76, L.T("Обновление компонентов удаления"));
 
             if (registrationSnapshot.StartMenuShortcut != null)
             {
@@ -1195,7 +1198,7 @@ namespace BoostixSetup
                     InstallDirectory,
                     "Boostix performance session utility.");
             }
-            ReportProgress(progress, 82, "Обновление ярлыков");
+            ReportProgress(progress, 82, L.T("Обновление ярлыков"));
 
             if (registrationSnapshot.DesktopShortcut != null &&
                 createDesktopShortcut)
@@ -1211,7 +1214,7 @@ namespace BoostixSetup
                 TryDeleteShortcut(
                     registrationSnapshot.DesktopShortcut.Path);
             }
-            ReportProgress(progress, 87, "Сохранение параметров установки");
+            ReportProgress(progress, 87, L.T("Сохранение параметров установки"));
 
             using (RegistryKey baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, MachineRegistryView))
             using (RegistryKey uninstall = baseKey.CreateSubKey(UninstallRegistryPath))
@@ -1228,7 +1231,7 @@ namespace BoostixSetup
                 uninstall.SetValue("EstimatedSize", CalculateEstimatedSizeKb(), RegistryValueKind.DWord);
                 uninstall.SetValue("InstallDate", DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture), RegistryValueKind.String);
             }
-            ReportProgress(progress, 94, "Регистрация новой версии");
+            ReportProgress(progress, 94, L.T("Регистрация новой версии"));
 
             using (RegistryKey baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, MachineRegistryView))
             using (RegistryKey appPath = baseKey.CreateSubKey(AppPathsRegistryPath))
@@ -1236,7 +1239,7 @@ namespace BoostixSetup
                 appPath.SetValue(string.Empty, InstalledExe, RegistryValueKind.String);
                 appPath.SetValue("Path", InstallDirectory, RegistryValueKind.String);
             }
-            ReportProgress(progress, 100, "Обновление установлено");
+            ReportProgress(progress, 100, L.T("Обновление установлено"));
             }
             catch (Exception registrationException)
             {
@@ -1397,7 +1400,7 @@ namespace BoostixSetup
                     try
                     {
                         guard = AcquireSystemTransactionGuard(
-                            "автоматическое восстановление обновления");
+                            L.T("автоматическое восстановление обновления"));
                     }
                     catch (InvalidOperationException)
                     {
@@ -3805,7 +3808,7 @@ namespace BoostixSetup
             if (string.IsNullOrWhiteSpace(programData))
             {
                 throw new DirectoryNotFoundException(
-                    "Не удалось определить защищённую папку ProgramData.");
+                    L.T("Не удалось определить защищённую папку ProgramData."));
             }
 
             return AcquireSystemTransactionGuardsAtRoots(
@@ -3872,12 +3875,12 @@ namespace BoostixSetup
                 !IsPathFreeOfReparsePoints(parent))
             {
                 throw new IOException(
-                    "Не удалось безопасно проверить папку системной оптимизации.");
+                    L.T("Не удалось безопасно проверить папку системной оптимизации."));
             }
             if (File.Exists(fullStateRoot))
             {
                 throw new IOException(
-                    "Путь системной оптимизации занят файлом.");
+                    L.T("Путь системной оптимизации занят файлом."));
             }
             if (!Directory.Exists(fullStateRoot))
             {
@@ -3886,7 +3889,7 @@ namespace BoostixSetup
             if (!IsPathFreeOfReparsePoints(fullStateRoot))
             {
                 throw new IOException(
-                    "Папка системной оптимизации не прошла проверку безопасности.");
+                    L.T("Папка системной оптимизации не прошла проверку безопасности."));
             }
 
             string lockPath = Path.GetFullPath(Path.Combine(
@@ -3897,7 +3900,7 @@ namespace BoostixSetup
                 (File.Exists(lockPath) && !IsPathFreeOfReparsePoints(lockPath)))
             {
                 throw new IOException(
-                    "Файл блокировки системной оптимизации имеет небезопасный путь.");
+                    L.T("Файл блокировки системной оптимизации имеет небезопасный путь."));
             }
 
             FileStream guard;
@@ -3914,22 +3917,22 @@ namespace BoostixSetup
             catch (IOException exception)
             {
                 throw new InvalidOperationException(
-                    "Нельзя продолжить " + operation +
-                    ": сейчас выполняется настройка или восстановление Windows. " +
-                    "Дождитесь завершения операции в Boostix и повторите попытку.",
+                    L.T("Нельзя продолжить ") + operation +
+                    L.T(": сейчас выполняется настройка или восстановление Windows. ") +
+                    L.T("Дождитесь завершения операции в Boostix и повторите попытку."),
                     exception);
             }
             catch (UnauthorizedAccessException exception)
             {
                 throw new InvalidOperationException(
-                    "Нельзя безопасно проверить системную транзакцию перед тем, как продолжить " +
-                    operation + ". Повторите попытку с правами администратора.",
+                    L.T("Нельзя безопасно проверить системную транзакцию перед тем, как продолжить ") +
+                    operation + L.T(". Повторите попытку с правами администратора."),
                     exception);
             }
             catch (System.Security.SecurityException exception)
             {
                 throw new InvalidOperationException(
-                    "Windows запретила проверку системной транзакции перед тем, как продолжить " +
+                    L.T("Windows запретила проверку системной транзакции перед тем, как продолжить ") +
                     operation + ".",
                     exception);
             }
@@ -3938,7 +3941,7 @@ namespace BoostixSetup
             {
                 guard.Dispose();
                 throw new IOException(
-                    "Файл блокировки системной оптимизации изменился во время проверки.");
+                    L.T("Файл блокировки системной оптимизации изменился во время проверки."));
             }
             return guard;
         }
@@ -3950,7 +3953,7 @@ namespace BoostixSetup
             if (string.IsNullOrWhiteSpace(programData))
             {
                 throw new DirectoryNotFoundException(
-                    "Не удалось определить защищённую папку ProgramData.");
+                    L.T("Не удалось определить защищённую папку ProgramData."));
             }
 
             EnsureUninstallStateAllowsRemovalAtRoots(
@@ -3976,7 +3979,7 @@ namespace BoostixSetup
             if (File.Exists(fullStateRoot))
             {
                 throw new IOException(
-                    "Путь системной оптимизации занят файлом.");
+                    L.T("Путь системной оптимизации занят файлом."));
             }
             if (!Directory.Exists(fullStateRoot))
             {
@@ -3985,7 +3988,7 @@ namespace BoostixSetup
             if (!IsPathFreeOfReparsePoints(fullStateRoot))
             {
                 throw new IOException(
-                    "Папка системной оптимизации не прошла проверку безопасности.");
+                    L.T("Папка системной оптимизации не прошла проверку безопасности."));
             }
 
             string expectedPointerPath = Path.GetFullPath(Path.Combine(
@@ -4006,7 +4009,7 @@ namespace BoostixSetup
                 !IsPathFreeOfReparsePoints(expectedPointerPath))
             {
                 throw CreateUnsafeUninstallStateException(
-                    "указатель latest-state.txt неоднозначен или небезопасен");
+                    L.T("указатель latest-state.txt неоднозначен или небезопасен"));
             }
 
             string candidatePath;
@@ -4019,7 +4022,7 @@ namespace BoostixSetup
             catch (Exception exception)
             {
                 throw CreateUnsafeUninstallStateException(
-                    "latest-state.txt нельзя безопасно прочитать",
+                    L.T("latest-state.txt нельзя безопасно прочитать"),
                     exception);
             }
             if (string.IsNullOrWhiteSpace(candidatePath) ||
@@ -4027,7 +4030,7 @@ namespace BoostixSetup
                 !Path.IsPathRooted(candidatePath))
             {
                 throw CreateUnsafeUninstallStateException(
-                    "указатель latest-state.txt повреждён");
+                    L.T("указатель latest-state.txt повреждён"));
             }
 
             string fullStatePath;
@@ -4038,7 +4041,7 @@ namespace BoostixSetup
             catch (Exception exception)
             {
                 throw CreateUnsafeUninstallStateException(
-                    "путь к резервной копии повреждён",
+                    L.T("путь к резервной копии повреждён"),
                     exception);
             }
 
@@ -4060,7 +4063,7 @@ namespace BoostixSetup
                 !IsPathFreeOfReparsePoints(fullStatePath))
             {
                 throw CreateUnsafeUninstallStateException(
-                    "state.json должен быть прямым потомком защищённой папки Backups");
+                    L.T("state.json должен быть прямым потомком защищённой папки Backups"));
             }
 
             string json;
@@ -4073,7 +4076,7 @@ namespace BoostixSetup
             catch (Exception exception)
             {
                 throw CreateUnsafeUninstallStateException(
-                    "state.json нельзя безопасно прочитать",
+                    L.T("state.json нельзя безопасно прочитать"),
                     exception);
             }
             string trimmedJson = json.Trim();
@@ -4082,7 +4085,7 @@ namespace BoostixSetup
                 trimmedJson[trimmedJson.Length - 1] != '}')
             {
                 throw CreateUnsafeUninstallStateException(
-                    "state.json повреждён или не завершён");
+                    L.T("state.json повреждён или не завершён"));
             }
 
             const string statusPattern =
@@ -4094,7 +4097,7 @@ namespace BoostixSetup
             if (statusMatches.Count != 1)
             {
                 throw CreateUnsafeUninstallStateException(
-                    "статус системной транзакции отсутствует или неоднозначен");
+                    L.T("статус системной транзакции отсутствует или неоднозначен"));
             }
 
             string status = statusMatches[0].Groups["value"].Value;
@@ -4106,7 +4109,7 @@ namespace BoostixSetup
                     RegexOptions.CultureInvariant))
             {
                 throw CreateUnsafeUninstallStateException(
-                    "статус системной транзакции повреждён");
+                    L.T("статус системной транзакции повреждён"));
             }
             if (IsCompletedRestoreStatus(status))
             {
@@ -4114,10 +4117,10 @@ namespace BoostixSetup
             }
 
             throw new InvalidOperationException(
-                "Удаление остановлено: системная оптимизация Windows ещё не восстановлена " +
-                "(статус: " + status + "). Откройте Boostix, нажмите " +
-                "«ВОССТАНОВИТЬ WINDOWS» и дождитесь завершения восстановления. " +
-                "Резервная копия сохранена.");
+                L.T("Удаление остановлено: системная оптимизация Windows ещё не восстановлена ") +
+                L.T("(статус: ") + status + L.T("). Откройте Boostix, нажмите ") +
+                L.T("«Восстановить Windows» и дождитесь завершения восстановления. ") +
+                L.T("Резервная копия сохранена."));
         }
 
         private static InvalidOperationException CreateUnsafeUninstallStateException(
@@ -4125,10 +4128,10 @@ namespace BoostixSetup
             Exception innerException = null)
         {
             return new InvalidOperationException(
-                "Удаление остановлено: состояние системной оптимизации нельзя " +
-                "однозначно и безопасно проверить (" + reason + "). Откройте Boostix, " +
-                "нажмите «ВОССТАНОВИТЬ WINDOWS» и только после успешного восстановления " +
-                "повторите удаление. Резервная копия не удалена.",
+                L.T("Удаление остановлено: состояние системной оптимизации нельзя ") +
+                L.T("однозначно и безопасно проверить (") + reason + L.T("). Откройте Boostix, ") +
+                L.T("нажмите «Восстановить Windows» и только после успешного восстановления ") +
+                L.T("повторите удаление. Резервная копия не удалена."),
                 innerException);
         }
 
@@ -4704,13 +4707,42 @@ namespace BoostixSetup
             }
         }
 
+        /// <summary>
+        /// "Start with Windows" is one value in the user's Run key. It is
+        /// removed only when it still points at Boostix.exe.
+        /// </summary>
+        private static void RemoveStartWithWindowsEntry()
+        {
+            try
+            {
+                using (RegistryKey run = Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Run",
+                    true))
+                {
+                    string command = run == null
+                        ? null
+                        : run.GetValue(ProductBrand.ProductName) as string;
+                    if (command != null &&
+                        command.IndexOf("Boostix.exe", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        run.DeleteValue(ProductBrand.ProductName, false);
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                Trace.WriteLine(
+                    "Boostix start-up entry cleanup skipped: " + exception.Message);
+            }
+        }
+
         public static void Uninstall(bool quiet)
         {
             if (!quiet)
             {
                 DialogResult result = MessageBox.Show(
-                    "Удалить Boostix и все установленные файлы?",
-                    "Удаление Boostix",
+                    L.T("Удалить Boostix и все установленные файлы?"),
+                    L.T("Удаление Boostix"),
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question,
                     MessageBoxDefaultButton.Button2);
@@ -4723,7 +4755,7 @@ namespace BoostixSetup
             try
             {
                 using (IDisposable systemTransactionGuard =
-                    AcquireSystemTransactionGuard("удаление"))
+                    AcquireSystemTransactionGuard(L.T("удаление")))
                 {
                 RecoverInterruptedUpdateTransactions(false);
                 EnsureUninstallStateAllowsRemoval();
@@ -4765,6 +4797,7 @@ namespace BoostixSetup
                     baseKey.DeleteSubKeyTree(LegacyUninstallRegistryPath, false);
                     baseKey.DeleteSubKeyTree(LegacyAppPathsRegistryPath, false);
                 }
+                RemoveStartWithWindowsEntry();
 
                 string localApplicationData = Environment.GetFolderPath(
                     Environment.SpecialFolder.LocalApplicationData);
@@ -4807,8 +4840,8 @@ namespace BoostixSetup
                 if (!quiet)
                 {
                     MessageBox.Show(
-                        "Boostix удалён.",
-                        "Удаление завершено",
+                        L.T("Boostix удалён."),
+                        L.T("Удаление завершено"),
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
                 }
@@ -4820,8 +4853,8 @@ namespace BoostixSetup
                 if (!quiet)
                 {
                     MessageBox.Show(
-                        "Не удалось полностью удалить программу:\r\n" + exception.Message,
-                        "Ошибка удаления",
+                        L.T("Не удалось полностью удалить программу:\r\n") + exception.Message,
+                        L.T("Ошибка удаления"),
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
                 }
@@ -5238,18 +5271,18 @@ namespace BoostixSetup
             string token = Guid.NewGuid().ToString("N");
             var items = new List<PayloadTransactionItem>
             {
-                CreatePayloadItem(token, "Boost-Session", "Boostix.BoostSession.ps1", InstalledBoostSessionScript, "сценария Boost-сессии", false, false),
-                CreatePayloadItem(token, "MaxFPS-Apply", "Boostix.MaxFPSApply.ps1", InstalledMaxFpsApplyScript, "профиля производительности", false, false),
-                CreatePayloadItem(token, "MaxFPS-Restore", "Boostix.MaxFPSRestore.ps1", InstalledMaxFpsRestoreScript, "компонентов восстановления", false, false),
-                CreatePayloadItem(token, "PresentMon-License", "Boostix.PresentMon.License.txt", InstalledPresentMonLicense, "лицензии измерителя FPS", false, false),
-                CreatePayloadItem(token, "PresentMon-ThirdParty", "Boostix.PresentMon.ThirdParty.txt", InstalledPresentMonThirdParty, "уведомлений сторонних компонентов", false, false),
-                CreatePayloadItem(token, "PresentMon", "Boostix.PresentMon.exe", InstalledPresentMon, "измерителя FPS", false, true),
+                CreatePayloadItem(token, "Boost-Session", "Boostix.BoostSession.ps1", InstalledBoostSessionScript, L.T("сценария Boost-сессии"), false, false),
+                CreatePayloadItem(token, "MaxFPS-Apply", "Boostix.MaxFPSApply.ps1", InstalledMaxFpsApplyScript, L.T("профиля производительности"), false, false),
+                CreatePayloadItem(token, "MaxFPS-Restore", "Boostix.MaxFPSRestore.ps1", InstalledMaxFpsRestoreScript, L.T("компонентов восстановления"), false, false),
+                CreatePayloadItem(token, "PresentMon-License", "Boostix.PresentMon.License.txt", InstalledPresentMonLicense, L.T("лицензии измерителя FPS"), false, false),
+                CreatePayloadItem(token, "PresentMon-ThirdParty", "Boostix.PresentMon.ThirdParty.txt", InstalledPresentMonThirdParty, L.T("уведомлений сторонних компонентов"), false, false),
+                CreatePayloadItem(token, "PresentMon", "Boostix.PresentMon.exe", InstalledPresentMon, L.T("измерителя FPS"), false, true),
 #if LEGACY_UPDATE_BRIDGE
-                CreatePayloadItem(token, "Uninstall", CanonicalSetupResourceName, UninstallerExe, "компонентов удаления", true, false),
+                CreatePayloadItem(token, "Uninstall", CanonicalSetupResourceName, UninstallerExe, L.T("компонентов удаления"), true, false),
 #else
-                CreatePayloadItem(token, "Uninstall", null, UninstallerExe, "компонентов удаления", true, false),
+                CreatePayloadItem(token, "Uninstall", null, UninstallerExe, L.T("компонентов удаления"), true, false),
 #endif
-                CreatePayloadItem(token, "Boostix", "Boostix.Payload.exe", InstalledExe, "файлов программы", true, false)
+                CreatePayloadItem(token, "Boostix", "Boostix.Payload.exe", InstalledExe, L.T("файлов программы"), true, false)
             };
 #if !LEGACY_UPDATE_BRIDGE
             items[6].CopyInstaller = true;
@@ -5267,7 +5300,7 @@ namespace BoostixSetup
                     ReportProgress(
                         progress,
                         10 + index * 2,
-                        "Распаковка " + item.ProgressText);
+                        L.T("Распаковка ") + item.ProgressText);
                     if (item.CopyInstaller)
                     {
                         File.Copy(Application.ExecutablePath, item.StagePath, false);
@@ -5286,7 +5319,7 @@ namespace BoostixSetup
                     ReportProgress(
                         progress,
                         28 + index * 2,
-                        "Проверка " + item.ProgressText);
+                        L.T("Проверка ") + item.ProgressText);
                     ValidateStagedPayload(item.StagePath, item.Executable);
                     if (item.PresentMon)
                     {
@@ -5295,10 +5328,10 @@ namespace BoostixSetup
                 }
 
                 StopInstalledApplication();
-                ReportProgress(progress, 45, "Остановка запущенной версии");
+                ReportProgress(progress, 45, L.T("Остановка запущенной версии"));
                 captureDirectories = PrepareCaptureDirectoryTransaction();
                 ApplyCaptureDirectoryTransaction(captureDirectories);
-                ReportProgress(progress, 47, "Защита папки измерений");
+                ReportProgress(progress, 47, L.T("Защита папки измерений"));
 
                 // Dependencies are published first; the main application remains
                 // the final commit marker for the transaction.
@@ -5313,7 +5346,7 @@ namespace BoostixSetup
                     ReportProgress(
                         progress,
                         48 + index * 3,
-                        "Установка " + item.ProgressText);
+                        L.T("Установка ") + item.ProgressText);
                     CommitStagedFile(
                         item.StagePath,
                         item.DestinationPath,
@@ -5326,7 +5359,7 @@ namespace BoostixSetup
                     registerInstallation();
                 }
                 installationSucceeded = true;
-                ReportProgress(progress, 72, "Файлы программы обновлены");
+                ReportProgress(progress, 72, L.T("Файлы программы обновлены"));
             }
             catch
             {
@@ -5806,8 +5839,8 @@ namespace BoostixSetup
                     Version installedVersion = Version.Parse(
                         installedInfo.FileVersion.Trim());
                     throw new InvalidOperationException(
-                        "На компьютере уже установлена более новая версия Boostix (" +
-                        installedVersion.ToString(3) + "). Установка более старой версии отменена.");
+                        L.T("На компьютере уже установлена более новая версия Boostix (") +
+                        installedVersion.ToString(3) + L.T("). Установка более старой версии отменена."));
                 }
                 // Boostix is ordered first. Once a recognized active installation
                 // is found, a stale legacy directory must not override its version.
@@ -5833,7 +5866,7 @@ namespace BoostixSetup
             var file = new FileInfo(path);
             if (!file.Exists || file.Length == 0)
             {
-                throw new InvalidDataException("Встроенные файлы установщика повреждены.");
+                throw new InvalidDataException(L.T("Встроенные файлы установщика повреждены."));
             }
 
             if (!executable)
@@ -5845,7 +5878,7 @@ namespace BoostixSetup
             {
                 if (input.Length < 2 || input.ReadByte() != 'M' || input.ReadByte() != 'Z')
                 {
-                    throw new InvalidDataException("Встроенный файл программы повреждён.");
+                    throw new InvalidDataException(L.T("Встроенный файл программы повреждён."));
                 }
             }
 
@@ -5857,7 +5890,7 @@ namespace BoostixSetup
                 !Version.TryParse(ProductVersion + ".0", out expectedVersion) ||
                 payloadVersion != expectedVersion)
             {
-                throw new InvalidDataException("Встроенный исполняемый файл имеет неверную версию или имя продукта.");
+                throw new InvalidDataException(L.T("Встроенный исполняемый файл имеет неверную версию или имя продукта."));
             }
         }
 
@@ -5869,7 +5902,7 @@ namespace BoostixSetup
             var file = new FileInfo(path);
             if (!file.Exists || file.Length != expectedLength)
             {
-                throw new InvalidDataException("Встроенный измеритель FPS имеет неверный размер.");
+                throw new InvalidDataException(L.T("Встроенный измеритель FPS имеет неверный размер."));
             }
 
             string actualHash;
@@ -5877,7 +5910,7 @@ namespace BoostixSetup
             {
                 if (input.ReadByte() != 'M' || input.ReadByte() != 'Z')
                 {
-                    throw new InvalidDataException("Встроенный измеритель FPS повреждён.");
+                    throw new InvalidDataException(L.T("Встроенный измеритель FPS повреждён."));
                 }
                 input.Position = 0;
                 using (SHA256 sha256 = SHA256.Create())
@@ -5889,7 +5922,7 @@ namespace BoostixSetup
             }
             if (!string.Equals(actualHash, expectedSha256, StringComparison.Ordinal))
             {
-                throw new InvalidDataException("Не совпадает контрольная сумма измерителя FPS.");
+                throw new InvalidDataException(L.T("Не совпадает контрольная сумма измерителя FPS."));
             }
         }
 
@@ -5933,7 +5966,7 @@ namespace BoostixSetup
                 }
             }
             throw new IOException(
-                "Windows не смогла завершить операцию с файлами после нескольких попыток: " +
+                L.T("Windows не смогла завершить операцию с файлами после нескольких попыток: ") +
                 operation + ".",
                 lastFailure);
         }
@@ -6018,7 +6051,7 @@ namespace BoostixSetup
             {
                 if (input == null)
                 {
-                    throw new InvalidOperationException("В установщике отсутствует ресурс: " + resourceName);
+                    throw new InvalidOperationException(L.T("В установщике отсутствует ресурс: ") + resourceName);
                 }
                 using (var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None))
                 {
@@ -6050,7 +6083,7 @@ namespace BoostixSetup
                         }
                         if (!process.WaitForExit(3000))
                         {
-                            throw new InvalidOperationException("Закройте запущенный Boostix и повторите установку.");
+                            throw new InvalidOperationException(L.T("Закройте запущенный Boostix и повторите установку."));
                         }
                     }
                 }
@@ -6261,7 +6294,7 @@ namespace BoostixSetup
             if (string.IsNullOrWhiteSpace(root))
             {
                 throw new IOException(
-                    "Не удалось определить диск для установки Boostix.");
+                    L.T("Не удалось определить диск для установки Boostix."));
             }
             var drive = new DriveInfo(root);
             const long safetyReserve = 128L * 1024L * 1024L;
@@ -6274,11 +6307,11 @@ namespace BoostixSetup
             if (!drive.IsReady || drive.AvailableFreeSpace < required)
             {
                 throw new IOException(
-                    "Недостаточно свободного места для безопасной установки и отката. " +
-                    "Освободите не менее " +
+                    L.T("Недостаточно свободного места для безопасной установки и отката. ") +
+                    L.T("Освободите не менее ") +
                     ((required + 1048575L) / 1048576L).ToString(
                         CultureInfo.InvariantCulture) +
-                    " МБ и повторите попытку.");
+                    L.T(" МБ и повторите попытку."));
             }
             InstallerDiagnostics.Write(
                 "Disk preflight passed. Free=" +
@@ -7171,19 +7204,19 @@ namespace BoostixSetup
 
         private static readonly string[] DemoStages =
         {
-            "Подготовка обновления",
-            "Подготовка папки установки",
-            "Остановка запущенной версии",
-            "Распаковка файлов программы",
-            "Распаковка компонентов обновления",
-            "Проверка файлов программы",
-            "Проверка компонентов обновления",
-            "Установка профиля производительности",
-            "Установка новой версии программы",
-            "Обновление компонентов удаления",
-            "Сохранение параметров установки",
-            "Регистрация новой версии",
-            "Обновление установлено"
+            L.T("Подготовка обновления"),
+            L.T("Подготовка папки установки"),
+            L.T("Остановка запущенной версии"),
+            L.T("Распаковка файлов программы"),
+            L.T("Распаковка компонентов обновления"),
+            L.T("Проверка файлов программы"),
+            L.T("Проверка компонентов обновления"),
+            L.T("Установка профиля производительности"),
+            L.T("Установка новой версии программы"),
+            L.T("Обновление компонентов удаления"),
+            L.T("Сохранение параметров установки"),
+            L.T("Регистрация новой версии"),
+            L.T("Обновление установлено")
         };
 
         public UpdateProgressForm(bool demoMode)
@@ -7288,8 +7321,8 @@ namespace BoostixSetup
             closeButton.Location = new Point(530, 0);
             closeButton.Size = new Size(30, 30);
             closeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            closeButton.AccessibleName = "Закрыть обновление";
-            closeButton.AccessibleDescription = "Закрывает окно обновления Boostix";
+            closeButton.AccessibleName = L.T("Закрыть обновление");
+            closeButton.AccessibleDescription = L.T("Закрывает окно обновления Boostix");
             closeButton.TabIndex = 1;
             closeButton.Click += delegate
             {
@@ -7308,7 +7341,8 @@ namespace BoostixSetup
             iconBox.MouseDown += DragWindow;
             Controls.Add(iconBox);
 
-            var title = MakeLabel("BOOSTIX", 22F, FontStyle.Bold, Color.White);
+            // Same brand line as the app's sidebar: the name and the version.
+            var title = MakeLabel("Boostix", 22F, FontStyle.Bold, Color.White);
             title.Font = BoostixFontProvider.CreateDisplay(22F, FontStyle.Bold);
             title.Location = new Point(105, 31);
             title.AutoSize = true;
@@ -7316,7 +7350,7 @@ namespace BoostixSetup
             Controls.Add(title);
 
             var version = MakeLabel(
-                "UPDATE  •  v" + InstallerEngine.ProductVersion,
+                "v" + InstallerEngine.ProductVersion,
                 8.5F,
                 FontStyle.Bold,
                 accentText);
@@ -7325,13 +7359,13 @@ namespace BoostixSetup
             version.MouseDown += DragWindow;
             Controls.Add(version);
 
-            headlineLabel = MakeLabel("УСТАНОВКА ОБНОВЛЕНИЯ", 16F, FontStyle.Bold, Color.White);
+            headlineLabel = MakeLabel(L.T("Устанавливаю обновление"), 16F, FontStyle.Bold, Color.White);
             headlineLabel.Location = new Point(40, 112);
             headlineLabel.AutoSize = true;
             Controls.Add(headlineLabel);
 
             descriptionLabel = MakeLabel(
-                "Boostix обновляется до версии " + InstallerEngine.ProductVersion,
+                L.T("Boostix обновляется до версии ") + InstallerEngine.ProductVersion,
                 10F,
                 FontStyle.Regular,
                 muted);
@@ -7343,10 +7377,10 @@ namespace BoostixSetup
             percentLabel.Location = new Point(39, 181);
             percentLabel.Size = new Size(120, 42);
             percentLabel.TextAlign = ContentAlignment.MiddleLeft;
-            percentLabel.AccessibleName = "Прогресс обновления: 0 процентов";
+            percentLabel.AccessibleName = L.T("Прогресс обновления: 0 процентов");
             Controls.Add(percentLabel);
 
-            phaseLabel = MakeLabel("Подготовка обновления", 10F, FontStyle.Bold, Color.FromArgb(237, 243, 244));
+            phaseLabel = MakeLabel(L.T("Подготовка обновления"), 10F, FontStyle.Bold, Color.FromArgb(237, 243, 244));
             phaseLabel.Location = new Point(162, 190);
             phaseLabel.Size = new Size(356, 28);
             phaseLabel.TextAlign = ContentAlignment.MiddleLeft;
@@ -7369,7 +7403,7 @@ namespace BoostixSetup
             progressTrack.Controls.Add(progressFill);
 
             detailLabel = MakeLabel(
-                "Не закрывайте установщик до завершения обновления.",
+                L.T("Не закрывайте установщик до завершения обновления."),
                 9F,
                 FontStyle.Regular,
                 muted);
@@ -7379,14 +7413,14 @@ namespace BoostixSetup
             Controls.Add(detailLabel);
 
             actionButton = new BoostixActionButton();
-            actionButton.Text = "ПРОДОЛЖИТЬ";
+            actionButton.Text = L.T("Продолжить");
             actionButton.Location = new Point(350, 288);
             actionButton.Size = new Size(170, 42);
             actionButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             actionButton.ForeColor = Color.White;
             actionButton.Font = CreateUiFont(10F, FontStyle.Bold);
-            actionButton.AccessibleName = "Продолжить после обновления";
-            actionButton.AccessibleDescription = "Запускает обновлённую версию Boostix";
+            actionButton.AccessibleName = L.T("Продолжить после обновления");
+            actionButton.AccessibleDescription = L.T("Запускает обновлённую версию Boostix");
             actionButton.TabIndex = 0;
             actionButton.Visible = false;
             actionButton.Click += ActionButtonClick;
@@ -7417,13 +7451,13 @@ namespace BoostixSetup
             targetProgress = 0;
             progressFill.Width = 0;
             percentLabel.Text = "0%";
-            percentLabel.AccessibleName = "Прогресс обновления: 0 процентов";
-            headlineLabel.Text = "УСТАНОВКА ОБНОВЛЕНИЯ";
+            percentLabel.AccessibleName = L.T("Прогресс обновления: 0 процентов");
+            headlineLabel.Text = L.T("Устанавливаю обновление");
             headlineLabel.ForeColor = Color.White;
-            descriptionLabel.Text = "Boostix обновляется до версии " + InstallerEngine.ProductVersion;
-            phaseLabel.Text = "Подготовка обновления";
+            descriptionLabel.Text = L.T("Boostix обновляется до версии ") + InstallerEngine.ProductVersion;
+            phaseLabel.Text = L.T("Подготовка обновления");
             phaseLabel.ForeColor = Color.FromArgb(237, 243, 244);
-            detailLabel.Text = "Не закрывайте установщик до завершения обновления.";
+            detailLabel.Text = L.T("Не закрывайте установщик до завершения обновления.");
             detailLabel.ForeColor = muted;
             actionButton.Visible = false;
             actionButton.Enabled = false;
@@ -7504,7 +7538,7 @@ namespace BoostixSetup
 
         private void InstallationCompleted()
         {
-            SetProgressTarget(100, "Обновление установлено");
+            SetProgressTarget(100, L.T("Обновление установлено"));
             successPending = true;
         }
 
@@ -7514,17 +7548,17 @@ namespace BoostixSetup
             installing = false;
             successPending = false;
             demoTimer.Stop();
-            headlineLabel.Text = "НЕ УДАЛОСЬ ОБНОВИТЬ";
+            headlineLabel.Text = L.T("Не удалось обновить");
             headlineLabel.ForeColor = Color.FromArgb(255, 128, 120);
-            descriptionLabel.Text = "Повторите установку обновления.";
-            phaseLabel.Text = "Ошибка установки";
+            descriptionLabel.Text = L.T("Повторите установку обновления.");
+            phaseLabel.Text = L.T("Ошибка установки");
             phaseLabel.ForeColor = Color.FromArgb(255, 128, 120);
             detailLabel.Text = FriendlyError(exception) +
-                "\r\nЖурнал: " + InstallerDiagnostics.LogPath;
+                L.T("\r\nЖурнал: ") + InstallerDiagnostics.LogPath;
             detailLabel.ForeColor = Color.FromArgb(173, 198, 203);
-            actionButton.Text = "ПОВТОРИТЬ";
-            actionButton.AccessibleName = "Повторить обновление Boostix";
-            actionButton.AccessibleDescription = "Повторно запускает установку обновления";
+            actionButton.Text = L.T("Повторить");
+            actionButton.AccessibleName = L.T("Повторить обновление Boostix");
+            actionButton.AccessibleDescription = L.T("Повторно запускает установку обновления");
             actionButton.Visible = true;
             actionButton.Enabled = true;
             closeButton.Enabled = true;
@@ -7568,9 +7602,9 @@ namespace BoostixSetup
         {
             percentLabel.Text = displayedProgress.ToString(
                 CultureInfo.InvariantCulture) + "%";
-            percentLabel.AccessibleName = "Прогресс обновления: " +
+            percentLabel.AccessibleName = L.T("Прогресс обновления: ") +
                 displayedProgress.ToString(CultureInfo.InvariantCulture) +
-                " процентов";
+                L.T(" процентов");
             int trackWidth = progressFill.Parent == null
                 ? ProgressTrackWidth
                 : progressFill.Parent.ClientSize.Width;
@@ -7608,18 +7642,18 @@ namespace BoostixSetup
 
             successShown = true;
             installing = false;
-            headlineLabel.Text = "ПРОГРАММА УСПЕШНО ОБНОВЛЕНА";
+            headlineLabel.Text = L.T("Boostix обновлён");
             headlineLabel.ForeColor = Color.White;
-            descriptionLabel.Text = "Версия " + InstallerEngine.ProductVersion + " готова к запуску.";
-            phaseLabel.Text = "Обновление завершено";
+            descriptionLabel.Text = L.T("Версия ") + InstallerEngine.ProductVersion + L.T(" готова к запуску.");
+            phaseLabel.Text = L.T("Обновление завершено");
             phaseLabel.ForeColor = accentText;
-            detailLabel.Text = "Нажмите «Продолжить», чтобы открыть Boostix.";
+            detailLabel.Text = L.T("Нажмите «Продолжить», чтобы открыть Boostix.");
             detailLabel.ForeColor = muted;
-            actionButton.Text = "ПРОДОЛЖИТЬ";
-            actionButton.AccessibleName = "Продолжить после обновления";
+            actionButton.Text = L.T("Продолжить");
+            actionButton.AccessibleName = L.T("Продолжить после обновления");
             actionButton.AccessibleDescription = demoMode
-                ? "Закрывает демонстрацию обновления"
-                : "Запускает обновлённую версию Boostix";
+                ? L.T("Закрывает демонстрацию обновления")
+                : L.T("Запускает обновлённую версию Boostix");
             actionButton.Visible = true;
             actionButton.Enabled = true;
             closeButton.Enabled = true;
@@ -7647,7 +7681,7 @@ namespace BoostixSetup
             }
             catch (Exception exception)
             {
-                detailLabel.Text = "Не удалось запустить программу: " + FriendlyError(exception);
+                detailLabel.Text = L.T("Не удалось запустить программу: ") + FriendlyError(exception);
                 detailLabel.ForeColor = Color.FromArgb(255, 128, 120);
                 actionButton.Enabled = true;
                 actionButton.Focus();
@@ -7658,7 +7692,7 @@ namespace BoostixSetup
         {
             if (exception == null || string.IsNullOrWhiteSpace(exception.Message))
             {
-                return "Неизвестная ошибка. Нажмите «Повторить».";
+                return L.T("Неизвестная ошибка. Нажмите «Повторить».");
             }
 
             string message = exception.Message.Replace('\r', ' ').Replace('\n', ' ').Trim();
@@ -7803,8 +7837,8 @@ namespace BoostixSetup
             closeButton.Location = new Point(530, 0);
             closeButton.Size = new Size(30, 30);
             closeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            closeButton.AccessibleName = "Закрыть установщик";
-            closeButton.AccessibleDescription = "Закрывает окно установки Boostix";
+            closeButton.AccessibleName = L.T("Закрыть установщик");
+            closeButton.AccessibleDescription = L.T("Закрывает окно установки Boostix");
             closeButton.TabIndex = 2;
             closeButton.Click += delegate { Close(); };
             Controls.Add(closeButton);
@@ -7817,7 +7851,8 @@ namespace BoostixSetup
             iconBox.MouseDown += DragWindow;
             Controls.Add(iconBox);
 
-            var title = MakeLabel("BOOSTIX", 22F, FontStyle.Bold, Color.White);
+            // Same brand line as the app's sidebar: the name and the version.
+            var title = MakeLabel("Boostix", 22F, FontStyle.Bold, Color.White);
             title.Font = BoostixFontProvider.CreateDisplay(22F, FontStyle.Bold);
             title.Location = new Point(105, 35);
             title.AutoSize = true;
@@ -7825,7 +7860,7 @@ namespace BoostixSetup
             Controls.Add(title);
 
             var version = MakeLabel(
-                "SETUP  •  v" + InstallerEngine.ProductVersion,
+                "v" + InstallerEngine.ProductVersion,
                 8.5F,
                 FontStyle.Bold,
                 accentText);
@@ -7834,7 +7869,7 @@ namespace BoostixSetup
             version.MouseDown += DragWindow;
             Controls.Add(version);
 
-            var subtitle = MakeLabel("Установщик приложения для повышения производительности", 10F, FontStyle.Regular, muted);
+            var subtitle = MakeLabel(L.T("Установщик приложения для повышения производительности"), 10F, FontStyle.Regular, muted);
             subtitle.Location = new Point(40, 110);
             subtitle.AutoSize = true;
             Controls.Add(subtitle);
@@ -7848,7 +7883,7 @@ namespace BoostixSetup
             locationPanel.BackColor = panel;
             Controls.Add(locationPanel);
 
-            var locationTitle = MakeLabel("ПАПКА УСТАНОВКИ", 8.5F, FontStyle.Bold, muted);
+            var locationTitle = MakeLabel(L.T("Папка установки"), 8.5F, FontStyle.Bold, muted);
             locationTitle.Location = new Point(16, 11);
             locationTitle.AutoSize = true;
             locationPanel.Controls.Add(locationTitle);
@@ -7863,7 +7898,7 @@ namespace BoostixSetup
             locationPanel.Controls.Add(locationValue);
 
             desktopShortcut = new BoostixToggle();
-            desktopShortcut.Text = "Создать ярлык на рабочем столе";
+            desktopShortcut.Text = L.T("Создать ярлык на рабочем столе");
             desktopShortcut.Checked = InstallerEngine.GetDesktopShortcutPreference();
             desktopShortcut.Location = new Point(42, 226);
             desktopShortcut.Size = new Size(478, 26);
@@ -7872,8 +7907,8 @@ namespace BoostixSetup
                 AnchorStyles.Right;
             desktopShortcut.ForeColor = Color.FromArgb(173, 198, 203);
             desktopShortcut.Font = BoostixFontProvider.Create(9.5F, FontStyle.Regular);
-            desktopShortcut.AccessibleName = "Создать ярлык на рабочем столе";
-            desktopShortcut.AccessibleDescription = "Включает или отключает создание ярлыка Boostix на рабочем столе";
+            desktopShortcut.AccessibleName = L.T("Создать ярлык на рабочем столе");
+            desktopShortcut.AccessibleDescription = L.T("Включает или отключает создание ярлыка Boostix на рабочем столе");
             desktopShortcut.TabIndex = 0;
             Controls.Add(desktopShortcut);
 
@@ -7892,20 +7927,20 @@ namespace BoostixSetup
             progressFill.BackColor = accent;
             progressTrack.Controls.Add(progressFill);
 
-            statusLabel = MakeLabel("ГОТОВО К УСТАНОВКЕ", 8.5F, FontStyle.Bold, muted);
+            statusLabel = MakeLabel(L.T("Готово к установке"), 8.5F, FontStyle.Bold, muted);
             statusLabel.Location = new Point(42, 292);
             statusLabel.AutoSize = true;
             Controls.Add(statusLabel);
 
             installButton = new BoostixActionButton();
-            installButton.Text = "УСТАНОВИТЬ";
+            installButton.Text = L.T("Установить");
             installButton.Location = new Point(350, 299);
             installButton.Size = new Size(170, 42);
             installButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             installButton.ForeColor = Color.White;
             installButton.Font = BoostixFontProvider.CreateDisplay(10.5F, FontStyle.Bold);
-            installButton.AccessibleName = "Установить Boostix";
-            installButton.AccessibleDescription = "Начинает установку приложения";
+            installButton.AccessibleName = L.T("Установить Boostix");
+            installButton.AccessibleDescription = L.T("Начинает установку приложения");
             installButton.TabIndex = 1;
             installButton.Click += InstallButtonClick;
             Controls.Add(installButton);
@@ -7932,7 +7967,7 @@ namespace BoostixSetup
             installButton.Enabled = false;
             closeButton.Enabled = false;
             desktopShortcut.Enabled = false;
-            statusLabel.Text = "УСТАНАВЛИВАЮ...";
+            statusLabel.Text = L.T("Устанавливаю…");
             statusLabel.ForeColor = Color.FromArgb(
                 ProductBrand.AccentTextRed,
                 ProductBrand.AccentTextGreen,
@@ -7979,11 +8014,11 @@ namespace BoostixSetup
         {
             installOperationRunning = false;
             AnimateProgress(GetProgressTrackWidth());
-            statusLabel.Text = "УСТАНОВЛЕНО";
+            statusLabel.Text = L.T("Установлено");
             statusLabel.ForeColor = accentText;
-            installButton.Text = "ЗАПУСТИТЬ";
-            installButton.AccessibleName = "Запустить Boostix";
-            installButton.AccessibleDescription = "Запускает установленное приложение Boostix";
+            installButton.Text = L.T("Запустить");
+            installButton.AccessibleName = L.T("Запустить Boostix");
+            installButton.AccessibleDescription = L.T("Запускает установленное приложение Boostix");
             installButton.Enabled = true;
             closeButton.Enabled = true;
             installed = true;
@@ -7993,18 +8028,18 @@ namespace BoostixSetup
         {
             InstallerDiagnostics.Write("Interactive installation failed.", exception);
             installOperationRunning = false;
-            statusLabel.Text = "ОШИБКА УСТАНОВКИ";
+            statusLabel.Text = L.T("Установка не удалась");
             statusLabel.ForeColor = Color.FromArgb(255, 128, 120);
-            installButton.Text = "ПОВТОРИТЬ";
-            installButton.AccessibleName = "Повторить установку Boostix";
-            installButton.AccessibleDescription = "Повторно запускает установку приложения";
+            installButton.Text = L.T("Повторить");
+            installButton.AccessibleName = L.T("Повторить установку Boostix");
+            installButton.AccessibleDescription = L.T("Повторно запускает установку приложения");
             installButton.Enabled = true;
             closeButton.Enabled = true;
             desktopShortcut.Enabled = true;
             MessageBox.Show(
-                "Не удалось установить Boostix:\r\n" + exception.Message +
-                "\r\n\r\nЖурнал: " + InstallerDiagnostics.LogPath,
-                "Ошибка установки",
+                L.T("Не удалось установить Boostix:\r\n") + exception.Message +
+                L.T("\r\n\r\nЖурнал: ") + InstallerDiagnostics.LogPath,
+                L.T("Ошибка установки"),
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }

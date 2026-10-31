@@ -60,7 +60,7 @@ namespace Boostix
             {
                 string value = (ProcessName ?? string.Empty).Trim();
                 return string.IsNullOrEmpty(value)
-                    ? "выбранное приложение"
+                    ? L.T("выбранное приложение")
                     : value;
             }
         }
@@ -161,7 +161,7 @@ namespace Boostix
             {
                 return Task.FromResult(CreateFailure(
                     PerformanceCaptureStatus.NoSupportedProcess,
-                    "Сначала выберите игру в Boostix.",
+                    L.T("Сначала выберите игру в Boostix."),
                     null,
                     false,
                     null,
@@ -179,8 +179,8 @@ namespace Boostix
             {
                 return Task.FromResult(CreateFailure(
                     PerformanceCaptureStatus.NoSupportedProcess,
-                    "Не удалось однозначно определить приложение. " +
-                    "Выберите игру в Boostix и повторите замер.",
+                    L.T("Не удалось однозначно определить приложение. ") +
+                    L.T("Выберите игру в Boostix и повторите замер."),
                     null,
                     false,
                     null,
@@ -201,7 +201,7 @@ namespace Boostix
             {
                 return Task.FromResult(CreateFailure(
                     PerformanceCaptureStatus.CaptureFailed,
-                    "Повтор с правами администратора доступен только после отказа в доступе.",
+                    L.T("Повтор с правами администратора доступен только после отказа в доступе."),
                     deniedAttempt == null ? null : deniedAttempt.Target,
                     true,
                     null,
@@ -225,7 +225,7 @@ namespace Boostix
             {
                 return CreateFailure(
                     PerformanceCaptureStatus.TargetExited,
-                    "Выбранное приложение уже закрыто или было перезапущено.",
+                    L.T("Выбранное приложение уже закрыто или было перезапущено."),
                     target,
                     elevated,
                     null,
@@ -237,7 +237,7 @@ namespace Boostix
                 PerformanceCaptureStage.Preparing,
                 0,
                 0,
-                "Проверяем компонент измерения.");
+                L.T("Проверяем компонент измерения."));
 
             ToolResolution tool = ResolveAndValidateTool();
             if (tool.Status != PerformanceCaptureStatus.Completed)
@@ -254,7 +254,7 @@ namespace Boostix
             {
                 return CreateFailure(
                     PerformanceCaptureStatus.ToolInvalid,
-                    "Повтор с UAC доступен только для проверенного компонента из папки установки приложения.",
+                    L.T("Повтор с UAC доступен только для проверенного компонента из папки установки приложения."),
                     target,
                     true,
                     tool.Path,
@@ -275,7 +275,7 @@ namespace Boostix
             {
                 return CreateFailure(
                     PerformanceCaptureStatus.CaptureFailed,
-                    "Не удалось подготовить файл измерения: " + ex.Message,
+                    L.T("Не удалось подготовить файл измерения: ") + ex.Message,
                     target,
                     elevated,
                     tool.Path,
@@ -286,7 +286,7 @@ namespace Boostix
             {
                 return CreateFailure(
                     PerformanceCaptureStatus.Cancelled,
-                    "Измерение отменено.",
+                    L.T("Измерение отменено."),
                     target,
                     elevated,
                     tool.Path,
@@ -296,7 +296,7 @@ namespace Boostix
             {
                 return CreateFailure(
                     PerformanceCaptureStatus.TargetExited,
-                    "Выбранное приложение закрылось до начала измерения.",
+                    L.T("Выбранное приложение закрылось до начала измерения."),
                     target,
                     elevated,
                     tool.Path,
@@ -353,7 +353,7 @@ namespace Boostix
                 {
                     return CreateFailure(
                         PerformanceCaptureStatus.CaptureFailed,
-                        "PresentMon не запустился.",
+                        L.T("PresentMon не запустился."),
                         target,
                         elevated,
                         tool.Path,
@@ -388,8 +388,8 @@ namespace Boostix
                         return CreateFailure(
                             PerformanceCaptureStatus.AccessDenied,
                             elevated
-                                ? "PresentMon не получил доступ даже после подтверждения UAC."
-                                : "Для замера FPS Windows попросит разрешение.",
+                                ? L.T("PresentMon не получил доступ даже после подтверждения UAC.")
+                                : L.T("Для замера FPS Windows попросит разрешение."),
                             target,
                             elevated,
                             tool.Path,
@@ -419,7 +419,7 @@ namespace Boostix
                 TryStopProcess(process);
                 return CreateFailure(
                     PerformanceCaptureStatus.Cancelled,
-                    "Измерение отменено.",
+                    L.T("Измерение отменено."),
                     target,
                     elevated,
                     tool.Path,
@@ -431,7 +431,7 @@ namespace Boostix
                 {
                     return CreateFailure(
                         PerformanceCaptureStatus.UacCancelled,
-                        "Разрешение не дано. Boost работает, замер FPS пропущен.",
+                        L.T("Разрешение не дано. Boost работает, замер FPS пропущен."),
                         target,
                         true,
                         tool.Path,
@@ -442,7 +442,7 @@ namespace Boostix
                     ex.NativeErrorCode == 5
                         ? PerformanceCaptureStatus.AccessDenied
                         : PerformanceCaptureStatus.CaptureFailed,
-                    "Не удалось запустить PresentMon: " + ex.Message,
+                    L.T("Не удалось запустить PresentMon: ") + ex.Message,
                     target,
                     elevated,
                     tool.Path,
@@ -454,7 +454,7 @@ namespace Boostix
                 TryStopProcess(process);
                 return CreateFailure(
                     PerformanceCaptureStatus.CaptureFailed,
-                    "Ошибка измерения FPS: " + ex.Message,
+                    L.T("Ошибка измерения FPS: ") + ex.Message,
                     target,
                     elevated,
                     tool.Path,
@@ -477,7 +477,7 @@ namespace Boostix
                 PerformanceCaptureStage.Processing,
                 96,
                 DelaySeconds + CaptureSeconds,
-                "Обрабатываем результаты.");
+                L.T("Обрабатываем результаты."));
 
             PerformanceCaptureAttemptResult parsed = ParseCaptureCsv(
                 csvPath,
@@ -489,8 +489,8 @@ namespace Boostix
             {
                 return CreateFailure(
                     PerformanceCaptureStatus.TargetExited,
-                    "Выбранное приложение завершилось, было перезапущено " +
-                    "или сменило исполняемый файл во время измерения.",
+                    L.T("Выбранное приложение завершилось, было перезапущено ") +
+                    L.T("или сменило исполняемый файл во время измерения."),
                     target,
                     elevated,
                     tool.Path,
@@ -503,7 +503,7 @@ namespace Boostix
                     PerformanceCaptureStage.Completed,
                     100,
                     DelaySeconds + CaptureSeconds,
-                    "Измерение завершено.");
+                    L.T("Измерение завершено."));
                 PruneOldCaptures();
             }
             return parsed;
@@ -544,7 +544,7 @@ namespace Boostix
                 {
                     TryStopProcess(process);
                     throw new TimeoutException(
-                        "PresentMon не завершил измерение за отведённое время.");
+                        L.T("PresentMon не завершил измерение за отведённое время."));
                 }
                 bool waiting = elapsed < DelaySeconds;
                 int percent = Math.Min(
@@ -558,8 +558,8 @@ namespace Boostix
                     percent,
                     elapsed,
                     waiting
-                        ? "Подготавливаем стабильный замер."
-                        : "Измеряем FPS игры.");
+                        ? L.T("Подготавливаем стабильный замер.")
+                        : L.T("Измеряем FPS игры."));
 
                 await Task.Delay(250, cancellationToken).ConfigureAwait(false);
             }
@@ -578,7 +578,7 @@ namespace Boostix
             {
                 return CreateFailure(
                     PerformanceCaptureStatus.CaptureFailed,
-                    "PresentMon не создал файл измерения.",
+                    L.T("PresentMon не создал файл измерения."),
                     target,
                     elevated,
                     toolPath,
@@ -616,9 +616,9 @@ namespace Boostix
                             {
                                 return CreateFailure(
                                     PerformanceCaptureStatus.InvalidCapture,
-                                    "В файле PresentMon отсутствует обязательная " +
-                                    "колонка ProcessID; кадры нельзя безопасно " +
-                                    "связать с выбранным приложением.",
+                                    L.T("В файле PresentMon отсутствует обязательная ") +
+                                    L.T("колонка ProcessID; кадры нельзя безопасно ") +
+                                    L.T("связать с выбранным приложением."),
                                     target,
                                     elevated,
                                     toolPath,
@@ -695,7 +695,7 @@ namespace Boostix
                 {
                     return CreateFailure(
                         PerformanceCaptureStatus.InvalidCapture,
-                        "В файле PresentMon нет корректных кадров выбранного процесса.",
+                        L.T("В файле PresentMon нет корректных кадров выбранного процесса."),
                         target,
                         elevated,
                         toolPath,
@@ -708,7 +708,7 @@ namespace Boostix
                         PerformanceCaptureStatus.InvalidCapture,
                         string.Format(
                             CultureInfo.CurrentCulture,
-                            "Замер слишком короткий: {0} кадров, {1:0.0} с. Нужно минимум 300 кадров и 10 секунд.",
+                            L.T("Замер слишком короткий: {0} кадров, {1:0.0} с. Нужно минимум 300 кадров и 10 секунд."),
                             selected.FrameTimes.Count,
                             selected.DurationMilliseconds / 1000.0),
                         target,
@@ -742,7 +742,7 @@ namespace Boostix
                 return new PerformanceCaptureAttemptResult
                 {
                     Status = PerformanceCaptureStatus.Completed,
-                    Message = "Замер FPS успешно завершён.",
+                    Message = L.T("Замер FPS успешно завершён."),
                     UsedElevation = elevated,
                     ToolPath = toolPath,
                     CsvPath = csvPath,
@@ -757,7 +757,7 @@ namespace Boostix
             {
                 return CreateFailure(
                     PerformanceCaptureStatus.InvalidCapture,
-                    "Не удалось прочитать результат PresentMon: " + ex.Message,
+                    L.T("Не удалось прочитать результат PresentMon: ") + ex.Message,
                     target,
                     elevated,
                     toolPath,
@@ -927,7 +927,7 @@ namespace Boostix
                 Path = invalidPath,
                 Message = foundInvalid
                     ? invalidMessage
-                    : "Компонент PresentMon не установлен. Переустановите приложение."
+                    : L.T("Компонент PresentMon не установлен. Переустановите приложение.")
             };
         }
 
@@ -942,7 +942,7 @@ namespace Boostix
                     {
                         Status = PerformanceCaptureStatus.ToolNotFound,
                         Path = path,
-                        Message = "Компонент PresentMon не найден."
+                        Message = L.T("Компонент PresentMon не найден.")
                     };
                 }
                 if (file.Length != ExpectedPresentMonSize)
@@ -951,7 +951,7 @@ namespace Boostix
                     {
                         Status = PerformanceCaptureStatus.ToolInvalid,
                         Path = path,
-                        Message = "Размер PresentMon не совпадает с проверенной версией 2.5.1."
+                        Message = L.T("Размер PresentMon не совпадает с проверенной версией 2.5.1.")
                     };
                 }
 
@@ -974,7 +974,7 @@ namespace Boostix
                     {
                         Status = PerformanceCaptureStatus.ToolInvalid,
                         Path = path,
-                        Message = "Контрольная сумма PresentMon не совпадает с проверенной версией 2.5.1."
+                        Message = L.T("Контрольная сумма PresentMon не совпадает с проверенной версией 2.5.1.")
                     };
                 }
 
@@ -991,7 +991,7 @@ namespace Boostix
                 {
                     Status = PerformanceCaptureStatus.ToolInvalid,
                     Path = path,
-                    Message = "PresentMon не прошёл проверку: " + ex.Message
+                    Message = L.T("PresentMon не прошёл проверку: ") + ex.Message
                 };
             }
         }
@@ -1273,7 +1273,7 @@ namespace Boostix
                 Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
             if (string.IsNullOrWhiteSpace(commonDataDirectory))
             {
-                throw new InvalidOperationException("Системная папка ProgramData недоступна.");
+                throw new InvalidOperationException(L.T("Системная папка ProgramData недоступна."));
             }
 
             string productDirectory = SafeFullPath(Path.Combine(
@@ -1285,7 +1285,7 @@ namespace Boostix
             if (string.IsNullOrWhiteSpace(productDirectory) ||
                 string.IsNullOrWhiteSpace(captureDirectory))
             {
-                throw new InvalidOperationException("Защищённая папка измерений недоступна.");
+                throw new InvalidOperationException(L.T("Защищённая папка измерений недоступна."));
             }
 
             string commonDataPrefix = commonDataDirectory.TrimEnd(
@@ -1301,7 +1301,7 @@ namespace Boostix
                     productPrefix,
                     StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("Папка измерений находится вне ProgramData.");
+                throw new InvalidOperationException(L.T("Папка измерений находится вне ProgramData."));
             }
 
             ValidateProtectedCaptureDirectory(commonDataDirectory, "ProgramData");
@@ -1319,8 +1319,8 @@ namespace Boostix
                 (directory.Attributes & FileAttributes.ReparsePoint) != 0)
             {
                 throw new InvalidOperationException(
-                    "Защищённая папка " + name +
-                    " отсутствует или не прошла проверку безопасности. Переустановите приложение.");
+                    L.T("Защищённая папка ") + name +
+                    L.T(" отсутствует или не прошла проверку безопасности. Переустановите приложение."));
             }
         }
 
@@ -1333,7 +1333,7 @@ namespace Boostix
             if (string.IsNullOrWhiteSpace(fullPath) ||
                 string.IsNullOrWhiteSpace(directoryPath))
             {
-                throw new InvalidOperationException("Файл измерения имеет недопустимый путь.");
+                throw new InvalidOperationException(L.T("Файл измерения имеет недопустимый путь."));
             }
 
             string expectedDirectory = ResolveProtectedCaptureDirectory();
@@ -1354,7 +1354,7 @@ namespace Boostix
                     @"-PresentMon-[0-9a-f]{32}\.csv$",
                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             {
-                throw new InvalidOperationException("Защищённый файл измерения не прошёл проверку безопасности.");
+                throw new InvalidOperationException(L.T("Защищённый файл измерения не прошёл проверку безопасности."));
             }
         }
 
@@ -1437,7 +1437,7 @@ namespace Boostix
                 detail = detail.Substring(0, 240);
             }
             return string.IsNullOrWhiteSpace(detail)
-                ? "PresentMon завершился с кодом " +
+                ? L.T("PresentMon завершился с кодом ") +
                   exitCode.ToString(CultureInfo.InvariantCulture) + "."
                 : "PresentMon: " + detail;
         }

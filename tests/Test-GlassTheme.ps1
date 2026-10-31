@@ -51,6 +51,18 @@ Assert-Contains $program 'protected override void OnSourceInitialized' 'window h
 Assert-Contains $program 'GlassFrameThickness = new Thickness(-1)' 'frame extended under the client area'
 Assert-Contains $build '"$projectRoot\Boostix\WindowBackdrop.cs"' 'backdrop source compiled into Boostix.exe'
 Assert-Contains $tokens 'WindowTintBrushKey' 'translucent window tint resource'
+# Themes: the saved theme is applied before the first colour is used, can be
+# picked in Settings, and dialogs read colours when they open.
+Assert-Contains $program 'ReadThemePreference(' 'saved theme read at start-up'
+Assert-Contains $program 'BoostixDesignTokens.SetPalette(' 'theme applied from Settings'
+$centerSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\BoostCenterOverlay.cs'))
+Assert-Contains $centerSource '"Boostix.Center.Theme."' 'theme choice in Settings'
+foreach ($dialog in @('OptimizationFlow.cs', 'UpdateFlow.cs')) {
+    $dialogSource = [IO.File]::ReadAllText((Join-Path $projectRoot ('Boostix\' + $dialog)))
+    if ($dialogSource -match 'static\s+readonly\s+Color\s') {
+        throw "$dialog captures theme colours once; a theme switch would not reach it."
+    }
+}
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -161,58 +173,82 @@ if (-not (Get-Token 'Accent').Equals($lemon)) {
 if (-not (Get-Token 'Background').Equals($petrolNight)) {
     throw "The window background is $(Get-Token 'Background'); expected petrol $petrolNight."
 }
-$hueGap = [Math]::Abs((Get-Hue (Get-Token 'Warning')) - (Get-Hue (Get-Token 'Accent')))
-if ($hueGap -lt 15) {
-    throw 'Warning colour is too close to the lemon accent to read as a separate status.'
+# Every theme in Settings must pass the same checks as the default one.
+$palettesField = $tokenType.GetField('Palettes', $flags)
+$setPalette = $tokenType.GetMethod('SetPalette', $flags)
+if (-not $palettesField -or -not $setPalette) {
+    throw 'Themes are missing: BoostixDesignTokens.Palettes and SetPalette are required.'
 }
-
-foreach ($backgroundName in @('Background', 'Sidebar', 'Surface', 'SurfaceRaised')) {
-    $background = Get-Token $backgroundName
-    foreach ($foregroundName in @('Text', 'SecondaryText', 'MutedText', 'AccentText', 'Success', 'Warning', 'Error')) {
-        Assert-Contrast (Get-Token $foregroundName) $background 4.5 "$foregroundName on $backgroundName"
-    }
-    Assert-Contrast (Get-Token 'Accent') $background 3 "Accent on $backgroundName"
+$paletteIds = @($palettesField.GetValue($null) | ForEach-Object { $_.Id })
+if (($paletteIds -join ',') -cne 'petrol,pine,ink,amber') {
+    throw "Themes were: $($paletteIds -join ',')"
 }
-foreach ($foregroundName in @('Text', 'SecondaryText')) {
-    Assert-Contrast (Get-Token $foregroundName) (Get-Token 'Hover') 4.5 "$foregroundName on Hover"
+if ([bool]$setPalette.Invoke($null, @('no-such-theme'))) {
+    throw 'An unknown theme id must be refused.'
 }
-Assert-Contrast (Get-Token 'AccentForeground') (Get-Token 'Accent') 7 'Text on the lemon accent'
-Assert-Contrast (Get-Token 'AccentForeground') (Get-Token 'AccentText') 7 'Text on the hovered accent'
-Assert-Contrast (Get-Token 'AccentForeground') (Get-Token 'Destructive') 4.5 'Text on the destructive action'
-
 $glass = $tokenType.GetProperty('GlassBackdrop', $flags)
 if (-not $glass -or -not $glass.CanWrite) {
     throw 'BoostixDesignTokens.GlassBackdrop must be a settable flag.'
 }
-$white = [System.Windows.Media.Color]::FromRgb(255, 255, 255)
-# Dark acrylic never lets more than this much light through behind the tint.
-$brightAcrylic = [System.Windows.Media.Color]::FromRgb(0x60, 0x60, 0x60)
 try {
-    $glass.SetValue($null, $false, $null)
-    foreach ($pair in @(@('WindowTint', 'Background'), @('SidebarTint', 'Sidebar'))) {
-        if (-not (Get-Token $pair[0]).Equals((Get-Token $pair[1]))) {
-            throw "$($pair[0]) must equal the opaque $($pair[1]) without the system backdrop."
-        }
+foreach ($paletteId in $paletteIds) {
+    if (-not [bool]$setPalette.Invoke($null, @($paletteId))) {
+        throw "Theme $paletteId could not be selected."
+    }
+    $hueGap = [Math]::Abs((Get-Hue (Get-Token 'Warning')) - (Get-Hue (Get-Token 'Accent')))
+    if ($hueGap -lt 15) {
+        throw "Warning colour is too close to the accent in the $paletteId theme."
     }
 
-    $glass.SetValue($null, $true, $null)
-    foreach ($pair in @(@('WindowTint', 'Background'), @('SidebarTint', 'Sidebar'))) {
-        $tint = Get-Token $pair[0]
-        $base = Get-Token $pair[1]
-        if ($tint.A -lt 0xB0 -or $tint.A -gt 0xF0) {
-            throw "$($pair[0]) alpha is $($tint.A); the glass tint must stay translucent but readable."
+    foreach ($backgroundName in @('Background', 'Sidebar', 'Surface', 'SurfaceRaised')) {
+        $background = Get-Token $backgroundName
+        foreach ($foregroundName in @('Text', 'SecondaryText', 'MutedText', 'AccentText', 'Success', 'Warning', 'Error')) {
+            Assert-Contrast (Get-Token $foregroundName) $background 4.5 "$foregroundName on $backgroundName ($paletteId)"
         }
-        if ($tint.R -ne $base.R -or $tint.G -ne $base.G -or $tint.B -ne $base.B) {
-            throw "$($pair[0]) must tint with the $($pair[1]) colour."
+        Assert-Contrast (Get-Token 'Accent') $background 3 "Accent on $backgroundName"
+    }
+    foreach ($foregroundName in @('Text', 'SecondaryText')) {
+        Assert-Contrast (Get-Token $foregroundName) (Get-Token 'Hover') 4.5 "$foregroundName on Hover"
+    }
+    Assert-Contrast (Get-Token 'AccentForeground') (Get-Token 'Accent') 7 "Text on the accent ($paletteId)"
+    Assert-Contrast (Get-Token 'AccentForeground') (Get-Token 'AccentText') 7 'Text on the hovered accent'
+    Assert-Contrast (Get-Token 'AccentForeground') (Get-Token 'Destructive') 4.5 'Text on the destructive action'
+
+
+    $white = [System.Windows.Media.Color]::FromRgb(255, 255, 255)
+    # Dark acrylic never lets more than this much light through behind the tint.
+    $brightAcrylic = [System.Windows.Media.Color]::FromRgb(0x60, 0x60, 0x60)
+    try {
+        $glass.SetValue($null, $false, $null)
+        foreach ($pair in @(@('WindowTint', 'Background'), @('SidebarTint', 'Sidebar'))) {
+            if (-not (Get-Token $pair[0]).Equals((Get-Token $pair[1]))) {
+                throw "$($pair[0]) must equal the opaque $($pair[1]) without the system backdrop."
+            }
         }
-        Assert-Contrast (Get-Token 'Text') (Get-Composite $tint $white) 4.5 "Text on $($pair[0]) over a white window"
-        foreach ($foregroundName in @('Text', 'SecondaryText', 'MutedText', 'AccentText')) {
-            Assert-Contrast (Get-Token $foregroundName) (Get-Composite $tint $brightAcrylic) 4.5 "$foregroundName on $($pair[0]) over acrylic"
+
+        $glass.SetValue($null, $true, $null)
+        foreach ($pair in @(@('WindowTint', 'Background'), @('SidebarTint', 'Sidebar'))) {
+            $tint = Get-Token $pair[0]
+            $base = Get-Token $pair[1]
+            if ($tint.A -lt 0xB0 -or $tint.A -gt 0xF0) {
+                throw "$($pair[0]) alpha is $($tint.A); the glass tint must stay translucent but readable."
+            }
+            if ($tint.R -ne $base.R -or $tint.G -ne $base.G -or $tint.B -ne $base.B) {
+                throw "$($pair[0]) must tint with the $($pair[1]) colour."
+            }
+            Assert-Contrast (Get-Token 'Text') (Get-Composite $tint $white) 4.5 "Text on $($pair[0]) over a white window"
+            foreach ($foregroundName in @('Text', 'SecondaryText', 'MutedText', 'AccentText')) {
+                Assert-Contrast (Get-Token $foregroundName) (Get-Composite $tint $brightAcrylic) 4.5 "$foregroundName on $($pair[0]) over acrylic"
+            }
         }
     }
+    finally {
+        $glass.SetValue($null, $false, $null)
+    }
+}
 }
 finally {
-    $glass.SetValue($null, $false, $null)
+    [void]$setPalette.Invoke($null, @('petrol'))
 }
 
 $apply = @($tokenType.GetMethods($flags) | Where-Object {
@@ -240,6 +276,8 @@ if (-not $sidebarKeyField -or -not $applyTint) {
     throw 'The window and sidebar tints cannot follow window activation.'
 }
 Assert-Contains $program 'ApplyWindowTint(' 'tint follows window activation'
+# Activation changes fade like the DWM backdrop instead of jumping.
+Assert-Contains $program 'FadeWindowTint(' 'tint fades on activation'
 $center = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\BoostCenterOverlay.cs'))
 Assert-Contains $center 'BoostixDesignTokens.SidebarTintBrushKey' 'sidebar uses the shared tint resource'
 try {

@@ -400,7 +400,7 @@ namespace Boostix
             var result = new PerformanceProofResult();
             if (pairs == null || pairs.Count < MinimumPairs)
             {
-                result.Summary = "Недостаточно пар A/B для доказательного сравнения.";
+                result.Summary = L.T("Недостаточно пар A/B для доказательного сравнения.");
                 return result;
             }
 
@@ -419,7 +419,7 @@ namespace Boostix
                     return Refuse(
                         result,
                         PerformanceProofStatus.InvalidPairOrder,
-                        "Каждая пара должна содержать один замер без Boost и один замер с Boost.");
+                        L.T("Каждая пара должна содержать один замер без Boost и один замер с Boost."));
                 }
 
                 if (pair.First.Variant == PerformanceProofVariant.Baseline)
@@ -446,7 +446,7 @@ namespace Boostix
                     return Refuse(
                         result,
                         PerformanceProofStatus.InvalidContext,
-                        "Не удалось подтвердить исполняемый файл и контекст замера.");
+                        L.T("Не удалось подтвердить исполняемый файл и контекст замера."));
                 }
 
                 if (!string.Equals(
@@ -457,7 +457,7 @@ namespace Boostix
                     return Refuse(
                         result,
                         PerformanceProofStatus.TargetMismatch,
-                        "Замеры относятся к разным исполняемым файлам.");
+                        L.T("Замеры относятся к разным исполняемым файлам."));
                 }
 
                 if (!string.Equals(
@@ -468,7 +468,7 @@ namespace Boostix
                     return Refuse(
                         result,
                         PerformanceProofStatus.ContextMismatch,
-                        "Разрешение, сценарий или графические параметры замеров различаются.");
+                        L.T("Разрешение, сценарий или графические параметры замеров различаются."));
                 }
 
                 if (string.IsNullOrEmpty(expectedTarget))
@@ -481,14 +481,14 @@ namespace Boostix
                     return Refuse(
                         result,
                         PerformanceProofStatus.TargetMismatch,
-                        "Пары относятся к разным исполняемым файлам.");
+                        L.T("Пары относятся к разным исполняемым файлам."));
                 }
                 else if (!string.Equals(expectedContext, baseline.ContextKey.Trim(), StringComparison.Ordinal))
                 {
                     return Refuse(
                         result,
                         PerformanceProofStatus.ContextMismatch,
-                        "Пары были записаны в разных сценариях.");
+                        L.T("Пары были записаны в разных сценариях."));
                 }
 
                 if (baseline.CaptureDurationSeconds < MinimumDurationSeconds ||
@@ -497,7 +497,7 @@ namespace Boostix
                     return Refuse(
                         result,
                         PerformanceProofStatus.InsufficientDuration,
-                        "Каждый этап должен длиться не менее 50 секунд.");
+                        L.T("Каждый этап должен длиться не менее 50 секунд."));
                 }
 
                 PerformanceFrameMetrics baselineValue = CalculateMetrics(baseline.FrameTimesMs);
@@ -508,7 +508,7 @@ namespace Boostix
                     return Refuse(
                         result,
                         PerformanceProofStatus.InsufficientFrames,
-                        "В одном из этапов недостаточно корректных кадров.");
+                        L.T("В одном из этапов недостаточно корректных кадров."));
                 }
 
                 baselineMetrics.Add(baselineValue);
@@ -522,7 +522,7 @@ namespace Boostix
                 return Refuse(
                     result,
                     PerformanceProofStatus.InvalidPairOrder,
-                    "Для защиты от прогрева нужны обе последовательности: A→B и B→A.");
+                    L.T("Для защиты от прогрева нужны обе последовательности: A→B и B→A."));
             }
 
             result.Status = PerformanceProofStatus.Completed;
@@ -588,7 +588,7 @@ namespace Boostix
                 result.Verdict = PerformanceProofVerdict.Positive;
                 result.Conclusive = true;
                 result.Summary =
-                    "С Boost игра стабильно шла быстрее.";
+                    L.T("С Boost игра стабильно шла быстрее.");
             }
             else if (result.AverageFpsDeltaPercent < -result.RequiredEffectPercent &&
                      agreement >= 0.75 &&
@@ -597,14 +597,14 @@ namespace Boostix
                 result.Verdict = PerformanceProofVerdict.Negative;
                 result.Conclusive = true;
                 result.Summary =
-                    "С Boost игра стабильно шла медленнее.";
+                    L.T("С Boost игра стабильно шла медленнее.");
             }
             else
             {
                 result.Verdict = PerformanceProofVerdict.Neutral;
                 result.Conclusive = false;
                 result.Summary =
-                    "Разница в пределах обычного разброса между проходами.";
+                    L.T("Разница в пределах обычного разброса между проходами.");
             }
 
             return result;

@@ -80,6 +80,8 @@ try {
         "/reference:$wpfRoot\PresentationCore.dll",
         "/reference:$wpfRoot\PresentationFramework.dll",
         $brandPath,
+        (Join-Path $projectRoot 'Boostix\Localization.cs'),
+        (Join-Path $projectRoot 'Boostix\LocalizationEnglish.cs'),
         $designTokensPath,
         $flowPath
     )

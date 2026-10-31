@@ -1284,6 +1284,39 @@ namespace Boostix
             return profile;
         }
 
+        /// <summary>
+        /// Adds a game found in a launcher library. Auto Boost stays off until
+        /// the user turns it on, exactly as for a game picked while running.
+        /// </summary>
+        internal GameProfile AddExecutable(string executablePath, string displayName)
+        {
+            GameProfile profile;
+            if (!GameProfile.TryCreateStored(
+                    executablePath,
+                    displayName,
+                    false,
+                    DateTime.UtcNow,
+                    out profile))
+            {
+                throw new ArgumentException(
+                    "The game executable path is not valid.",
+                    "executablePath");
+            }
+            GameProfileLoadResult loaded = Load();
+            ThrowIfUnreadableStoreWouldBeOverwritten(loaded);
+            List<GameProfile> profiles = loaded.Profiles.ToList();
+            if (profiles.Any(existing => string.Equals(
+                    existing.NormalizedExecutablePath,
+                    profile.NormalizedExecutablePath,
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                return profile;
+            }
+            profiles.Add(profile);
+            Save(profiles);
+            return profile;
+        }
+
         internal bool Remove(string executablePath)
         {
             GameProfileLoadResult loaded = Load();

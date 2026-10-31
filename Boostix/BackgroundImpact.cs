@@ -118,9 +118,9 @@ namespace Boostix
                     WorkingSetBytes = Math.Max(0, last.WorkingSetBytes),
                     ReadBytes = SaturatingDelta(last.ReadBytes, first.ReadBytes),
                     WriteBytes = SaturatingDelta(last.WriteBytes, first.WriteBytes),
-                    MeasurementNote = "Измерено за " +
+                    MeasurementNote = L.T("Измерено за ") +
                         (duration / 1000.0).ToString("0.#", CultureInfo.InvariantCulture) +
-                        " с; процесс не изменялся."
+                        L.T(" с; процесс не изменялся.")
                 });
             }
 
@@ -151,26 +151,26 @@ namespace Boostix
                 {
                     if (identity == null || identity.ProcessId <= 0)
                     {
-                        throw new InvalidOperationException("Некорректная выбранная программа.");
+                        throw new InvalidOperationException(L.T("Некорректная выбранная программа."));
                     }
                     process = Process.GetProcessById(identity.ProcessId);
                     if (!SameProcess(identity, CreateIdentity(process)) ||
                         process.MainWindowHandle == IntPtr.Zero)
                     {
                         throw new InvalidOperationException(
-                            "Программа уже закрыта, перезапущена или не имеет окна.");
+                            L.T("Программа уже закрыта, перезапущена или не имеет окна."));
                     }
                     result.CloseRequested = process.CloseMainWindow();
                     if (!result.CloseRequested)
                     {
-                        result.Message = "Windows не приняла запрос на обычное закрытие.";
+                        result.Message = L.T("Windows не приняла запрос на обычное закрытие.");
                     }
                     else
                     {
                         result.Exited = wait > 0 && process.WaitForExit(wait);
                         result.Message = result.Exited
-                            ? "Программа закрылась штатно."
-                            : "Запрос отправлен; программа оставлена запущенной.";
+                            ? L.T("Программа закрылась штатно.")
+                            : L.T("Запрос отправлен; программа оставлена запущенной.");
                     }
                 }
                 catch (Exception ex)

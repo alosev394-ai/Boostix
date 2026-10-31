@@ -51,6 +51,8 @@ try {
         '/reference:System.Core.dll',
         '/reference:System.IO.Compression.dll',
         (Join-Path $projectRoot 'ProductBrand.cs'),
+        (Join-Path $projectRoot 'Boostix\Localization.cs'),
+        (Join-Path $projectRoot 'Boostix\LocalizationEnglish.cs'),
         $featuresPath,
         $diagnosticsPath
     )

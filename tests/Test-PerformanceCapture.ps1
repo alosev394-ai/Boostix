@@ -102,6 +102,8 @@ try {
         '/reference:System.IO.Compression.dll',
         "/out:$harness",
         (Join-Path $projectRoot 'ProductBrand.cs'),
+        (Join-Path $projectRoot 'Boostix\Localization.cs'),
+        (Join-Path $projectRoot 'Boostix\LocalizationEnglish.cs'),
         (Join-Path $projectRoot 'Boostix\BoostFeatures.cs'),
         (Join-Path $projectRoot 'Boostix\DiagnosticsFeatures.cs'),
         (Join-Path $projectRoot 'Boostix\SessionInsights.cs'),

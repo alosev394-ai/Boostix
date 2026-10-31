@@ -125,7 +125,7 @@ namespace Boostix
                 return new CrashCorrelationResult
                 {
                     Status = CrashCorrelationStatus.ProviderUnavailable,
-                    Summary = "Не удалось прочитать журнал Windows. Причина завершения не определена."
+                    Summary = L.T("Не удалось прочитать журнал Windows. Причина завершения не определена.")
                 };
             }
 
@@ -377,8 +377,8 @@ namespace Boostix
                     ProcessId = target.ProcessId,
                     ProcessName = NormalizeProcessName(target.ProcessName),
                     Summary =
-                        "Рядом с завершением выбранного процесса не найдено подходящее событие Windows. " +
-                        "Причина завершения не определена."
+                        L.T("Рядом с завершением выбранного процесса не найдено подходящее событие Windows. ") +
+                        L.T("Причина завершения не определена.")
                 };
             }
 
@@ -397,8 +397,8 @@ namespace Boostix
                 FaultOffset = NormalizeHex(best.FaultOffset, 16),
                 Message = SanitizeMessage(best.Message),
                 Summary =
-                    "Найдено совпадающее по процессу и времени событие Windows. " +
-                    "Оно является свидетельством события, а не автоматическим диагнозом."
+                    L.T("Найдено совпадающее по процессу и времени событие Windows. ") +
+                    L.T("Оно является свидетельством события, а не автоматическим диагнозом.")
             };
         }
 
@@ -416,7 +416,7 @@ namespace Boostix
                 return new CrashCorrelationResult
                 {
                     Status = CrashCorrelationStatus.InvalidTarget,
-                    Summary = "Недостаточно данных для сопоставления завершившегося процесса."
+                    Summary = L.T("Недостаточно данных для сопоставления завершившегося процесса.")
                 };
             }
 
@@ -427,7 +427,7 @@ namespace Boostix
                 return new CrashCorrelationResult
                 {
                     Status = CrashCorrelationStatus.InvalidTarget,
-                    Summary = "Время завершения процесса предшествует времени запуска."
+                    Summary = L.T("Время завершения процесса предшествует времени запуска.")
                 };
             }
 
@@ -438,7 +438,7 @@ namespace Boostix
                     Status = CrashCorrelationStatus.NotApplicable,
                     ProcessId = target.ProcessId,
                     ProcessName = NormalizeProcessName(target.ProcessName),
-                    Summary = "Процесс завершился штатно; поиск аварии не выполнялся."
+                    Summary = L.T("Процесс завершился штатно; поиск аварии не выполнялся.")
                 };
             }
 

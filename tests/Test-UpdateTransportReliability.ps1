@@ -109,6 +109,9 @@ public static class BoostixWebFailureFixture
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $brandSource = Join-Path $projectRoot 'ProductBrand.cs'
+$localizationSources = @(
+    (Join-Path $projectRoot 'Boostix\Localization.cs'),
+    (Join-Path $projectRoot 'Boostix\LocalizationEnglish.cs'))
 $tokensSource = Join-Path $projectRoot 'Boostix\DesignTokens.cs'
 $updateSource = Join-Path $projectRoot 'Boostix\UpdateFlow.cs'
 $installerSource = Join-Path $projectRoot 'BoostixInstaller\Program.cs'
@@ -229,6 +232,7 @@ try {
         "/reference:$wpfRoot\PresentationCore.dll" `
         "/reference:$wpfRoot\PresentationFramework.dll" `
         $brandSource `
+        $localizationSources `
         $tokensSource `
         $updateSource 2>&1
     if ($LASTEXITCODE -ne 0) {
@@ -246,6 +250,7 @@ try {
         /reference:System.Windows.Forms.dll `
         /reference:System.Security.dll `
         $brandSource `
+        $localizationSources `
         $installerSource 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Installer reliability harness did not compile:`r`n$($installerCompilerOutput -join [Environment]::NewLine)"

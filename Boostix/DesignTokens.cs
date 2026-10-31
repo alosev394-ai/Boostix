@@ -91,34 +91,95 @@ namespace Boostix
             get { return new FontFamily("Segoe UI Variable Text, Segoe UI"); }
         }
 
-        // Petrol glass and lemon light: dark petrol surfaces (tinted glass on
-        // Windows 11), lemon for Boost and live readings, and status colours
-        // only where they mean status. Warning is amber so it never reads as
-        // the lemon accent.
-        private static readonly Color PetrolBackground = Color.FromRgb(10, 34, 41);
-        private static readonly Color PetrolSidebar = Color.FromRgb(7, 26, 32);
-        private static readonly Color PetrolSurface = Color.FromRgb(15, 46, 55);
-        private static readonly Color PetrolRaised = Color.FromRgb(20, 58, 69);
-        private static readonly Color PetrolHover = Color.FromRgb(26, 70, 82);
-        private static readonly Color PetrolBorder = Color.FromRgb(33, 80, 93);
-        private static readonly Color PetrolDivider = Color.FromRgb(24, 63, 74);
-        private static readonly Color MistText = Color.FromRgb(237, 243, 244);
-        private static readonly Color SeaText = Color.FromRgb(173, 198, 203);
-        private static readonly Color HazeText = Color.FromRgb(134, 167, 174);
-        private static readonly Color LemonLight = Color.FromRgb(
-            ProductBrand.AccentRed,
-            ProductBrand.AccentGreen,
-            ProductBrand.AccentBlue);
-        private static readonly Color LemonText = Color.FromRgb(
-            ProductBrand.AccentTextRed,
-            ProductBrand.AccentTextGreen,
-            ProductBrand.AccentTextBlue);
-        private static readonly Color OnLemon = Color.FromRgb(10, 34, 41);
-        private static readonly Color GoGreen = Color.FromRgb(91, 208, 142);
-        private static readonly Color CautionAmber = Color.FromRgb(255, 160, 48);
-        private static readonly Color FaultCoral = Color.FromRgb(255, 128, 120);
-        private static readonly Color DestructiveRed = Color.FromRgb(240, 90, 95);
+        // Themes picked from the author's colour-pair cards, laid out for a
+        // dark interface: dark surfaces from the first colour, the accent from
+        // the second, reserved for Boost and primary actions. Status colours
+        // keep their meaning in every theme; Warning never shares the accent's
+        // hue. Petrol and lemon is the default and the brand.
+        internal static readonly BoostixPalette[] Palettes =
+        {
+            new BoostixPalette
+            {
+                Id = "petrol", Name = L.T("Петроль и лимон"),
+                Background = Color.FromRgb(10, 34, 41), Sidebar = Color.FromRgb(7, 26, 32),
+                Surface = Color.FromRgb(15, 46, 55), Raised = Color.FromRgb(20, 58, 69),
+                Hover = Color.FromRgb(26, 70, 82), Border = Color.FromRgb(33, 80, 93),
+                Divider = Color.FromRgb(24, 63, 74),
+                Text = Color.FromRgb(237, 243, 244), Secondary = Color.FromRgb(173, 198, 203),
+                Muted = Color.FromRgb(134, 167, 174),
+                Accent = Color.FromRgb(ProductBrand.AccentRed, ProductBrand.AccentGreen, ProductBrand.AccentBlue),
+                AccentText = Color.FromRgb(ProductBrand.AccentTextRed, ProductBrand.AccentTextGreen, ProductBrand.AccentTextBlue),
+                OnAccent = Color.FromRgb(10, 34, 41), AccentPressed = Color.FromRgb(232, 219, 58),
+                Success = Color.FromRgb(91, 208, 142), Warning = Color.FromRgb(255, 160, 48),
+                Error = Color.FromRgb(255, 128, 120), Destructive = Color.FromRgb(240, 90, 95)
+            },
+            new BoostixPalette
+            {
+                Id = "pine", Name = L.T("Хвойный и розовый кварц"),
+                Background = Color.FromRgb(11, 31, 23), Sidebar = Color.FromRgb(8, 23, 17),
+                Surface = Color.FromRgb(17, 43, 32), Raised = Color.FromRgb(23, 56, 42),
+                Hover = Color.FromRgb(30, 69, 52), Border = Color.FromRgb(38, 83, 63),
+                Divider = Color.FromRgb(27, 63, 48),
+                Text = Color.FromRgb(237, 244, 240), Secondary = Color.FromRgb(176, 201, 188),
+                Muted = Color.FromRgb(138, 171, 154),
+                Accent = Color.FromRgb(247, 202, 201), AccentText = Color.FromRgb(250, 214, 213),
+                OnAccent = Color.FromRgb(11, 31, 23), AccentPressed = Color.FromRgb(232, 180, 179),
+                Success = Color.FromRgb(91, 208, 142), Warning = Color.FromRgb(255, 160, 48),
+                Error = Color.FromRgb(255, 128, 120), Destructive = Color.FromRgb(240, 90, 95)
+            },
+            new BoostixPalette
+            {
+                Id = "ink", Name = L.T("Чернильный и пудровый"),
+                Background = Color.FromRgb(13, 19, 48), Sidebar = Color.FromRgb(9, 14, 38),
+                Surface = Color.FromRgb(20, 28, 64), Raised = Color.FromRgb(27, 36, 80),
+                Hover = Color.FromRgb(35, 45, 96), Border = Color.FromRgb(45, 56, 110),
+                Divider = Color.FromRgb(32, 41, 84),
+                Text = Color.FromRgb(238, 240, 248), Secondary = Color.FromRgb(183, 189, 216),
+                Muted = Color.FromRgb(146, 154, 190),
+                Accent = Color.FromRgb(244, 194, 215), AccentText = Color.FromRgb(248, 210, 226),
+                OnAccent = Color.FromRgb(13, 19, 48), AccentPressed = Color.FromRgb(228, 172, 196),
+                Success = Color.FromRgb(91, 208, 142), Warning = Color.FromRgb(255, 160, 48),
+                Error = Color.FromRgb(255, 128, 120), Destructive = Color.FromRgb(240, 90, 95)
+            },
+            new BoostixPalette
+            {
+                Id = "amber", Name = L.T("Янтарь и ультрамарин"),
+                Background = Color.FromRgb(15, 16, 54), Sidebar = Color.FromRgb(11, 12, 42),
+                Surface = Color.FromRgb(23, 25, 72), Raised = Color.FromRgb(31, 34, 89),
+                Hover = Color.FromRgb(40, 44, 106), Border = Color.FromRgb(50, 55, 122),
+                Divider = Color.FromRgb(36, 40, 96),
+                Text = Color.FromRgb(239, 239, 250), Secondary = Color.FromRgb(186, 187, 226),
+                Muted = Color.FromRgb(150, 152, 204),
+                Accent = Color.FromRgb(255, 191, 0), AccentText = Color.FromRgb(255, 207, 64),
+                OnAccent = Color.FromRgb(15, 16, 54), AccentPressed = Color.FromRgb(230, 172, 0),
+                Success = Color.FromRgb(91, 208, 142), Warning = Color.FromRgb(255, 138, 61),
+                Error = Color.FromRgb(255, 122, 122), Destructive = Color.FromRgb(240, 90, 95)
+            }
+        };
 
+        private static BoostixPalette palette = Palettes[0];
+
+        internal static string PaletteId
+        {
+            get { return palette.Id; }
+        }
+
+        /// <summary>
+        /// Switches the colour theme; unknown ids are refused and the current
+        /// theme stays. Callers refresh the visuals afterwards.
+        /// </summary>
+        internal static bool SetPalette(string id)
+        {
+            foreach (BoostixPalette candidate in Palettes)
+            {
+                if (string.Equals(candidate.Id, id, StringComparison.OrdinalIgnoreCase))
+                {
+                    palette = candidate;
+                    return true;
+                }
+            }
+            return false;
+        }
         // How much of the petrol tint covers the Windows 11 glass: enough for
         // white text to stay readable over a white window behind Boostix.
         private const byte WindowTintAlpha = 0xB8;
@@ -132,12 +193,12 @@ namespace Boostix
 
         public static Color Background
         {
-            get { return Resolve(SystemColors.WindowColor, PetrolBackground); }
+            get { return Resolve(SystemColors.WindowColor, palette.Background); }
         }
 
         public static Color Sidebar
         {
-            get { return Resolve(SystemColors.WindowColor, PetrolSidebar); }
+            get { return Resolve(SystemColors.WindowColor, palette.Sidebar); }
         }
 
         /// <summary>
@@ -156,42 +217,42 @@ namespace Boostix
 
         public static Color Surface
         {
-            get { return Resolve(SystemColors.WindowColor, PetrolSurface); }
+            get { return Resolve(SystemColors.WindowColor, palette.Surface); }
         }
 
         public static Color SurfaceRaised
         {
-            get { return Resolve(SystemColors.WindowColor, PetrolRaised); }
+            get { return Resolve(SystemColors.WindowColor, palette.Raised); }
         }
 
         public static Color Hover
         {
-            get { return Resolve(SystemColors.HighlightColor, PetrolHover); }
+            get { return Resolve(SystemColors.HighlightColor, palette.Hover); }
         }
 
         public static Color Border
         {
-            get { return Resolve(SystemColors.ActiveBorderColor, PetrolBorder); }
+            get { return Resolve(SystemColors.ActiveBorderColor, palette.Border); }
         }
 
         public static Color Divider
         {
-            get { return Resolve(SystemColors.ActiveBorderColor, PetrolDivider); }
+            get { return Resolve(SystemColors.ActiveBorderColor, palette.Divider); }
         }
 
         public static Color Text
         {
-            get { return Resolve(SystemColors.WindowTextColor, MistText); }
+            get { return Resolve(SystemColors.WindowTextColor, palette.Text); }
         }
 
         public static Color SecondaryText
         {
-            get { return Resolve(SystemColors.WindowTextColor, SeaText); }
+            get { return Resolve(SystemColors.WindowTextColor, palette.Secondary); }
         }
 
         public static Color MutedText
         {
-            get { return Resolve(SystemColors.GrayTextColor, HazeText); }
+            get { return Resolve(SystemColors.GrayTextColor, palette.Muted); }
         }
 
         /// <summary>
@@ -200,12 +261,12 @@ namespace Boostix
         /// </summary>
         public static Color Accent
         {
-            get { return Resolve(SystemColors.HighlightColor, LemonLight); }
+            get { return Resolve(SystemColors.HighlightColor, palette.Accent); }
         }
 
         public static Color AccentText
         {
-            get { return Resolve(SystemColors.WindowTextColor, LemonText); }
+            get { return Resolve(SystemColors.WindowTextColor, palette.AccentText); }
         }
 
         /// <summary>
@@ -215,7 +276,7 @@ namespace Boostix
         /// </summary>
         public static Color AccentForeground
         {
-            get { return Resolve(SystemColors.HighlightTextColor, OnLemon); }
+            get { return Resolve(SystemColors.HighlightTextColor, palette.OnAccent); }
         }
 
         public static Color AccentPressed
@@ -224,49 +285,48 @@ namespace Boostix
             {
                 return Resolve(
                     SystemColors.HighlightColor,
-                    (Color)ColorConverter.ConvertFromString(
-                        ProductBrand.AccentPressedHex));
+                    palette.AccentPressed);
             }
         }
 
         public static Color Focus
         {
-            get { return Resolve(SystemColors.HighlightColor, LemonText); }
+            get { return Resolve(SystemColors.HighlightColor, palette.AccentText); }
         }
 
         public static Color ChromeGlyph
         {
-            get { return Resolve(SystemColors.WindowTextColor, HazeText); }
+            get { return Resolve(SystemColors.WindowTextColor, palette.Muted); }
         }
 
         public static Color ToggleKnobOn
         {
-            get { return Resolve(SystemColors.HighlightTextColor, OnLemon); }
+            get { return Resolve(SystemColors.HighlightTextColor, palette.OnAccent); }
         }
 
         public static Color ToggleKnobOff
         {
-            get { return Resolve(SystemColors.WindowTextColor, SeaText); }
+            get { return Resolve(SystemColors.WindowTextColor, palette.Secondary); }
         }
 
         public static Color Success
         {
-            get { return Resolve(SystemColors.WindowTextColor, GoGreen); }
+            get { return Resolve(SystemColors.WindowTextColor, palette.Success); }
         }
 
         public static Color Warning
         {
-            get { return Resolve(SystemColors.WindowTextColor, CautionAmber); }
+            get { return Resolve(SystemColors.WindowTextColor, palette.Warning); }
         }
 
         public static Color Error
         {
-            get { return Resolve(SystemColors.WindowTextColor, FaultCoral); }
+            get { return Resolve(SystemColors.WindowTextColor, palette.Error); }
         }
 
         public static Color Destructive
         {
-            get { return Resolve(SystemColors.HighlightColor, DestructiveRed); }
+            get { return Resolve(SystemColors.HighlightColor, palette.Destructive); }
         }
 
         public static bool MotionEnabled
@@ -312,39 +372,39 @@ namespace Boostix
                 throw new ArgumentNullException("resources");
             }
 
-            resources[BackgroundBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowColor, PetrolBackground));
+            resources[BackgroundBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowColor, palette.Background));
             resources[WindowTintBrushKey] = Brush(Resolve(
                 highContrast,
                 SystemColors.WindowColor,
-                GlassBackdrop ? WithAlpha(PetrolBackground, WindowTintAlpha) : PetrolBackground));
+                GlassBackdrop ? WithAlpha(palette.Background, WindowTintAlpha) : palette.Background));
             resources[SidebarTintBrushKey] = Brush(Resolve(
                 highContrast,
                 SystemColors.WindowColor,
-                GlassBackdrop ? WithAlpha(PetrolSidebar, SidebarTintAlpha) : PetrolSidebar));
-            resources[SidebarBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowColor, PetrolSidebar));
-            resources[SurfaceBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowColor, PetrolSurface));
-            resources[SurfaceRaisedBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowColor, PetrolRaised));
-            resources[HoverBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightColor, PetrolHover));
-            resources[BorderBrushKey] = Brush(Resolve(highContrast, SystemColors.ActiveBorderColor, PetrolBorder));
-            resources[DividerBrushKey] = Brush(Resolve(highContrast, SystemColors.ActiveBorderColor, PetrolDivider));
-            resources[TextBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, MistText));
-            resources[SecondaryTextBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, SeaText));
-            resources[MutedTextBrushKey] = Brush(Resolve(highContrast, SystemColors.GrayTextColor, HazeText));
-            resources[AccentBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightColor, LemonLight));
-            resources[AccentTextBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, LemonText));
-            resources[AccentForegroundBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightTextColor, OnLemon));
+                GlassBackdrop ? WithAlpha(palette.Sidebar, SidebarTintAlpha) : palette.Sidebar));
+            resources[SidebarBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowColor, palette.Sidebar));
+            resources[SurfaceBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowColor, palette.Surface));
+            resources[SurfaceRaisedBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowColor, palette.Raised));
+            resources[HoverBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightColor, palette.Hover));
+            resources[BorderBrushKey] = Brush(Resolve(highContrast, SystemColors.ActiveBorderColor, palette.Border));
+            resources[DividerBrushKey] = Brush(Resolve(highContrast, SystemColors.ActiveBorderColor, palette.Divider));
+            resources[TextBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, palette.Text));
+            resources[SecondaryTextBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, palette.Secondary));
+            resources[MutedTextBrushKey] = Brush(Resolve(highContrast, SystemColors.GrayTextColor, palette.Muted));
+            resources[AccentBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightColor, palette.Accent));
+            resources[AccentTextBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, palette.AccentText));
+            resources[AccentForegroundBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightTextColor, palette.OnAccent));
             resources[AccentPressedBrushKey] = Brush(Resolve(
                 highContrast,
                 SystemColors.HighlightColor,
-                (Color)ColorConverter.ConvertFromString(ProductBrand.AccentPressedHex)));
-            resources[FocusBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightColor, LemonText));
-            resources[SuccessBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, GoGreen));
-            resources[WarningBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, CautionAmber));
-            resources[ErrorBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, FaultCoral));
-            resources[DestructiveBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightColor, DestructiveRed));
-            resources[ChromeGlyphBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, HazeText));
-            resources[ToggleKnobOnBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightTextColor, OnLemon));
-            resources[ToggleKnobOffBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, SeaText));
+                palette.AccentPressed));
+            resources[FocusBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightColor, palette.AccentText));
+            resources[SuccessBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, palette.Success));
+            resources[WarningBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, palette.Warning));
+            resources[ErrorBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, palette.Error));
+            resources[DestructiveBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightColor, palette.Destructive));
+            resources[ChromeGlyphBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, palette.Muted));
+            resources[ToggleKnobOnBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightTextColor, palette.OnAccent));
+            resources[ToggleKnobOffBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, palette.Secondary));
         }
 
         private static Color Resolve(Color highContrast, Color normal)
@@ -381,6 +441,19 @@ namespace Boostix
         {
             return useHighContrast ? highContrast : normal;
         }
+    }
+
+    /// <summary>
+    /// One colour theme for every Boostix surface.
+    /// </summary>
+    internal sealed class BoostixPalette
+    {
+        public string Id;
+        public string Name;
+        public Color Background, Sidebar, Surface, Raised, Hover, Border, Divider;
+        public Color Text, Secondary, Muted;
+        public Color Accent, AccentText, OnAccent, AccentPressed;
+        public Color Success, Warning, Error, Destructive;
     }
 
     /// <summary>
@@ -459,6 +532,18 @@ namespace Boostix
         public static FrameworkElement Create(string data, double size, Color stroke)
         {
             return Create(data, size, BoostixDesignTokens.Brush(stroke), 1.8);
+        }
+
+        /// <summary>
+        /// An icon whose colour follows a theme resource, for icons that stay
+        /// on screen while the theme changes.
+        /// </summary>
+        public static FrameworkElement CreateThemed(string data, double size, string brushKey)
+        {
+            var host = (Viewbox)Create(data, size, Brushes.Transparent, 1.8);
+            var path = (Path)((Canvas)host.Child).Children[0];
+            path.SetResourceReference(Shape.StrokeProperty, brushKey);
+            return host;
         }
     }
 
@@ -710,20 +795,26 @@ namespace Boostix
         /// </summary>
         public static FrameworkElement BrandMark(double size)
         {
+            // The mark is the brand, like the application icon: petrol and
+            // lemon in every theme, system colours in High Contrast.
+            BoostixPalette brand = BoostixDesignTokens.Palettes[0];
+            bool contrast = SystemParameters.HighContrast;
             var host = new Grid { Width = size, Height = size, SnapsToDevicePixels = true };
             host.Children.Add(new Border
             {
                 CornerRadius = new CornerRadius(size * 0.26),
-                Background = new SolidColorBrush(BoostixDesignTokens.SurfaceRaised),
-                BorderBrush = new SolidColorBrush(BoostixDesignTokens.Border),
+                Background = new SolidColorBrush(contrast ? BoostixDesignTokens.SurfaceRaised : brand.Raised),
+                BorderBrush = new SolidColorBrush(contrast ? BoostixDesignTokens.Border : brand.Border),
                 BorderThickness = new Thickness(1)
             });
             var canvas = new Canvas { Width = size, Height = size };
             double centerX = size / 2;
             double centerY = size * 0.58;
             double radius = size * 0.31;
-            canvas.Children.Add(MarkArc(centerX, centerY, radius, -120, 55, BoostixDesignTokens.MutedText, size * 0.07));
-            canvas.Children.Add(MarkArc(centerX, centerY, radius, 62, 120, BoostixDesignTokens.Accent, size * 0.09));
+            Color scale = contrast ? BoostixDesignTokens.MutedText : brand.Muted;
+            Color lemon = contrast ? BoostixDesignTokens.Accent : brand.Accent;
+            canvas.Children.Add(MarkArc(centerX, centerY, radius, -120, 55, scale, size * 0.07));
+            canvas.Children.Add(MarkArc(centerX, centerY, radius, 62, 120, lemon, size * 0.09));
             double needleAngle = 78 * Math.PI / 180;
             canvas.Children.Add(new Line
             {
@@ -731,7 +822,7 @@ namespace Boostix
                 Y1 = centerY,
                 X2 = centerX + radius * 0.92 * Math.Sin(needleAngle),
                 Y2 = centerY - radius * 0.92 * Math.Cos(needleAngle),
-                Stroke = new SolidColorBrush(BoostixDesignTokens.Text),
+                Stroke = new SolidColorBrush(contrast ? BoostixDesignTokens.Text : brand.Text),
                 StrokeThickness = size * 0.075,
                 StrokeStartLineCap = PenLineCap.Round,
                 StrokeEndLineCap = PenLineCap.Round
@@ -740,7 +831,7 @@ namespace Boostix
             {
                 Width = size * 0.16,
                 Height = size * 0.16,
-                Fill = new SolidColorBrush(BoostixDesignTokens.Accent)
+                Fill = new SolidColorBrush(lemon)
             };
             Canvas.SetLeft(hub, centerX - size * 0.08);
             Canvas.SetTop(hub, centerY - size * 0.08);
@@ -788,7 +879,7 @@ namespace Boostix
 
         public static Border Card(Thickness padding)
         {
-            return new Border
+            var card = new Border
             {
                 Background = new SolidColorBrush(BoostixDesignTokens.Surface),
                 BorderBrush = new SolidColorBrush(BoostixDesignTokens.Border),
@@ -797,6 +888,10 @@ namespace Boostix
                 Padding = padding,
                 SnapsToDevicePixels = true
             };
+            // Follow theme and High Contrast changes while the card is shown.
+            card.SetResourceReference(Border.BackgroundProperty, BoostixDesignTokens.SurfaceBrushKey);
+            card.SetResourceReference(Border.BorderBrushProperty, BoostixDesignTokens.BorderBrushKey);
+            return card;
         }
 
         /// <summary>
