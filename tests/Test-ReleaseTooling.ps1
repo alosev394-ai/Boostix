@@ -31,6 +31,22 @@ foreach ($script in @(
     }
 }
 
+# Windows PowerShell 5.1 reads a script without a BOM in the machine's ANSI
+# code page, so UTF-8 text means one thing on a Russian PC (1251) and another
+# on the CI runners (1252). Scripts stay ASCII or carry a UTF-8 BOM.
+$ambiguousScripts = @(Get-ChildItem -LiteralPath $projectRoot -Recurse -File |
+        Where-Object { $_.Extension -in '.ps1', '.psm1' -and $_.FullName -notmatch '\\(\.git|dist|work)\\' } |
+        Where-Object {
+            $bytes = [IO.File]::ReadAllBytes($_.FullName)
+            $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+            -not $hasBom -and @($bytes | Where-Object { $_ -gt 127 }).Count -gt 0
+        } |
+        ForEach-Object { $_.FullName.Substring($projectRoot.Length + 1) })
+if ($ambiguousScripts.Count -gt 0) {
+    throw ('PowerShell scripts with non-ASCII text and no UTF-8 BOM read differently per code page: ' +
+        ($ambiguousScripts -join ', '))
+}
+
 $brandSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'ProductBrand.cs'))
 $version = [regex]::Match($brandSource, 'ProductVersion\s*=\s*"(?<v>[0-9.]+)"').Groups['v'].Value
 

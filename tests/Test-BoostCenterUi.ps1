@@ -400,7 +400,7 @@ try {
         }
     }
 
-    # --demo-center opens the "Система" section.
+    # --demo-center opens the System section.
     Wait-ForSelectedTab $tabs[1]
     Assert-ContainerSelection $containerSelection $tabs[1]
     for ($index = 0; $index -lt $tabContracts.Count; $index++) {

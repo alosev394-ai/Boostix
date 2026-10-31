@@ -40,7 +40,7 @@ function Convert-CSharpLiteral {
     })
 }
 
-$cyrillic = [regex]'[Ѐ-ӿ]'
+$cyrillic = [regex]'[\u0400-\u04FF]'
 $placeholder = [regex]'\{\d+[^}]*\}'
 
 # --- Every L.T text in the app and the installer has English. ---
