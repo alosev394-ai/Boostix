@@ -323,6 +323,28 @@ if ($addTabStart -lt 0 -or $openCenterStart -le $addTabStart) {
     throw 'The Boost Center tab construction section could not be isolated.'
 }
 $addTab = $center.Substring($addTabStart, $openCenterStart - $addTabStart)
+# With Windows animations off a page is rendered and focused in one go. A
+# button inside a new ScrollViewer is not visible (and refuses focus) until
+# layout applies the template, so focus is queued after layout.
+$focusPreferredStart = $center.IndexOf(
+    'private void FocusPreferredButton()',
+    [StringComparison]::Ordinal)
+if ($focusPreferredStart -lt 0) {
+    throw 'FocusPreferredButton could not be isolated.'
+}
+$focusPreferredEnd = $center.IndexOf(
+    'private void OverlayPreviewKeyDown(',
+    $focusPreferredStart,
+    [StringComparison]::Ordinal)
+if ($focusPreferredEnd -le $focusPreferredStart) {
+    throw 'FocusPreferredButton could not be isolated.'
+}
+$focusPreferred = $center.Substring(
+    $focusPreferredStart,
+    $focusPreferredEnd - $focusPreferredStart)
+if (-not $focusPreferred.Contains('DispatcherPriority.Loaded')) {
+    throw 'FocusPreferredButton must wait for layout (DispatcherPriority.Loaded); with animations off the page button is not visible yet.'
+}
 if (-not $center.Contains('private const double NavigationItemHeight = 42;') -or
     -not $addTab.Contains('Height = NavigationItemHeight')) {
     throw 'Sidebar navigation hit targets are not 42 DIP.'

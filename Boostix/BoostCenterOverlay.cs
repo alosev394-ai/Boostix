@@ -5710,6 +5710,9 @@ namespace Boostix
 
         private void FocusPreferredButton()
         {
+            // After layout: with Windows animations off the page is rendered
+            // just before this, and a button inside a new ScrollViewer is not
+            // visible, so it refuses focus, until the template is applied.
             Dispatcher.BeginInvoke(new Action(delegate
             {
                 if (preferredFocusButton != null &&
@@ -5719,7 +5722,7 @@ namespace Boostix
                     preferredFocusButton.Focus();
                     Keyboard.Focus(preferredFocusButton);
                 }
-            }));
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
         }
 
         private void OverlayPreviewKeyDown(object sender, KeyEventArgs e)

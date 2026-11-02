@@ -230,6 +230,12 @@ Assert-Placement (Invoke-MonitorPlacement `
     -WorkLeft 0 -WorkTop 0 -WorkRight 1920 -WorkBottom 1008 `
     -DpiX 144 -DpiY 144 -CurrentLeft 0 -CurrentTop 0 -Center $true) `
     @(180, 12, 1560, 984, 0) '1920x1080 laptop at 150% with a taskbar stays crisp'
+# 1024x768 at 100% (GitHub runners): narrower than the 1040 DIP shell, so the
+# window scales down to the work area minus the safety inset.
+$small = Invoke-MonitorPlacement `
+    -WorkLeft 0 -WorkTop 0 -WorkRight 1024 -WorkBottom 728 `
+    -DpiX 96 -DpiY 96 -CurrentLeft 0 -CurrentTop 0 -Center $true
+Assert-Placement $small @(8, 46, 1008, 635, 1) '1024x768 monitor at 100%'
 Assert-Placement (Invoke-MonitorPlacement `
     -WorkLeft 0 -WorkTop 0 -WorkRight 1920 -WorkBottom 1080 `
     -DpiX 0 -DpiY 900 -CurrentLeft 0 -CurrentTop 0 -Center $true) `
@@ -534,7 +540,18 @@ foreach ($scale in $scales) {
         Assert-NoOverlap $close $target 'Caption controls and target selector'
 
         if ([Math]::Abs($scale - 1.0) -lt 0.001) {
-            if ($windowBounds.Left -lt $workArea.Left -or
+            # Demo windows keep the design size. On a work area smaller than
+            # that (1024x768 runners) Boostix itself scales down, which the
+            # 1024x768 placement case above checks.
+            $designFits = $workArea.Width -ge $windowBounds.Width -and
+                $workArea.Height -ge $windowBounds.Height
+            if (-not $designFits) {
+                Write-Warning (
+                    "Work area $($workArea.Width)x$($workArea.Height) is smaller than " +
+                    "the $($windowBounds.Width)x$($windowBounds.Height) demo window; " +
+                    'containment is covered by the placement cases.')
+            }
+            elseif ($windowBounds.Left -lt $workArea.Left -or
                 $windowBounds.Top -lt $workArea.Top -or
                 $windowBounds.Right -gt $workArea.Right -or
                 $windowBounds.Bottom -gt $workArea.Bottom) {
