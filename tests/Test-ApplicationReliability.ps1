@@ -110,7 +110,7 @@ foreach ($required in @(
     'public long MinimumCommitHeadroomBytes;',
     'public long PeakTargetPrivateBytes;',
     'public string TargetCrashCode;',
-    '(version != 1 && version != 2 && version != 3 && version != 4)',
+    '(version != 1 && version != 2 && version != 3 && version != 4 && version != 5)',
     'LegacySessionsDirectory',
     'IsSafeKnownSessionsDirectory',
     '(file.Attributes & FileAttributes.ReparsePoint) != 0',

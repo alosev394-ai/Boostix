@@ -92,11 +92,11 @@ if ($problems.Count -gt 0) {
 $setLanguage = $localization.GetMethod('SetLanguage', $flags)
 $translate = $localization.GetMethod('T', $flags)
 $fromArguments = $localization.GetMethod('FromArguments', $flags)
-$homeText = Convert-UiName '0JPQu9Cw0LLQvdCw0Y8='
+$homeText = Convert-UiName '0JjQs9GA0Ys='
 try {
     [void]$setLanguage.Invoke($null, @('en'))
-    if ([string]$translate.Invoke($null, @($homeText)) -cne 'Home') {
-        throw 'English did not translate the Home section.'
+    if ([string]$translate.Invoke($null, @($homeText)) -cne 'Games') {
+        throw 'English did not translate the Games section.'
     }
     if ([string]$translate.Invoke($null, @('Boostix 9.9')) -cne 'Boostix 9.9') {
         throw 'A text without a translation must pass through unchanged.'
@@ -263,12 +263,12 @@ try {
     $testInstance = '--test-instance=' + [Guid]::NewGuid().ToString('N')
     $process = Start-Process `
         -FilePath $ApplicationPath `
-        -ArgumentList '--skip-setup', '--demo', '--demo-center', '--lang=en', $testInstance `
+        -ArgumentList '--skip-setup', '--demo', '--demo-center', '--demo-shelf', '--lang=en', $testInstance `
         -PassThru
     $root = [Windows.Automation.AutomationElement]::RootElement
     $readiness = Wait-ForElement $root 'Boostix.Center.Tab.Readiness' $process.Id
-    if ($readiness.Current.Name -ne 'PC check') {
-        throw "The PC check tab was named '$($readiness.Current.Name)'."
+    if ($readiness.Current.Name -ne 'PC') {
+        throw "The PC tab was named '$($readiness.Current.Name)'."
     }
     $process.Refresh()
     $window = [Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
@@ -292,6 +292,14 @@ try {
     $russian = Get-RussianNames $window
     if ($russian.Count -gt 0) {
         throw ("English Home still shows Russian:`n" + ($russian -join "`n"))
+    }
+    $gamesTab = Wait-ForElement $window 'Boostix.Center.Tab.Games' $process.Id
+    $gamesTab.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    [void](Wait-ForElement $window 'Boostix.Games.Play' $process.Id)
+    Start-Sleep -Milliseconds 600
+    $russian = Get-RussianNames $window
+    if ($russian.Count -gt 0) {
+        throw ("English Games still show Russian:`n" + ($russian -join "`n"))
     }
 }
 finally {

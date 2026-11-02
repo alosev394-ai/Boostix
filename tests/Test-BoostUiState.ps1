@@ -99,6 +99,22 @@ function Wait-ForPathState {
     throw "Path state did not become '$Exists': $Path"
 }
 
+# A demo Boost must not reach the user's real history: it used to save a
+# two-second "Manual / Boostix" report there on every run, pushing a real
+# session out of the 20 that are kept.
+$stateDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Boostix'
+function Get-SessionStoreState {
+    $files = @()
+    foreach ($path in @((Join-Path $stateDirectory 'Sessions'), (Join-Path $stateDirectory 'last-session.report'))) {
+        if (Test-Path -LiteralPath $path) {
+            $files += @(Get-ChildItem -LiteralPath $path -File -Force |
+                    ForEach-Object { $_.FullName + '|' + $_.LastWriteTimeUtc.Ticks })
+        }
+    }
+    return ($files | Sort-Object) -join ';'
+}
+$storeBefore = Get-SessionStoreState
+
 $process = $null
 try {
     $testInstance = '--test-instance=' + [Guid]::NewGuid().ToString('N')
@@ -140,6 +156,10 @@ try {
         -ExpectedNamePrefix $activatePrefix `
         -TimeoutMilliseconds 5000)
     Wait-ForPathState -Path $monitorSignal -Exists $false -TimeoutMilliseconds 3000
+    Start-Sleep -Milliseconds 500
+    if ((Get-SessionStoreState) -cne $storeBefore) {
+        throw 'A demo Boost wrote a session report into the real Boostix history.'
+    }
 
     "Boost UI state test passed: $($bounds.Width)x$($bounds.Height), activate -> deactivate."
 }

@@ -308,21 +308,20 @@ function Convert-PixelsToDip {
     return $Pixels * $Dpi / 96.0
 }
 
-# The sidebar is the application's only navigation: Home hosts the Boost
-# control, every other entry is a section page with its primary action.
+# The top bar is the application's only navigation: Games is the shelf with
+# Play, Home ("Now") hosts the Boost control, every other entry is a section
+# page with its primary action.
 $tabContracts = @(
-    @{ Id = 'Boostix.Center.Tab.Home'; Name = '0JPQm9CQ0JLQndCQ0K8='; PageElement = 'Boostix.Activate' },
-    @{ Id = 'Boostix.Center.Tab.Readiness'; Name = '0J/QoNCe0JLQldCg0JrQkCDQn9Ca'; PageElement = 'Boostix.Center.SelectTarget' },
-    @{ Id = 'Boostix.Center.Tab.Impact'; Name = '0KTQntCd0J7QktCr0JUg0J/QoNCe0JPQoNCQ0JzQnNCr'; PageElement = 'Boostix.Center.ImpactScan' },
+    @{ Id = 'Boostix.Center.Tab.Games'; Name = '0JjQk9Cg0Ks='; PageElement = 'Boostix.Games.Play' },
+    @{ Id = 'Boostix.Center.Tab.Home'; Name = '0KHQldCZ0KfQkNCh'; PageElement = 'Boostix.Activate' },
+    @{ Id = 'Boostix.Center.Tab.Readiness'; Name = '0JrQntCc0J/QrNCu0KLQldCg'; PageElement = 'Boostix.Center.SelectTarget' },
     @{ Id = 'Boostix.Center.Tab.Report'; Name = '0JjQodCi0J7QoNCY0K8='; PageElement = 'Boostix.Center.ReportBenchmark' },
-    @{ Id = 'Boostix.Center.Tab.Profiles'; Name = '0JjQk9Cg0Ks='; PageElement = 'Boostix.Center.ProfileAdd' },
     @{ Id = 'Boostix.Center.Tab.Settings'; Name = '0J3QkNCh0KLQoNCe0JnQmtCY'; PageElement = 'Boostix.Center.Setting.0' }
 )
+# Escape returns to the shelf.
 $homeFocusTargets = @(
-    'Boostix.Center.Tab.Home',
-    'Boostix.Activate',
-    'Boostix.Target.Select',
-    'Boostix.OpenSystem'
+    'Boostix.Center.Tab.Games',
+    'Boostix.Games.Play'
 )
 
 $process = $null
@@ -332,7 +331,7 @@ try {
     $testInstance = '--test-instance=' + [Guid]::NewGuid().ToString('N')
     $process = Start-Process `
         -FilePath $ApplicationPath `
-        -ArgumentList '--skip-setup', '--demo', '--demo-center', $testInstance `
+        -ArgumentList '--skip-setup', '--demo', '--demo-center', '--demo-shelf', $testInstance `
         -PassThru
 
     $window = Wait-ForCenterWindow -Process $process -TimeoutMilliseconds 20000
@@ -341,11 +340,11 @@ try {
     $windowWidthDip = Convert-PixelsToDip `
         $window.Current.BoundingRectangle.Width `
         $dpi
-    if ($windowWidthDip -lt 878 -or $windowWidthDip -gt 882) {
+    if ($windowWidthDip -lt 1038 -or $windowWidthDip -gt 1042) {
         throw (
             "Boostix window width was $windowWidthDip DIP " +
             "($($window.Current.BoundingRectangle.Width) px at $dpi DPI); " +
-            'expected the fixed 880 DIP shell.')
+            'expected the fixed 1040 DIP shell.')
     }
 
     $tabContainer = Wait-ForElementById `
@@ -400,9 +399,9 @@ try {
         }
     }
 
-    # --demo-center opens the System section.
-    Wait-ForSelectedTab $tabs[1]
-    Assert-ContainerSelection $containerSelection $tabs[1]
+    # --demo-center opens the PC section.
+    Wait-ForSelectedTab $tabs[2]
+    Assert-ContainerSelection $containerSelection $tabs[2]
     for ($index = 0; $index -lt $tabContracts.Count; $index++) {
         Select-Tab $tabs[$index]
         Assert-ContainerSelection $containerSelection $tabs[$index]
@@ -452,29 +451,29 @@ try {
     # Verify the two keyboard navigation paths without depending on visual
     # animation timing: arrows move within the Tab control, Ctrl+Tab uses the
     # existing overlay command and both keep exactly one selected item.
-    Select-Tab $tabs[0]
-    $tabs[0].SetFocus()
+    Select-Tab $tabs[1]
+    $tabs[1].SetFocus()
     [Windows.Forms.SendKeys]::SendWait('{RIGHT}')
-    Wait-ForSelectedTab $tabs[1]
-    Assert-ContainerSelection $containerSelection $tabs[1]
-    Start-Sleep -Milliseconds 350
-    Wait-ForFocusedAutomationId $process $tabContracts[1].Id
-
-    [Windows.Forms.SendKeys]::SendWait('^{TAB}')
     Wait-ForSelectedTab $tabs[2]
     Assert-ContainerSelection $containerSelection $tabs[2]
     Start-Sleep -Milliseconds 350
     Wait-ForFocusedAutomationId $process $tabContracts[2].Id
 
-    $tabs[2].SetFocus()
-    [Windows.Forms.SendKeys]::SendWait('{LEFT}')
-    Wait-ForSelectedTab $tabs[1]
-    Assert-ContainerSelection $containerSelection $tabs[1]
+    [Windows.Forms.SendKeys]::SendWait('^{TAB}')
+    Wait-ForSelectedTab $tabs[3]
+    Assert-ContainerSelection $containerSelection $tabs[3]
     Start-Sleep -Milliseconds 350
-    Wait-ForFocusedAutomationId $process $tabContracts[1].Id
+    Wait-ForFocusedAutomationId $process $tabContracts[3].Id
 
-    # Escape returns to Home and keeps keyboard focus on a visible Home
-    # control rather than on a collapsed section page.
+    $tabs[3].SetFocus()
+    [Windows.Forms.SendKeys]::SendWait('{LEFT}')
+    Wait-ForSelectedTab $tabs[2]
+    Assert-ContainerSelection $containerSelection $tabs[2]
+    Start-Sleep -Milliseconds 350
+    Wait-ForFocusedAutomationId $process $tabContracts[2].Id
+
+    # Escape returns to the games shelf and keeps keyboard focus on a
+    # visible shelf control rather than on a collapsed section page.
     [Windows.Forms.SendKeys]::SendWait('{ESC}')
     Wait-ForSelectedTab $tabs[0]
     Assert-ContainerSelection $containerSelection $tabs[0]
@@ -491,10 +490,10 @@ try {
         Start-Sleep -Milliseconds 50
     }
     if ($homeFocusTargets -notcontains $focusedId) {
-        throw "Keyboard focus after Escape was '$focusedId'; expected a Home control."
+        throw "Keyboard focus after Escape was '$focusedId'; expected a shelf control."
     }
 
-    Write-Host 'Boostix sidebar UIA navigation test passed.' -ForegroundColor Green
+    Write-Host 'Boostix top bar UIA navigation test passed.' -ForegroundColor Green
 }
 finally {
     if ($selectionEventsStarted) {

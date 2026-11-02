@@ -5,8 +5,8 @@ namespace Boostix.Branding
         public const string ProductName = "Boostix";
         public const string ProductFileName = "Boostix";
         public const string CompanyName = "Silas Suspect";
-        public const string ProductVersion = "3.2.1";
-        public const string AssemblyVersion = "3.2.1.0";
+        public const string ProductVersion = "4.0.0";
+        public const string AssemblyVersion = "4.0.0.0";
         public const string ReleaseLabel = "";
 
         public const string DataDirectoryName = "Boostix";
@@ -14,17 +14,18 @@ namespace Boostix.Branding
         public const string InstallDirectoryName = "Boostix";
         public const string LegacyInstallDirectoryName = "Majestic Boost";
 
-        public const string AccentHex = "#FFFFF44F";
-        public const string AccentVisualHex = "#FFFFF57A";
-        public const string AccentTextHex = "#FFFFF57A";
-        public const string AccentHoverHex = "#FFFFF57A";
-        public const string AccentPressedHex = "#FFE8DB3A";
+        // Gulf: racing orange on deep navy (4.0).
+        public const string AccentHex = "#FFFF7A2F";
+        public const string AccentVisualHex = "#FFFF9A5C";
+        public const string AccentTextHex = "#FFFF9A5C";
+        public const string AccentHoverHex = "#FFFF9A5C";
+        public const string AccentPressedHex = "#FFE8661C";
 
         public const byte AccentRed = 255;
-        public const byte AccentGreen = 244;
-        public const byte AccentBlue = 79;
+        public const byte AccentGreen = 122;
+        public const byte AccentBlue = 47;
         public const byte AccentTextRed = 255;
-        public const byte AccentTextGreen = 245;
-        public const byte AccentTextBlue = 122;
+        public const byte AccentTextGreen = 154;
+        public const byte AccentTextBlue = 92;
     }
 }

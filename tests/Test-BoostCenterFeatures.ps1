@@ -245,10 +245,18 @@ foreach ($forbidden in @(
 }
 
 foreach ($required in @(
+    # 4.0: the games shelf is the first page; Home is the live Boost page
+    # ("Now"); navigation runs across the top bar.
+    'CenterPage.Games',
     'CenterPage.Home',
+    'AddTab(tabs, CenterPage.Games',
     'AddTab(tabs, CenterPage.Home',
     'SetHomeContent(',
-    'BuildSidebar()',
+    'BuildTopBar()',
+    'RenderGames()',
+    'GameShelf.Build(gameProfiles, installedGames, sessionHistory)',
+    'GameLaunchRequested',
+    'new SessionChart(',
     '"Boostix.Sidebar"',
     '"Boostix.Watermark"',
     '"by Silas Suspect"',
@@ -257,9 +265,8 @@ foreach ($required in @(
     'Raise(preserveTabFocus ? HomeNavigated : CloseRequested);',
     'footerBar.Visibility',
     'CenterPage.Readiness',
-    'CenterPage.Impact',
+    'RenderImpactSection();',
     'CenterPage.Report',
-    'CenterPage.Profiles',
     'CenterPage.Settings',
     'OpenReadiness',
     'OpenImpact',
@@ -272,9 +279,7 @@ foreach ($required in @(
     'AutomationControlType.TabItem',
     'PatternInterface.SelectionItem',
     'AddTab(tabs, CenterPage.Readiness',
-    'AddTab(tabs, CenterPage.Impact',
     'AddTab(tabs, CenterPage.Report',
-    'AddTab(tabs, CenterPage.Profiles',
     'AddTab(tabs, CenterPage.Settings',
     'AutomationProperties.SetName',
     'KeyboardNavigationMode.Cycle',
@@ -378,8 +383,8 @@ foreach ($required in @(
     'public const double BodyTextSize = 13',
     'public const double MetadataTextSize = 11.5',
     'public const double OverlineTextSize = 11',
-    'public const double WindowWidth = 880',
-    'public const double WindowHeight = 560',
+    'public const double WindowWidth = 1040',
+    'public const double WindowHeight = 656',
     'public const double MinimumActionHeight = 40',
     'public const double PreferredActionHeight = 44'
 )) {

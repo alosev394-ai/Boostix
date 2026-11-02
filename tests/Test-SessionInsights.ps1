@@ -243,6 +243,13 @@ Set-Field $resourceReport $reportType 'PeakTargetWorkingSetBytes' ([long](2GB))
 Set-Field $resourceReport $reportType 'PeakTargetPrivateBytes' ([long](3GB))
 Set-Field $resourceReport $reportType 'TargetCrashCode' '0xC0000005'
 Set-Field $resourceReport $reportType 'TargetCrashModule' 'sample.dll'
+Set-Field $resourceReport $reportType 'TargetExecutablePath' 'C:\Games\Sample\sample.exe'
+# 4.0 session chart: one point per 10 s; an earlier point is skipped.
+$started = [DateTime]$reportType.GetField('StartedUtc', $bindingFlags).GetValue($resourceReport)
+$addPoint = $reportType.GetMethod('AddTimelinePoint', $bindingFlags)
+foreach ($point in @(@(0, 6GB, 40), @(4, 5GB, 50), @(10, 4GB, 60), @(20, 3GB, -1))) {
+    [void]$addPoint.Invoke($resourceReport, [object[]]@($started.AddSeconds($point[0]), [long]$point[1], [int]$point[2]))
+}
 $serialized = [string]$serialize.Invoke($null, @($resourceReport))
 foreach ($legacyKey in @(
     'PeakGameWorkingSetBytes=',
@@ -261,7 +268,7 @@ $roundTrip = $deserialize.Invoke(
     $null,
     [object[]](,[string[]]($serialized -split "\r?\n")))
 if ($null -eq $roundTrip -or
-    [int]$reportType.GetField('Version', $bindingFlags).GetValue($roundTrip) -ne 4 -or
+    [int]$reportType.GetField('Version', $bindingFlags).GetValue($roundTrip) -ne 5 -or
     [string]$reportType.GetField('GpuAdapterNames', $bindingFlags).GetValue($roundTrip) -cne 'Other GPU' -or
     [string]$reportType.GetField('GpuAdapterLuid', $bindingFlags).GetValue($roundTrip) -cne '00000003_00000004' -or
     [long]$reportType.GetField('PageFileAllocatedBytes', $bindingFlags).GetValue($roundTrip) -ne 8GB -or
@@ -274,7 +281,24 @@ if ($null -eq $roundTrip -or
         $bindingFlags).GetValue(
             $reportType.GetField('Performance', $bindingFlags).GetValue($roundTrip)) -cne
         'roundtrip-context') {
-    throw 'Version 4 session telemetry did not survive serialization.'
+    throw 'Version 5 session telemetry did not survive serialization.'
+}
+$timeline = $reportType.GetField('Timeline', $bindingFlags).GetValue($roundTrip)
+$timelineText = (@($timeline) | ForEach-Object {
+        '{0}:{1}:{2}' -f $_.OffsetSeconds, $_.AvailableMegabytes, $_.CpuPercent
+    }) -join ';'
+if ($timelineText -cne '0:6144:40;10:4096:60;20:3072:-1' -or
+    [string]$reportType.GetField('TargetExecutablePath', $bindingFlags).GetValue($roundTrip) -cne 'C:\Games\Sample\sample.exe') {
+    throw "The session chart or game path did not survive serialization: $timelineText"
+}
+$longReport = [Activator]::CreateInstance($reportType, $true)
+Set-Field $longReport $reportType 'StartedUtc' $started
+for ($second = 0; $second -le 9000; $second += 10) {
+    [void]$addPoint.Invoke($longReport, [object[]]@($started.AddSeconds($second), [long](4GB), [int]50))
+}
+$longTimeline = @($reportType.GetField('Timeline', $bindingFlags).GetValue($longReport))
+if ($longTimeline.Count -gt 720 -or $longTimeline.Count -lt 360 -or $longTimeline[0].OffsetSeconds -ne 0) {
+    throw "A 2.5-hour chart was not thinned to at most 720 points: $($longTimeline.Count)"
 }
 
 $legacySerialized = $serialized.Replace('Version=4', 'Version=3')

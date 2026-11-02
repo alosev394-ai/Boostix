@@ -164,14 +164,14 @@ function Get-Hue {
 
 Add-Type -AssemblyName System.Drawing
 
-# Petrol and lemon: the pair the author picked for the glass redesign.
-$lemon = [System.Windows.Media.Color]::FromRgb(0xFF, 0xF4, 0x4F)
-$petrolNight = [System.Windows.Media.Color]::FromRgb(0x0A, 0x22, 0x29)
-if (-not (Get-Token 'Accent').Equals($lemon)) {
-    throw "The Boost accent is $(Get-Token 'Accent'); expected lemon $lemon."
+# Gulf (4.0): racing orange for actions on deep navy, Gulf blue for data.
+$gulfOrange = [System.Windows.Media.Color]::FromRgb(0xFF, 0x7A, 0x2F)
+$gulfNavy = [System.Windows.Media.Color]::FromRgb(0x0B, 0x17, 0x26)
+if (-not (Get-Token 'Accent').Equals($gulfOrange)) {
+    throw "The Boost accent is $(Get-Token 'Accent'); expected Gulf orange $gulfOrange."
 }
-if (-not (Get-Token 'Background').Equals($petrolNight)) {
-    throw "The window background is $(Get-Token 'Background'); expected petrol $petrolNight."
+if (-not (Get-Token 'Background').Equals($gulfNavy)) {
+    throw "The window background is $(Get-Token 'Background'); expected Gulf navy $gulfNavy."
 }
 # Every theme in Settings must pass the same checks as the default one.
 $palettesField = $tokenType.GetField('Palettes', $flags)
@@ -180,7 +180,7 @@ if (-not $palettesField -or -not $setPalette) {
     throw 'Themes are missing: BoostixDesignTokens.Palettes and SetPalette are required.'
 }
 $paletteIds = @($palettesField.GetValue($null) | ForEach-Object { $_.Id })
-if (($paletteIds -join ',') -cne 'petrol,pine,ink,amber') {
+if (($paletteIds -join ',') -cne 'gulf,graphite,oxblood,petrol') {
     throw "Themes were: $($paletteIds -join ',')"
 }
 if ([bool]$setPalette.Invoke($null, @('no-such-theme'))) {
@@ -206,6 +206,8 @@ foreach ($paletteId in $paletteIds) {
             Assert-Contrast (Get-Token $foregroundName) $background 4.5 "$foregroundName on $backgroundName ($paletteId)"
         }
         Assert-Contrast (Get-Token 'Accent') $background 3 "Accent on $backgroundName"
+        # Chart lines and the selected game ring are graphics: 3:1.
+        Assert-Contrast (Get-Token 'Data') $background 3 "Data on $backgroundName ($paletteId)"
     }
     foreach ($foregroundName in @('Text', 'SecondaryText')) {
         Assert-Contrast (Get-Token $foregroundName) (Get-Token 'Hover') 4.5 "$foregroundName on Hover"
@@ -248,7 +250,7 @@ foreach ($paletteId in $paletteIds) {
 }
 }
 finally {
-    [void]$setPalette.Invoke($null, @('petrol'))
+    [void]$setPalette.Invoke($null, @('gulf'))
 }
 
 $apply = @($tokenType.GetMethods($flags) | Where-Object {
@@ -303,4 +305,4 @@ finally {
     $glass.SetValue($null, $false, $null)
 }
 
-Write-Host 'Glass backdrop and petrol/lemon contrast contracts passed.' -ForegroundColor Green
+Write-Host 'Glass backdrop and theme contrast contracts passed (Gulf by default).' -ForegroundColor Green

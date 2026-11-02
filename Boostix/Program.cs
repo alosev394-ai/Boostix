@@ -456,6 +456,9 @@ namespace Boostix
         private bool hotkeyRegistered;
         private BoostCenterOverlay boostCenterOverlay;
         private readonly SystemLoadSampler loadSampler = new SystemLoadSampler();
+        // Separate from the gauge's sampler so each chart point averages the
+        // whole 10 s since the previous one.
+        private readonly SystemLoadSampler timelineLoadSampler = new SystemLoadSampler();
         private DispatcherTimer readinessTimer;
         private DispatcherTimer activeBoostTimer;
         private DispatcherTimer autoBoostDiscoveryTimer;
@@ -582,7 +585,11 @@ namespace Boostix
                     ex);
             }
             demoMode = HasLaunchArgument(launchArguments, "--demo");
-            startInTray = HasLaunchArgument(launchArguments, AutostartRegistration.TrayArgument);
+            if (demoMode)
+            {
+                BoostSessionReportStore.DisablePersistence();
+            }
+            startInTray =HasLaunchArgument(launchArguments, AutostartRegistration.TrayArgument);
             safeMode = HasLaunchArgument(launchArguments, "--safe-mode");
             updateHealthProbe = HasLaunchArgument(
                 launchArguments,
@@ -864,6 +871,8 @@ namespace Boostix
                 BoostCenterInstalledGamesScanRequested;
             boostCenterOverlay.InstalledGameAddRequested +=
                 BoostCenterInstalledGameAddRequested;
+            boostCenterOverlay.GameLaunchRequested +=
+                BoostCenterGameLaunchRequested;
             boostCenterOverlay.ExportDiagnosticsRequested +=
                 BoostCenterExportDiagnosticsRequested;
             Panel.SetZIndex(boostCenterOverlay, 10);
@@ -2980,6 +2989,17 @@ namespace Boostix
                             currentSession.PeakTargetPrivateBytes,
                             sample.TargetPrivateBytes);
                     }
+                    // The game debrief chart: one point every 10 s with the
+                    // processor load averaged since the previous point.
+                    DateTime nowUtc = DateTime.UtcNow;
+                    if (currentSession.TimelinePointDue(nowUtc))
+                    {
+                        double load = timelineLoadSampler.Sample();
+                        currentSession.AddTimelinePoint(
+                            nowUtc,
+                            sample.AvailablePhysicalBytes,
+                            double.IsNaN(load) ? -1 : (int)Math.Round(load * 100));
+                    }
                 }
             }
 
@@ -3203,6 +3223,12 @@ namespace Boostix
                 proofCoordinator == null
                     ? null
                     : proofCoordinator.GetSnapshot());
+            if (demoMode && HasLaunchArgument(launchArguments, "--demo-shelf"))
+            {
+                // The demo shelf shows only its own games, never the user's.
+                boostCenterOverlay.SetGameProfiles(new GameProfile[0]);
+                return;
+            }
             if (!gameProfilesDirty)
             {
                 boostCenterOverlay.SetGameProfiles(cachedGameProfiles);
@@ -3365,6 +3391,12 @@ namespace Boostix
             EventArgs e)
         {
             List<InstalledGame> games;
+            if (demoMode && HasLaunchArgument(launchArguments, "--demo-shelf"))
+            {
+                // Screenshots and UI tests get the same shelf on every PC.
+                boostCenterOverlay.SetInstalledGames(DemoShelf.Games(), false);
+                return;
+            }
             try
             {
                 games = await Task.Run(delegate { return GameLibraryScanner.Scan(); });
@@ -4089,6 +4121,15 @@ namespace Boostix
                 CompleteCurrentSession("Interrupted", L.T("Начата новая сессия Boost."));
             }
             currentSession = BoostSessionReport.Start(trigger);
+            if (selectedTarget != null)
+            {
+                // Ties the report to its game card even if the process name
+                // changes between versions of the game.
+                currentSession.TargetExecutablePath = selectedTarget.ExecutablePath;
+            }
+            // Primes the chart's processor reading so the first point already
+            // has a load value.
+            timelineLoadSampler.Sample();
             lock (activeMaintenanceSync)
             {
                 priorityFailureTargetKey = null;
@@ -4737,6 +4778,10 @@ namespace Boostix
             catch
             {
                 sessionHistory = new List<BoostSessionReport>();
+            }
+            if (demoMode && HasLaunchArgument(launchArguments, "--demo-shelf"))
+            {
+                sessionHistory.AddRange(DemoShelf.Sessions());
             }
 
             if (currentSession != null &&
@@ -6633,6 +6678,61 @@ namespace Boostix
                 RememberBoostCenterFocusReturn(centerButton);
                 boostCenterOverlay.OpenHistory();
             }
+            else if (boostCenterOverlay != null && (selectedTarget != null || boostActive))
+            {
+                // A game is already chosen (a test picked one, or Boost is
+                // running): open the live page instead of the shelf.
+                boostCenterOverlay.OpenHome();
+            }
+        }
+
+        private void BoostCenterGameLaunchRequested(object sender, ShelfGameEventArgs e)
+        {
+            if (e == null || e.Game == null || boostCenterOverlay == null)
+            {
+                return;
+            }
+            ShelfGame game = e.Game;
+            if (demoMode)
+            {
+                boostCenterOverlay.SetGameMessage(
+                    L.T("В демо-режиме игры не запускаются."),
+                    false);
+                return;
+            }
+            try
+            {
+                // Play means "Boost this game": Auto starts Boost as soon as
+                // the game's process appears.
+                if (!game.Saved)
+                {
+                    gameProfileStore.AddExecutable(game.ExecutablePath, game.Name);
+                }
+                if (!game.AutoBoost)
+                {
+                    gameProfileStore.SetAutoBoost(game.ExecutablePath, true);
+                }
+                gameProfilesDirty = true;
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not turn on Auto for a game started from the shelf.", ex);
+            }
+            string error;
+            if (GameLauncher.TryLaunch(game, out error))
+            {
+                boostCenterOverlay.SetGameMessage(
+                    string.Format(
+                        CultureInfo.CurrentCulture,
+                        L.T("Запускаем {0}. Boost включится, как только игра откроется."),
+                        game.Name),
+                    false);
+            }
+            else
+            {
+                boostCenterOverlay.SetGameMessage(error, true);
+            }
+            UpdateBoostCenterSessionData();
         }
 
         private void SelectCurrentProcessAsDemoTarget()

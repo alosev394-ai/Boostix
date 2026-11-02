@@ -14,6 +14,8 @@ namespace Boostix
         public string Name;
         public string ExecutablePath;
         public string Source;
+        // Steam only: the app id names the cover art and the launch link.
+        public string SteamAppId;
     }
 
     /// <summary>
@@ -115,7 +117,13 @@ namespace Boostix
                     string executable = PickMainExecutable(Path.Combine(apps, "common", installDirectory), name);
                     if (executable != null)
                     {
-                        yield return new InstalledGame { Name = name, ExecutablePath = executable, Source = "Steam" };
+                        yield return new InstalledGame
+                        {
+                            Name = name,
+                            ExecutablePath = executable,
+                            Source = "Steam",
+                            SteamAppId = AppIdFromManifestPath(manifest)
+                        };
                     }
                 }
             }
@@ -212,6 +220,95 @@ namespace Boostix
             name = ReadVdfValue(acf, "name");
             installDirectory = ReadVdfValue(acf, "installdir");
             return !string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(installDirectory);
+        }
+
+        /// <summary>
+        /// "appmanifest_730.acf" -> "730"; null when the name holds no app id.
+        /// </summary>
+        internal static string AppIdFromManifestPath(string manifestPath)
+        {
+            Match match = Regex.Match(
+                Path.GetFileName(manifestPath ?? string.Empty),
+                @"^appmanifest_(\d{1,10})\.acf$",
+                RegexOptions.IgnoreCase);
+            return match.Success ? match.Groups[1].Value : null;
+        }
+
+        private static readonly Dictionary<string, Dictionary<string, string>> steamLibraryIndex =
+            new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// The Steam app id of a game whose executable lives under
+        /// ...\steamapps\common\&lt;folder&gt;\..., read from that library's
+        /// manifests; null for anything else. Saved profiles store only a
+        /// path, so this is how their cover art is found.
+        /// </summary>
+        internal static string SteamAppIdForExecutable(string executablePath)
+        {
+            if (string.IsNullOrWhiteSpace(executablePath))
+            {
+                return null;
+            }
+            const string marker = @"\steamapps\common\";
+            string path = executablePath.Replace('/', '\\');
+            int at = path.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (at <= 0)
+            {
+                return null;
+            }
+            string library = path.Substring(0, at);
+            string rest = path.Substring(at + marker.Length);
+            int slash = rest.IndexOf('\\');
+            string folder = slash < 0 ? rest : rest.Substring(0, slash);
+            if (folder.Length == 0)
+            {
+                return null;
+            }
+
+            Dictionary<string, string> index;
+            lock (steamLibraryIndex)
+            {
+                if (!steamLibraryIndex.TryGetValue(library, out index))
+                {
+                    index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    try
+                    {
+                        string apps = Path.Combine(library, "steamapps");
+                        if (Directory.Exists(apps))
+                        {
+                            foreach (string manifest in Directory.EnumerateFiles(apps, "appmanifest_*.acf"))
+                            {
+                                string name;
+                                string installDirectory;
+                                string id = AppIdFromManifestPath(manifest);
+                                if (id != null &&
+                                    ParseAppManifest(ReadTextOrEmpty(manifest), out name, out installDirectory))
+                                {
+                                    index[installDirectory] = id;
+                                }
+                            }
+                        }
+                    }
+                    catch (IOException)
+                    {
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                    }
+                    steamLibraryIndex[library] = index;
+                }
+            }
+            string appId;
+            return index.TryGetValue(folder, out appId) ? appId : null;
+        }
+
+        /// <summary>
+        /// Steam's own folder (where appcache lives), or null.
+        /// </summary>
+        internal static string SteamDirectory()
+        {
+            string steamPath = ReadRegistryString(Registry.CurrentUser, @"Software\Valve\Steam", "SteamPath");
+            return string.IsNullOrWhiteSpace(steamPath) ? null : steamPath.Replace('/', '\\');
         }
 
         /// <summary>

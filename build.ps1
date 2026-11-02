@@ -226,6 +226,13 @@ $appArguments = @(
     "/reference:$wpfRoot\UIAutomationTypes.dll",
     "/resource:$projectRoot\CHANGELOG.md,Boostix.Changelog.md",
     "/resource:$projectRoot\CHANGELOG.en.md,Boostix.Changelog.en.md",
+    "/resource:$projectRoot\Boostix\Art\cover-1.jpg,Boostix.Art.cover-1.jpg",
+    "/resource:$projectRoot\Boostix\Art\cover-2.jpg,Boostix.Art.cover-2.jpg",
+    "/resource:$projectRoot\Boostix\Art\cover-3.jpg,Boostix.Art.cover-3.jpg",
+    "/resource:$projectRoot\Boostix\Art\cover-4.jpg,Boostix.Art.cover-4.jpg",
+    "/resource:$projectRoot\Boostix\Art\cover-5.jpg,Boostix.Art.cover-5.jpg",
+    "/resource:$projectRoot\Boostix\Art\cover-6.jpg,Boostix.Art.cover-6.jpg",
+    "/resource:$projectRoot\Boostix\Art\empty-shelf.jpg,Boostix.Art.empty-shelf.jpg",
     "/out:$appOutput",
     "$projectRoot\ProductBrand.cs",
     "$projectRoot\Boostix\DesignTokens.cs",
@@ -250,6 +257,7 @@ $appArguments = @(
     "$projectRoot\Boostix\WindowBackdrop.cs",
     "$projectRoot\Boostix\GameSignals.cs",
     "$projectRoot\Boostix\GameLibraryScanner.cs",
+    "$projectRoot\Boostix\GameShelf.cs",
     "$projectRoot\Boostix\Localization.cs",
     "$projectRoot\Boostix\LocalizationEnglish.cs"
 )

@@ -3,6 +3,25 @@
 The English interface arrived in 3.2.0. Earlier versions are described in
 [`CHANGELOG.md`](CHANGELOG.md), in Russian.
 
+## 4.0.0 — 2026-11-02
+
+### New
+
+- The main screen is now a shelf of your games with covers from Steam.
+  Epic Games, GOG and games you added get a Boostix cover with the title.
+- Play starts the game and turns on Auto for it, so Boost starts as soon as
+  the game opens.
+- A debrief after every game: free memory and processor load over the whole
+  session, the moment memory was lowest, and three plain conclusions.
+- New colours: deep navy, Gulf blue and racing orange. The Graphite and ice,
+  Oxblood and gold, and the earlier Petrol and lemon themes are there too.
+- A bigger window with sections along the top: Games, Now, PC, History and
+  Settings. The PC check and background programs share one page.
+
+### Fixes
+
+- Test and demo launches no longer write sessions into your history.
+
 ## 3.2.1 — 2026-11-01
 
 ### Fixes

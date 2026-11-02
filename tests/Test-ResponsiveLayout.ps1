@@ -20,9 +20,9 @@ $testInstanceArgument = '--test-instance=' + [Guid]::NewGuid().ToString('N')
 # The shell is one fixed 880x560 DIP design surface: a 216 DIP navigation
 # sidebar and a 664 DIP content column with 28 DIP insets. Work areas that
 # cannot hold it at 1:1 receive a uniformly down-scaled window.
-$designWidth = 880.0
-$designHeight = 560.0
-$sidebarWidth = 216.0
+$designWidth = 1040.0
+$designHeight = 656.0
+$topBarHeight = 64.0
 $contentInset = 28.0
 
 Add-Type -AssemblyName PresentationFramework
@@ -95,7 +95,7 @@ try {
     $designSurface = $adaptiveViewbox.Child
     if ([Math]::Abs($designSurface.DesiredSize.Width - $designWidth) -gt 0.001 -or
         [Math]::Abs($designSurface.DesiredSize.Height - $designHeight) -gt 0.001) {
-        throw "Production design surface measured $($designSurface.DesiredSize); expected 880x560 DIP."
+        throw "Production design surface measured $($designSurface.DesiredSize); expected 1040x656 DIP."
     }
     $adaptiveMatrix = $designSurface.TransformToAncestor($adaptiveViewbox).Value
     if ([Math]::Abs($adaptiveMatrix.M11 - 1.0) -gt 0.001 -or
@@ -104,8 +104,8 @@ try {
     }
 
     # A smaller host scales the whole surface uniformly, never reflows it.
-    $adaptiveViewbox.Measure([Windows.Size]::new(792.0, 504.0))
-    $adaptiveViewbox.Arrange([Windows.Rect]::new(0.0, 0.0, 792.0, 504.0))
+    $adaptiveViewbox.Measure([Windows.Size]::new($designWidth * 0.9, $designHeight * 0.9))
+    $adaptiveViewbox.Arrange([Windows.Rect]::new(0.0, 0.0, $designWidth * 0.9, $designHeight * 0.9))
     $adaptiveViewbox.UpdateLayout()
     $scaledMatrix = $designSurface.TransformToAncestor($adaptiveViewbox).Value
     if ([Math]::Abs($scaledMatrix.M11 - 0.9) -gt 0.001 -or
@@ -158,13 +158,14 @@ function Assert-Placement {
     }
 }
 
-# 1920x1080 desktops: crisp 880x560 DIP up to 175%; 200% scales uniformly.
+# 1920x1080 desktops: crisp 1040x656 DIP up to 150% (the common laptop
+# setting); 175% and 200% scale uniformly.
 foreach ($desktopCase in @(
-    @{ Dpi = [uint32]96; Expected = @(520, 260, 880, 560, 0) },
-    @{ Dpi = [uint32]120; Expected = @(410, 190, 1100, 700, 0) },
-    @{ Dpi = [uint32]144; Expected = @(300, 120, 1320, 840, 0) },
-    @{ Dpi = [uint32]168; Expected = @(190, 50, 1540, 980, 0) },
-    @{ Dpi = [uint32]192; Expected = @(137, 16, 1646, 1048, 1) }
+    @{ Dpi = [uint32]96; Expected = @(440, 212, 1040, 656, 0) },
+    @{ Dpi = [uint32]120; Expected = @(310, 130, 1300, 820, 0) },
+    @{ Dpi = [uint32]144; Expected = @(180, 48, 1560, 984, 0) },
+    @{ Dpi = [uint32]168; Expected = @(126, 14, 1667, 1052, 1) },
+    @{ Dpi = [uint32]192; Expected = @(129, 16, 1661, 1048, 1) }
 )) {
     $placement = Invoke-MonitorPlacement `
         -WorkLeft 0 -WorkTop 0 -WorkRight 1920 -WorkBottom 1080 `
@@ -190,11 +191,11 @@ foreach ($desktopCase in @(
 $forSize = [int[]]$placementForSizeMethod.Invoke(
     $null,
     [object[]]@(0, 0, 1920, 1080, [uint32]144, [uint32]144, 0, 0, $true, $designWidth, $designHeight))
-Assert-Placement $forSize @(300, 120, 1320, 840, 0) 'Size-aware placement of the fixed shell'
+Assert-Placement $forSize @(180, 48, 1560, 984, 0) 'Size-aware placement of the fixed shell'
 
 foreach ($workCase in @(
-    @{ Bottom = 1040; Expected = @(168, 16, 1584, 1008, 1) },
-    @{ Bottom = 1032; Expected = @(174, 16, 1571, 1000, 1) }
+    @{ Bottom = 1040; Expected = @(161, 16, 1598, 1008, 1) },
+    @{ Bottom = 1032; Expected = @(167, 16, 1585, 1000, 1) }
 )) {
     $placement = Invoke-MonitorPlacement `
         -WorkLeft 0 -WorkTop 0 -WorkRight 1920 -WorkBottom $workCase.Bottom `
@@ -208,27 +209,31 @@ foreach ($workCase in @(
 Assert-Placement (Invoke-MonitorPlacement `
     -WorkLeft -2560 -WorkTop 0 -WorkRight 0 -WorkBottom 1440 `
     -DpiX 144 -DpiY 144 -CurrentLeft 0 -CurrentTop 0 -Center $true) `
-    @(-1940, 300, 1320, 840, 0) '150% negative-coordinate monitor placement'
+    @(-2060, 228, 1560, 984, 0) '150% negative-coordinate monitor placement'
 Assert-Placement (Invoke-MonitorPlacement `
     -WorkLeft 0 -WorkTop 0 -WorkRight 2560 -WorkBottom 1440 `
     -DpiX 192 -DpiY 192 -CurrentLeft 0 -CurrentTop 0 -Center $true) `
-    @(400, 160, 1760, 1120, 0) '200% QHD monitor placement'
+    @(240, 64, 2080, 1312, 0) '200% QHD monitor placement'
 Assert-Placement (Invoke-MonitorPlacement `
     -WorkLeft 0 -WorkTop 0 -WorkRight 1366 -WorkBottom 728 `
     -DpiX 120 -DpiY 120 -CurrentLeft 0 -CurrentTop 0 -Center $true) `
-    @(133, 14, 1100, 700, 0) '1366x768 laptop at 125%'
+    @(122, 10, 1122, 708, 1) '1366x768 laptop at 125%'
 Assert-Placement (Invoke-MonitorPlacement `
     -WorkLeft 1920 -WorkTop 0 -WorkRight 2520 -WorkBottom 700 `
     -DpiX 144 -DpiY 144 -CurrentLeft 5000 -CurrentTop -100 -Center $false) `
-    @(1932, 12, 576, 366, 1) 'Constrained 150% monitor placement'
+    @(1932, 12, 576, 363, 1) 'Constrained 150% monitor placement'
 Assert-Placement (Invoke-MonitorPlacement `
     -WorkLeft -300 -WorkTop 100 -WorkRight 0 -WorkBottom 300 `
     -DpiX 192 -DpiY 192 -CurrentLeft 9999 -CurrentTop -999 -Center $false) `
-    @(-280, 116, 264, 168, 1) 'Tiny 200% work-area clamping'
+    @(-282, 116, 266, 168, 1) 'Tiny 200% work-area clamping'
+Assert-Placement (Invoke-MonitorPlacement `
+    -WorkLeft 0 -WorkTop 0 -WorkRight 1920 -WorkBottom 1008 `
+    -DpiX 144 -DpiY 144 -CurrentLeft 0 -CurrentTop 0 -Center $true) `
+    @(180, 12, 1560, 984, 0) '1920x1080 laptop at 150% with a taskbar stays crisp'
 Assert-Placement (Invoke-MonitorPlacement `
     -WorkLeft 0 -WorkTop 0 -WorkRight 1920 -WorkBottom 1080 `
     -DpiX 0 -DpiY 900 -CurrentLeft 0 -CurrentTop 0 -Center $true) `
-    @(520, 260, 880, 560, 0) 'Invalid monitor DPI fallback to 96 DPI'
+    @(440, 212, 1040, 656, 0) 'Invalid monitor DPI fallback to 96 DPI'
 
 function Wait-ForWindow {
     param(
@@ -411,11 +416,10 @@ function Wait-ForFocusedId {
 }
 
 $tabIds = @(
+    'Boostix.Center.Tab.Games',
     'Boostix.Center.Tab.Home',
     'Boostix.Center.Tab.Readiness',
-    'Boostix.Center.Tab.Impact',
     'Boostix.Center.Tab.Report',
-    'Boostix.Center.Tab.Profiles',
     'Boostix.Center.Tab.Settings')
 
 $scales = @(1.0, 1.25, 1.5, 1.75, 2.0)
@@ -427,7 +431,7 @@ foreach ($scale in $scales) {
             $scale.ToString([Globalization.CultureInfo]::InvariantCulture)
         $process = Start-Process `
             -FilePath $ApplicationPath `
-            -ArgumentList '--skip-setup', '--demo', $scaleArgument, $testInstanceArgument `
+            -ArgumentList '--skip-setup', '--demo', '--demo-target', '--demo-shelf', $scaleArgument, $testInstanceArgument `
             -PassThru
         $window = Wait-ForWindow -Process $process -TimeoutMilliseconds 15000
 
@@ -488,31 +492,31 @@ foreach ($scale in $scales) {
             }
             $tabBounds = Get-NormalizedBounds $tab $window
             Assert-Between $tabBounds.Height 40 44.5 "Navigation tab height at scale $scale"
-            if ($tabBounds.Left -lt 8 -or $tabBounds.Right -gt ($sidebarWidth - 8)) {
-                throw "Navigation tab $tabId left the sidebar at scale $scale."
+            if ($tabBounds.Top -lt 4 -or $tabBounds.Top + $tabBounds.Height -gt ($topBarHeight - 4)) {
+                throw "Navigation tab $tabId left the top bar at scale $scale."
+            }
+            foreach ($chrome in @($minimize, $close, $status)) {
+                Assert-NoOverlap $tab $chrome "Navigation tab $tabId and the top bar controls"
             }
         }
 
-        foreach ($sidebarItem in @(
+        foreach ($barItem in @(
             @($version, 'Version label'),
-            @($status, 'Sidebar session status'),
+            @($status, 'Session status'),
             @($watermark, 'Watermark'))) {
-            $itemBounds = Get-NormalizedBounds $sidebarItem[0] $window
-            if ($itemBounds.Left -lt 8 -or $itemBounds.Right -gt $sidebarWidth) {
-                throw "$($sidebarItem[1]) is outside the sidebar at scale $scale."
+            $itemBounds = Get-NormalizedBounds $barItem[0] $window
+            if ($itemBounds.Top -lt 4 -or $itemBounds.Top + $itemBounds.Height -gt $topBarHeight) {
+                throw "$($barItem[1]) is outside the top bar at scale $scale."
             }
         }
-        $watermarkBounds = Get-NormalizedBounds $watermark $window
-        if ($watermarkBounds.BottomInset -lt 12) {
-            throw "Watermark left its footer safe area at scale $scale."
-        }
-        Assert-NoOverlap $status $watermark 'Sidebar status and watermark'
+        Assert-NoOverlap $status $close 'Session status and the close button'
 
         $targetBounds = Get-NormalizedBounds $target $window
         if ($targetBounds.Height -lt 72) {
             throw "Exact target selector is $($targetBounds.Height) DIP tall; expected at least 72."
         }
-        if ($targetBounds.Left -lt ($sidebarWidth + $contentInset - 1) -or
+        if ($targetBounds.Top -lt $topBarHeight -or
+            $targetBounds.Left -lt ($contentInset - 1) -or
             $targetBounds.RightInset -lt ($contentInset - 1)) {
             throw (
                 "Exact target selector left the content insets at scale $scale " +
@@ -536,15 +540,32 @@ foreach ($scale in $scales) {
                 $windowBounds.Bottom -gt $workArea.Bottom) {
                 throw 'The production-size window is not contained in its target monitor work area.'
             }
-            # Keyboard order: sidebar navigation, then the game, then Boost.
+            # Keyboard order: the top bar (sections, then session status),
+            # then the game, then Boost.
             $settingsTab = Find-ById $window 'Boostix.Center.Tab.Settings'
             $settingsTab.SetFocus()
             Wait-ForFocusedId 'Boostix.Center.Tab.Settings' 1000
+            [Windows.Forms.SendKeys]::SendWait('{TAB}')
+            Wait-ForFocusedId 'Boostix.StatusPill' 1000
             [Windows.Forms.SendKeys]::SendWait('{TAB}')
             Wait-ForFocusedId 'Boostix.Target.Select' 1000
             [Windows.Forms.SendKeys]::SendWait('{TAB}')
             Wait-ForFocusedId 'Boostix.Activate' 1000
         }
+
+        # The games shelf: Play and the first cover stay inside the window
+        # and clear of each other at every scale.
+        Select-Tab (Find-ById $window 'Boostix.Center.Tab.Games')
+        $play = Find-ById $window 'Boostix.Games.Play' 10000
+        Start-Sleep -Milliseconds ($transitionMilliseconds + 40)
+        $play = Find-ById $window 'Boostix.Games.Play'
+        $firstCard = Find-ById $window 'Boostix.Games.Card.0'
+        Assert-InsideWindow $play $window 'Play button'
+        Assert-InsideWindow $firstCard $window 'First game cover'
+        Assert-KeyboardFocusable $play 'Play button'
+        Assert-NoOverlap $firstCard $play 'First game cover and the Play button'
+        $playBounds = Get-NormalizedBounds $play $window
+        Assert-Between $playBounds.Height 44 48.5 "Play button height at scale $scale"
 
         Select-Tab (Find-ById $window 'Boostix.Center.Tab.Readiness')
         [void](Find-ById $window 'Boostix.Center.SelectTarget')
@@ -620,7 +641,7 @@ foreach ($constrainedCase in @(
     try {
         $constrainedProcess = Start-Process `
             -FilePath $ApplicationPath `
-            -ArgumentList '--skip-setup', '--demo', $constrainedCase.Argument, $testInstanceArgument `
+            -ArgumentList '--skip-setup', '--demo', '--demo-target', $constrainedCase.Argument, $testInstanceArgument `
             -PassThru
         $constrainedWindow = Wait-ForWindow `
             -Process $constrainedProcess `
@@ -632,7 +653,7 @@ foreach ($constrainedCase in @(
             0.65 `
             "Constrained window aspect for $($constrainedCase.Argument)"
         foreach ($automationId in @(
-            'Boostix.Center.Tab.Home',
+            'Boostix.Center.Tab.Games',
             'Boostix.Center.Tab.Settings',
             'Boostix.Activate',
             'Boostix.Target.Select',
@@ -732,4 +753,4 @@ foreach ($motionSourcePath in @(
     }
 }
 
-"Responsive layout test passed: $($results -join ', '); fixed 880x560 DIP shell stays crisp when it fits and scales uniformly otherwise, with sidebar UIA tabs, keyboard order, separated footer actions, unclipped compact work areas, reduced motion and $transitionMilliseconds ms transitions verified."
+"Responsive layout test passed: $($results -join ', '); fixed 1040x656 DIP shell stays crisp when it fits and scales uniformly otherwise, with top bar UIA tabs, the games shelf, keyboard order, separated footer actions, unclipped compact work areas, reduced motion and $transitionMilliseconds ms transitions verified."

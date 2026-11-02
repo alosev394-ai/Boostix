@@ -135,8 +135,9 @@ foreach ($withFlag in @($true, $false)) {
         }
         $window = [Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
         if (-not $withFlag) {
-            if (-not (Wait-ForElement -Root $window -AutomationId 'Boostix.Status' -TimeoutSeconds 10)) {
-                throw 'The home page did not render in the plain demo launch.'
+            # 4.0 opens on the games shelf.
+            if (-not (Wait-ForElement -Root $window -AutomationId 'Boostix.Games.Title' -TimeoutSeconds 10)) {
+                throw 'The games shelf did not render in the plain demo launch.'
             }
             if (Wait-ForElement -Root $window -AutomationId 'Boostix.WhatsNew' -TimeoutSeconds 2) {
                 throw "What's new appeared in a demo launch without --demo-whats-new."

@@ -68,6 +68,24 @@ namespace Boostix
             return null;
         }
 
+        /// <summary>
+        /// Culture for dates with month names. Numbers keep the regional
+        /// format, but "31 окт" in an English interface reads as a bug, so
+        /// English uses English month names whatever the regional format.
+        /// </summary>
+        internal static CultureInfo DateCulture
+        {
+            get
+            {
+                CultureInfo current = CultureInfo.CurrentCulture;
+                if (!english || current.TwoLetterISOLanguageName == "en")
+                {
+                    return current;
+                }
+                return CultureInfo.GetCultureInfo("en-GB");
+            }
+        }
+
         internal static string T(string russian)
         {
             string translated;

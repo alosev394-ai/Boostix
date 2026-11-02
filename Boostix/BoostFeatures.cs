@@ -140,14 +140,145 @@ namespace Boostix
         public string CsvPath;
     }
 
+    /// <summary>
+    /// One point of the session chart: seconds since Boost started, free
+    /// physical memory and processor load (-1 when Windows gave no reading).
+    /// </summary>
+    internal struct SessionTimelinePoint
+    {
+        public int OffsetSeconds;
+        public int AvailableMegabytes;
+        public int CpuPercent;
+    }
+
     internal sealed class BoostSessionReport
     {
-        public const int CurrentVersion = 4;
+        public const int CurrentVersion = 5;
+        // One point every 10 s; a two-hour game fills the chart, longer ones
+        // keep every other point so the file stays small.
+        public const int TimelineIntervalSeconds = 10;
+        public const int MaximumTimelinePoints = 720;
 
         public BoostSessionReport()
         {
             Version = CurrentVersion;
             Actions = new List<BoostActionRecord>();
+            Timeline = new List<SessionTimelinePoint>();
+        }
+
+        public string TargetExecutablePath;
+        public List<SessionTimelinePoint> Timeline;
+
+        /// <summary>
+        /// True when the next chart point is due, so a caller can take the
+        /// (averaging) processor reading only then.
+        /// </summary>
+        public bool TimelinePointDue(DateTime nowUtc)
+        {
+            if (Timeline == null || Timeline.Count == 0)
+            {
+                return true;
+            }
+            double offset = (nowUtc - StartedUtc).TotalSeconds;
+            return offset - Timeline[Timeline.Count - 1].OffsetSeconds >= TimelineIntervalSeconds;
+        }
+
+        /// <summary>
+        /// Records a chart point unless the previous one is younger than the
+        /// interval. Returns true when a point was added.
+        /// </summary>
+        public bool AddTimelinePoint(DateTime nowUtc, long availableBytes, int cpuPercent)
+        {
+            if (Timeline == null)
+            {
+                Timeline = new List<SessionTimelinePoint>();
+            }
+            int offset = (int)Math.Max(0, Math.Min(int.MaxValue, (nowUtc - StartedUtc).TotalSeconds));
+            if (Timeline.Count > 0 &&
+                offset - Timeline[Timeline.Count - 1].OffsetSeconds < TimelineIntervalSeconds)
+            {
+                return false;
+            }
+            Timeline.Add(new SessionTimelinePoint
+            {
+                OffsetSeconds = offset,
+                AvailableMegabytes = (int)Math.Max(0, Math.Min(int.MaxValue, availableBytes / (1024L * 1024L))),
+                CpuPercent = cpuPercent < 0 ? -1 : Math.Min(100, cpuPercent)
+            });
+            if (Timeline.Count > MaximumTimelinePoints)
+            {
+                var thinned = new List<SessionTimelinePoint>(MaximumTimelinePoints / 2 + 2);
+                for (int index = 0; index < Timeline.Count; index += 2)
+                {
+                    thinned.Add(Timeline[index]);
+                }
+                if ((Timeline.Count - 1) % 2 != 0)
+                {
+                    thinned.Add(Timeline[Timeline.Count - 1]);
+                }
+                Timeline = thinned;
+            }
+            return true;
+        }
+
+        internal static string FormatTimeline(IList<SessionTimelinePoint> points)
+        {
+            if (points == null || points.Count == 0)
+            {
+                return string.Empty;
+            }
+            var text = new StringBuilder(points.Count * 14);
+            foreach (SessionTimelinePoint point in points)
+            {
+                if (text.Length > 0)
+                {
+                    text.Append(';');
+                }
+                text.Append(point.OffsetSeconds.ToString(CultureInfo.InvariantCulture))
+                    .Append(':')
+                    .Append(point.AvailableMegabytes.ToString(CultureInfo.InvariantCulture))
+                    .Append(':')
+                    .Append(point.CpuPercent.ToString(CultureInfo.InvariantCulture));
+            }
+            return text.ToString();
+        }
+
+        internal static List<SessionTimelinePoint> ParseTimeline(string text)
+        {
+            var points = new List<SessionTimelinePoint>();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return points;
+            }
+            int previous = -1;
+            foreach (string item in text.Split(';'))
+            {
+                string[] parts = item.Split(':');
+                int offset;
+                int megabytes;
+                int cpu;
+                if (parts.Length != 3 ||
+                    !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out offset) ||
+                    !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out megabytes) ||
+                    !int.TryParse(parts[2], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out cpu) ||
+                    offset <= previous ||
+                    cpu < -1 || cpu > 100)
+                {
+                    continue;
+                }
+                previous = offset;
+                points.Add(new SessionTimelinePoint
+                {
+                    OffsetSeconds = offset,
+                    AvailableMegabytes = megabytes,
+                    CpuPercent = cpu
+                });
+                if (points.Count >= MaximumTimelinePoints)
+                {
+                    break;
+                }
+            }
+            return points;
         }
 
         public int Version;
@@ -192,6 +323,8 @@ namespace Boostix
         public BoostSessionReport Clone()
         {
             var clone = (BoostSessionReport)MemberwiseClone();
+            clone.Timeline = new List<SessionTimelinePoint>(
+                Timeline ?? new List<SessionTimelinePoint>());
             clone.Actions = new List<BoostActionRecord>();
             foreach (BoostActionRecord action in Actions ??
                 new List<BoostActionRecord>())
@@ -1304,6 +1437,22 @@ namespace Boostix
     {
         private const int MaxReports = 20;
         private const int MaxReportBytes = 1024 * 1024;
+        private static volatile bool persistenceDisabled;
+
+        /// <summary>
+        /// Demo and test launches keep their sessions in memory. They must not
+        /// add to the user's real history (only 20 reports are kept) or
+        /// finalize the user's unfinished session as interrupted.
+        /// </summary>
+        public static void DisablePersistence()
+        {
+            persistenceDisabled = true;
+        }
+
+        public static bool PersistenceDisabled
+        {
+            get { return persistenceDisabled; }
+        }
 
         public static string StateDirectory
         {
@@ -1337,7 +1486,7 @@ namespace Boostix
 
         public static void Save(BoostSessionReport report)
         {
-            if (report == null)
+            if (report == null || persistenceDisabled)
             {
                 return;
             }
@@ -1360,6 +1509,10 @@ namespace Boostix
 
         public static BoostSessionReport LoadLast()
         {
+            if (persistenceDisabled)
+            {
+                return null;
+            }
             BoostSessionReport report = LoadKnownReport(
                 StateDirectory,
                 "last-session.report");
@@ -1453,7 +1606,9 @@ namespace Boostix
                 ? report.TargetCrashUtc.Value.ToString("o", CultureInfo.InvariantCulture)
                 : string.Empty));
             lines.Add("TargetName=" + Encode(report.TargetName));
+            lines.Add("TargetExecutablePath=" + Encode(report.TargetExecutablePath));
             lines.Add("StopReason=" + Encode(report.StopReason));
+            lines.Add("Timeline=" + BoostSessionReport.FormatTimeline(report.Timeline));
 
             if (report.Performance != null)
             {
@@ -1522,7 +1677,7 @@ namespace Boostix
 
             int version;
             if (!TryParseInt(values, "Version", out version) ||
-                (version != 1 && version != 2 && version != 3 && version != 4))
+                (version != 1 && version != 2 && version != 3 && version != 4 && version != 5))
             {
                 return null;
             }
@@ -1562,7 +1717,9 @@ namespace Boostix
                 GpuAdapterLuid = Decode(GetValue(values, "GpuAdapterLuid")),
                 WorstResourcePressure = Decode(GetValue(values, "WorstResourcePressure")),
                 TargetName = DecodeFirst(values, "TargetName", "GameName"),
-                StopReason = Decode(GetValue(values, "StopReason"))
+                TargetExecutablePath = Decode(GetValue(values, "TargetExecutablePath")),
+                StopReason = Decode(GetValue(values, "StopReason")),
+                Timeline = BoostSessionReport.ParseTimeline(GetValue(values, "Timeline"))
             };
             long longValue;
             if (TryParseLong(values, "AvailableMemoryStartBytes", out longValue))

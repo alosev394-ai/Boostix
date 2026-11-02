@@ -38,6 +38,7 @@ namespace Boostix
         internal const string AccentForegroundBrushKey = "Boostix.Theme.AccentForeground";
         internal const string AccentPressedBrushKey = "Boostix.Theme.AccentPressed";
         internal const string FocusBrushKey = "Boostix.Theme.Focus";
+        internal const string DataBrushKey = "Boostix.Theme.Data";
         internal const string SuccessBrushKey = "Boostix.Theme.Success";
         internal const string WarningBrushKey = "Boostix.Theme.Warning";
         internal const string ErrorBrushKey = "Boostix.Theme.Error";
@@ -65,8 +66,10 @@ namespace Boostix
         public const double RadiusMedium = 10;
         public const double RadiusLarge = 12;
 
-        public const double WindowWidth = 880;
-        public const double WindowHeight = 560;
+        // 4.0: room for a shelf of covers next to the game panel, and still
+        // crisp at 150% on a 1920x1080 laptop (work area about 1008 px high).
+        public const double WindowWidth = 1040;
+        public const double WindowHeight = 656;
         public const double SidebarWidth = 216;
         public const double ContentInset = 28;
 
@@ -91,13 +94,60 @@ namespace Boostix
             get { return new FontFamily("Segoe UI Variable Text, Segoe UI"); }
         }
 
-        // Themes picked from the author's colour-pair cards, laid out for a
-        // dark interface: dark surfaces from the first colour, the accent from
-        // the second, reserved for Boost and primary actions. Status colours
-        // keep their meaning in every theme; Warning never shares the accent's
-        // hue. Petrol and lemon is the default and the brand.
+        // Dark stages for colourful game covers. The accent is reserved for
+        // Play, Boost and primary actions; Data draws charts and selection so
+        // the accent stays rare. Status colours keep their meaning in every
+        // theme and Warning never shares the accent's hue. Gulf (navy, Gulf
+        // blue and racing orange) is the 4.0 default and the brand; petrol and
+        // lemon stays for people who liked the 3.x look.
         internal static readonly BoostixPalette[] Palettes =
         {
+            new BoostixPalette
+            {
+                Id = "gulf", Name = L.T("Gulf"),
+                Background = Color.FromRgb(11, 23, 38), Sidebar = Color.FromRgb(8, 17, 29),
+                Surface = Color.FromRgb(20, 39, 61), Raised = Color.FromRgb(27, 49, 80),
+                Hover = Color.FromRgb(34, 60, 96), Border = Color.FromRgb(42, 71, 102),
+                Divider = Color.FromRgb(29, 52, 82),
+                Text = Color.FromRgb(238, 244, 250), Secondary = Color.FromRgb(168, 189, 211),
+                Muted = Color.FromRgb(134, 158, 184),
+                Accent = Color.FromRgb(ProductBrand.AccentRed, ProductBrand.AccentGreen, ProductBrand.AccentBlue),
+                AccentText = Color.FromRgb(ProductBrand.AccentTextRed, ProductBrand.AccentTextGreen, ProductBrand.AccentTextBlue),
+                OnAccent = Color.FromRgb(8, 17, 29), AccentPressed = Color.FromRgb(232, 102, 28),
+                Data = Color.FromRgb(143, 205, 240),
+                Success = Color.FromRgb(79, 214, 160), Warning = Color.FromRgb(255, 210, 74),
+                Error = Color.FromRgb(255, 108, 120), Destructive = Color.FromRgb(240, 71, 90)
+            },
+            new BoostixPalette
+            {
+                Id = "graphite", Name = L.T("Графит и лёд"),
+                Background = Color.FromRgb(18, 22, 28), Sidebar = Color.FromRgb(13, 16, 21),
+                Surface = Color.FromRgb(26, 32, 40), Raised = Color.FromRgb(34, 42, 52),
+                Hover = Color.FromRgb(42, 52, 64), Border = Color.FromRgb(52, 65, 80),
+                Divider = Color.FromRgb(37, 46, 58),
+                Text = Color.FromRgb(237, 241, 245), Secondary = Color.FromRgb(176, 186, 198),
+                Muted = Color.FromRgb(140, 152, 166),
+                Accent = Color.FromRgb(127, 219, 255), AccentText = Color.FromRgb(159, 228, 255),
+                OnAccent = Color.FromRgb(13, 16, 21), AccentPressed = Color.FromRgb(95, 203, 245),
+                Data = Color.FromRgb(242, 210, 127),
+                Success = Color.FromRgb(91, 208, 142), Warning = Color.FromRgb(255, 160, 48),
+                Error = Color.FromRgb(255, 122, 122), Destructive = Color.FromRgb(240, 90, 95)
+            },
+            new BoostixPalette
+            {
+                Id = "oxblood", Name = L.T("Бордо и золото"),
+                Background = Color.FromRgb(30, 15, 18), Sidebar = Color.FromRgb(22, 10, 13),
+                Surface = Color.FromRgb(42, 21, 25), Raised = Color.FromRgb(54, 28, 33),
+                Hover = Color.FromRgb(67, 36, 42), Border = Color.FromRgb(79, 44, 51),
+                Divider = Color.FromRgb(58, 31, 37),
+                Text = Color.FromRgb(246, 238, 236), Secondary = Color.FromRgb(210, 188, 184),
+                Muted = Color.FromRgb(180, 152, 147),
+                Accent = Color.FromRgb(242, 193, 78), AccentText = Color.FromRgb(246, 207, 114),
+                OnAccent = Color.FromRgb(30, 15, 18), AccentPressed = Color.FromRgb(220, 170, 53),
+                Data = Color.FromRgb(159, 211, 199),
+                Success = Color.FromRgb(91, 208, 142), Warning = Color.FromRgb(255, 138, 61),
+                Error = Color.FromRgb(255, 122, 122), Destructive = Color.FromRgb(240, 90, 95)
+            },
             new BoostixPalette
             {
                 Id = "petrol", Name = L.T("Петроль и лимон"),
@@ -107,53 +157,11 @@ namespace Boostix
                 Divider = Color.FromRgb(24, 63, 74),
                 Text = Color.FromRgb(237, 243, 244), Secondary = Color.FromRgb(173, 198, 203),
                 Muted = Color.FromRgb(134, 167, 174),
-                Accent = Color.FromRgb(ProductBrand.AccentRed, ProductBrand.AccentGreen, ProductBrand.AccentBlue),
-                AccentText = Color.FromRgb(ProductBrand.AccentTextRed, ProductBrand.AccentTextGreen, ProductBrand.AccentTextBlue),
+                Accent = Color.FromRgb(255, 244, 79), AccentText = Color.FromRgb(255, 245, 122),
                 OnAccent = Color.FromRgb(10, 34, 41), AccentPressed = Color.FromRgb(232, 219, 58),
+                Data = Color.FromRgb(158, 216, 224),
                 Success = Color.FromRgb(91, 208, 142), Warning = Color.FromRgb(255, 160, 48),
                 Error = Color.FromRgb(255, 128, 120), Destructive = Color.FromRgb(240, 90, 95)
-            },
-            new BoostixPalette
-            {
-                Id = "pine", Name = L.T("Хвойный и розовый кварц"),
-                Background = Color.FromRgb(11, 31, 23), Sidebar = Color.FromRgb(8, 23, 17),
-                Surface = Color.FromRgb(17, 43, 32), Raised = Color.FromRgb(23, 56, 42),
-                Hover = Color.FromRgb(30, 69, 52), Border = Color.FromRgb(38, 83, 63),
-                Divider = Color.FromRgb(27, 63, 48),
-                Text = Color.FromRgb(237, 244, 240), Secondary = Color.FromRgb(176, 201, 188),
-                Muted = Color.FromRgb(138, 171, 154),
-                Accent = Color.FromRgb(247, 202, 201), AccentText = Color.FromRgb(250, 214, 213),
-                OnAccent = Color.FromRgb(11, 31, 23), AccentPressed = Color.FromRgb(232, 180, 179),
-                Success = Color.FromRgb(91, 208, 142), Warning = Color.FromRgb(255, 160, 48),
-                Error = Color.FromRgb(255, 128, 120), Destructive = Color.FromRgb(240, 90, 95)
-            },
-            new BoostixPalette
-            {
-                Id = "ink", Name = L.T("Чернильный и пудровый"),
-                Background = Color.FromRgb(13, 19, 48), Sidebar = Color.FromRgb(9, 14, 38),
-                Surface = Color.FromRgb(20, 28, 64), Raised = Color.FromRgb(27, 36, 80),
-                Hover = Color.FromRgb(35, 45, 96), Border = Color.FromRgb(45, 56, 110),
-                Divider = Color.FromRgb(32, 41, 84),
-                Text = Color.FromRgb(238, 240, 248), Secondary = Color.FromRgb(183, 189, 216),
-                Muted = Color.FromRgb(146, 154, 190),
-                Accent = Color.FromRgb(244, 194, 215), AccentText = Color.FromRgb(248, 210, 226),
-                OnAccent = Color.FromRgb(13, 19, 48), AccentPressed = Color.FromRgb(228, 172, 196),
-                Success = Color.FromRgb(91, 208, 142), Warning = Color.FromRgb(255, 160, 48),
-                Error = Color.FromRgb(255, 128, 120), Destructive = Color.FromRgb(240, 90, 95)
-            },
-            new BoostixPalette
-            {
-                Id = "amber", Name = L.T("Янтарь и ультрамарин"),
-                Background = Color.FromRgb(15, 16, 54), Sidebar = Color.FromRgb(11, 12, 42),
-                Surface = Color.FromRgb(23, 25, 72), Raised = Color.FromRgb(31, 34, 89),
-                Hover = Color.FromRgb(40, 44, 106), Border = Color.FromRgb(50, 55, 122),
-                Divider = Color.FromRgb(36, 40, 96),
-                Text = Color.FromRgb(239, 239, 250), Secondary = Color.FromRgb(186, 187, 226),
-                Muted = Color.FromRgb(150, 152, 204),
-                Accent = Color.FromRgb(255, 191, 0), AccentText = Color.FromRgb(255, 207, 64),
-                OnAccent = Color.FromRgb(15, 16, 54), AccentPressed = Color.FromRgb(230, 172, 0),
-                Success = Color.FromRgb(91, 208, 142), Warning = Color.FromRgb(255, 138, 61),
-                Error = Color.FromRgb(255, 122, 122), Destructive = Color.FromRgb(240, 90, 95)
             }
         };
 
@@ -294,6 +302,15 @@ namespace Boostix
             get { return Resolve(SystemColors.HighlightColor, palette.AccentText); }
         }
 
+        /// <summary>
+        /// Charts, selection rings and other data marks, so the accent stays
+        /// reserved for actions.
+        /// </summary>
+        public static Color Data
+        {
+            get { return Resolve(SystemColors.HighlightColor, palette.Data); }
+        }
+
         public static Color ChromeGlyph
         {
             get { return Resolve(SystemColors.WindowTextColor, palette.Muted); }
@@ -398,6 +415,7 @@ namespace Boostix
                 SystemColors.HighlightColor,
                 palette.AccentPressed));
             resources[FocusBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightColor, palette.AccentText));
+            resources[DataBrushKey] = Brush(Resolve(highContrast, SystemColors.HighlightColor, palette.Data));
             resources[SuccessBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, palette.Success));
             resources[WarningBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, palette.Warning));
             resources[ErrorBrushKey] = Brush(Resolve(highContrast, SystemColors.WindowTextColor, palette.Error));
@@ -453,6 +471,7 @@ namespace Boostix
         public Color Background, Sidebar, Surface, Raised, Hover, Border, Divider;
         public Color Text, Secondary, Muted;
         public Color Accent, AccentText, OnAccent, AccentPressed;
+        public Color Data;
         public Color Success, Warning, Error, Destructive;
     }
 
@@ -463,7 +482,8 @@ namespace Boostix
     /// </summary>
     internal static class BoostixIcons
     {
-        public const string Home = "M3,10.5 L12,3 L21,10.5 M5,9 V20 H10 V14.5 H14 V20 H19 V9";
+        public const string Play = "M8,4.8 L19.2,12 L8,19.2 Z";
+        public const string Home ="M3,10.5 L12,3 L21,10.5 M5,9 V20 H10 V14.5 H14 V20 H19 V9";
         public const string Activity = "M3,12 H7 L10,4.5 L14,19.5 L17,12 H21";
         public const string Layers = "M12,3 L21,7.75 L12,12.5 L3,7.75 Z M3,12 L12,16.75 L21,12 M3,16.25 L12,21 L21,16.25";
         public const string Chart = "M3,20.5 H21 M6.5,20.5 V12 M11.5,20.5 V5 M16.5,20.5 V14.5";
