@@ -423,9 +423,8 @@ function Wait-ForFocusedId {
 
 $tabIds = @(
     'Boostix.Center.Tab.Games',
-    'Boostix.Center.Tab.Home',
-    'Boostix.Center.Tab.Readiness',
     'Boostix.Center.Tab.Report',
+    'Boostix.Center.Tab.Readiness',
     'Boostix.Center.Tab.Settings')
 
 $scales = @(1.0, 1.25, 1.5, 1.75, 2.0)
@@ -570,8 +569,8 @@ foreach ($scale in $scales) {
             Wait-ForFocusedId 'Boostix.Activate' 1000
         }
 
-        # The games shelf: Play and the first cover stay inside the window
-        # and clear of each other at every scale.
+        # The stage: Play and the first cover stay inside the window and
+        # clear of each other at every scale.
         Select-Tab (Find-ById $window 'Boostix.Center.Tab.Games')
         $play = Find-ById $window 'Boostix.Games.Play' 10000
         Start-Sleep -Milliseconds ($transitionMilliseconds + 40)
@@ -582,7 +581,7 @@ foreach ($scale in $scales) {
         Assert-KeyboardFocusable $play 'Play button'
         Assert-NoOverlap $firstCard $play 'First game cover and the Play button'
         $playBounds = Get-NormalizedBounds $play $window
-        Assert-Between $playBounds.Height 44 48.5 "Play button height at scale $scale"
+        Assert-Between $playBounds.Height 50 54.5 "Play button height at scale $scale"
 
         Select-Tab (Find-ById $window 'Boostix.Center.Tab.Readiness')
         [void](Find-ById $window 'Boostix.Center.SelectTarget')

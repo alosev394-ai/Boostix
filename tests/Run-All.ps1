@@ -17,6 +17,7 @@ $requiredTests = @(
     'Test-BackgroundImpactSafety.ps1',
     'Test-GameLibrary.ps1',
     'Test-GameSignals.ps1',
+    'Test-GameStage.ps1',
     'Test-GameTargetProfiles.ps1',
     'Test-GlassTheme.ps1',
     'Test-SessionGuard.ps1',

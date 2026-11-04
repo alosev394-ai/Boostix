@@ -3,6 +3,31 @@
 The English interface arrived in 3.2.0. Earlier versions are described in
 [`CHANGELOG.md`](CHANGELOG.md), in Russian.
 
+## 5.0.0 — 2026-11-05
+
+### New
+
+- The game stage: the whole window becomes the selected game. Its art fills
+  the screen with its logo and a rail of covers, and the interface takes its
+  colours from the art, so every game looks like itself.
+- The live game: while Boost runs, the stage shows a timer, free memory, the
+  processor, video memory and a chart that grows during the game.
+- A full-screen debrief: the main conclusion, the numbers, the chart and a
+  tip. After a long game it opens by itself.
+- A journal instead of a table: every game is a strip of its own art, sorted
+  by day, with the week's totals on top. 200 games are kept instead of 20.
+- PC answers in one sentence whether the computer is ready, with four rings
+  below it: memory, the Windows reserve, video memory and the page file.
+- Your own picture for games without Steam art, such as Epic Games and GOG.
+  A game's icon now shows on its cover.
+
+### Fixes
+
+- Starting with Windows no longer stops on a hidden update screen: Auto works
+  at once and the update waits until you open the window.
+- A Boostix that stays by the clock for days now learns about new versions.
+- New games appear on the shelf by themselves, so the search button is gone.
+
 ## 4.0.0 — 2026-11-02
 
 ### New

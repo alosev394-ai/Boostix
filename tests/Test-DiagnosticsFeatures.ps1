@@ -40,7 +40,7 @@ foreach ($required in @(
     'GpuCapacityBasis=Matching DXGI DedicatedVideoMemory for selected LUID',
     'internal static class DiagnosticPressureClassifier',
     'internal static class DiagnosticSessionHistory',
-    'public const int MaximumSessionCount = 10',
+    'public const int MaximumSessionCount = 120',
     'public static List<BoostSessionReport> LoadRecent(int maximumCount)',
     'BoostSessionReportStore.LegacySessionsDirectory',
     'BoostSessionReportStore.IsSafeKnownSessionsDirectory(',
@@ -410,7 +410,7 @@ $testRoot = Join-Path $env:TEMP (
 try {
     [void](New-Item -ItemType Directory -Path $testRoot)
     $baseTime = [DateTime]::UtcNow.AddHours(-1)
-    for ($index = 0; $index -lt 12; $index++) {
+    for ($index = 0; $index -lt 125; $index++) {
         $sessionId = [Guid]::NewGuid().ToString('N')
         $content = New-MinimalReportContent `
             -SessionId $sessionId `
@@ -438,9 +438,9 @@ try {
 
     $recent = $loadRecentFromDirectory.Invoke(
         $null,
-        [object[]]@([string]$testRoot, [int]100))
-    if ($recent.Count -ne 10) {
-        throw "History returned $($recent.Count) sessions instead of the hard maximum of 10."
+        [object[]]@([string]$testRoot, [int]1000))
+    if ($recent.Count -ne 120) {
+        throw "History returned $($recent.Count) sessions instead of the hard maximum of 120."
     }
     $newestTargetName = [string]$recent[0].GetType().GetField(
         'TargetName',

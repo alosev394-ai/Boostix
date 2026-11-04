@@ -1258,6 +1258,42 @@ namespace Boostix
             return checkTask;
         }
 
+        /// <summary>
+        /// Runs the check again for a copy that has been open for a while or
+        /// started with Windows. Shows the update screen when there is one.
+        /// </summary>
+        public Task<bool> RecheckForUpdatesAsync()
+        {
+            if (checkTask != null && !checkTask.IsCompleted)
+            {
+                return checkTask;
+            }
+            checkTask = null;
+            return CheckForUpdatesAsync();
+        }
+
+        /// <summary>
+        /// Asks the same signed channel without touching the screen, for a
+        /// background check. Any failure just means "not this time".
+        /// </summary>
+        public async Task<bool> IsNewerVersionAvailableAsync()
+        {
+            if (demoMode)
+            {
+                return false;
+            }
+            try
+            {
+                UpdateManifest manifest = await Task.Run(new Func<UpdateManifest>(FetchAndValidateManifest));
+                return manifest.Version.CompareTo(GetCurrentVersion()) > 0;
+            }
+            catch (Exception ex)
+            {
+                Log("Background update check unavailable: " + DescribeException(ex));
+                return false;
+            }
+        }
+
         public bool ShouldCancelWindowClose()
         {
             return state == UpdateState.Downloading && !allowOwnerClose;

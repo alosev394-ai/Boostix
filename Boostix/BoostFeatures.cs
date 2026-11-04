@@ -1435,7 +1435,7 @@ namespace Boostix
 
     internal static class BoostSessionReportStore
     {
-        private const int MaxReports = 20;
+        private const int MaxReports = 200;
         private const int MaxReportBytes = 1024 * 1024;
         private static volatile bool persistenceDisabled;
 

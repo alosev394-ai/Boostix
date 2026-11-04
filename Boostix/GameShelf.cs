@@ -228,18 +228,109 @@ namespace Boostix
     internal static class GameArtwork
     {
         internal const int FallbackCoverCount = 6;
+        private const long MaximumCustomArtBytes = 25L * 1024L * 1024L;
         private static readonly Dictionary<string, ImageSource> cache =
             new Dictionary<string, ImageSource>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, StageArt> stageCache =
+            new Dictionary<string, StageArt>(StringComparer.Ordinal);
 
         internal static ImageSource Cover(ShelfGame game)
         {
+            string custom = CustomArtPath(game);
+            if (custom != null)
+            {
+                return FromFile(custom, 320);
+            }
             ImageSource steam = SteamImage(game, new[] { "library_600x900.jpg", "library_capsule.jpg" }, 320);
             return steam ?? FallbackCover(game == null ? string.Empty : game.Key);
         }
 
         internal static bool HasOwnCover(ShelfGame game)
         {
-            return FindSteamFile(game, new[] { "library_600x900.jpg", "library_capsule.jpg" }) != null;
+            return CustomArtPath(game) != null ||
+                FindSteamFile(game, new[] { "library_600x900.jpg", "library_capsule.jpg" }) != null;
+        }
+
+        /// <summary>
+        /// A picture the player chose for a game Steam has no art for. It lives
+        /// next to the other Boostix data, one file per game.
+        /// </summary>
+        internal static string CustomArtPath(ShelfGame game)
+        {
+            string path = CustomArtFile(game);
+            return path != null && File.Exists(path) ? path : null;
+        }
+
+        private static string CustomArtFile(ShelfGame game)
+        {
+            if (game == null || string.IsNullOrWhiteSpace(game.Key) || BoostSessionReportStore.PersistenceDisabled)
+            {
+                return null;
+            }
+            using (var hash = System.Security.Cryptography.SHA256.Create())
+            {
+                byte[] digest = hash.ComputeHash(Encoding.UTF8.GetBytes(game.Key));
+                return Path.Combine(
+                    BoostSessionReportStore.StateDirectory,
+                    "Art",
+                    BitConverter.ToString(digest, 0, 12).Replace("-", string.Empty) + ".art");
+            }
+        }
+
+        /// <summary>
+        /// Copies a picture for a game. A file Windows cannot decode is refused
+        /// instead of leaving a broken cover behind.
+        /// </summary>
+        internal static bool TrySetCustomArt(ShelfGame game, string sourcePath, out string error)
+        {
+            error = null;
+            string target = CustomArtFile(game);
+            if (target == null)
+            {
+                error = L.T("Картинку сейчас не сохранить.");
+                return false;
+            }
+            try
+            {
+                var info = new FileInfo(sourcePath);
+                if (!info.Exists || info.Length <= 0 || info.Length > MaximumCustomArtBytes)
+                {
+                    error = L.T("Выберите картинку до 25 МБ.");
+                    return false;
+                }
+                var probe = new BitmapImage();
+                probe.BeginInit();
+                probe.CacheOption = BitmapCacheOption.OnLoad;
+                probe.DecodePixelWidth = 64;
+                probe.UriSource = new Uri(info.FullName, UriKind.Absolute);
+                probe.EndInit();
+                Directory.CreateDirectory(Path.GetDirectoryName(target));
+                File.Copy(info.FullName, target, true);
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not use a picture for " + game.Name + ".", ex);
+                error = L.T("Этот файл не удалось открыть как картинку.");
+                return false;
+            }
+            Forget(game);
+            return true;
+        }
+
+        private static void Forget(ShelfGame game)
+        {
+            lock (stageCache)
+            {
+                stageCache.Remove(game.Key);
+            }
+            string prefix = CustomArtFile(game) + "|";
+            lock (cache)
+            {
+                foreach (string key in cache.Keys.Where(item => item.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList())
+                {
+                    cache.Remove(key);
+                }
+            }
         }
 
         internal static ImageSource Hero(ShelfGame game)
@@ -249,7 +340,84 @@ namespace Boostix
 
         internal static ImageSource Logo(ShelfGame game)
         {
-            return SteamImage(game, new[] { "logo.png" }, 520);
+            return SteamImage(game, new[] { "logo.png" }, 640);
+        }
+
+        /// <summary>
+        /// The stage's dress for one game. Reads files and decodes images, so
+        /// it runs off the UI thread; everything it returns is frozen.
+        /// </summary>
+        internal static StageArt Stage(ShelfGame game)
+        {
+            string key = game == null ? string.Empty : game.Key;
+            lock (stageCache)
+            {
+                StageArt cached;
+                if (stageCache.TryGetValue(key, out cached))
+                {
+                    return cached;
+                }
+            }
+
+            var heroNames = new[] { "library_hero.jpg", "header.jpg", "library_header.jpg" };
+            string heroPath = CustomArtPath(game) ?? FindSteamFile(game, heroNames);
+            string coverPath = heroPath == null
+                ? FindSteamFile(game, new[] { "library_600x900.jpg", "library_capsule.jpg" })
+                : null;
+            var art = new StageArt
+            {
+                Hero = heroPath == null ? null : FromFile(heroPath, 1920),
+                Logo = Logo(game)
+            };
+            string sample = heroPath ?? coverPath;
+            if (sample != null)
+            {
+                art.Ambient = FromFile(sample, 96);
+                art.Soft = FromFile(sample, 18);
+            }
+            else
+            {
+                art.Icon = Icon(game);
+                art.Ambient = art.Icon ?? FallbackCover(key);
+                art.Soft = art.Ambient;
+            }
+            art.DarkLogo = art.Logo != null && ArtPalette.IsDarkLogo(ArtPalette.ReadPixels(art.Logo));
+            art.Accent = ArtPalette.PickAccent(
+                ArtPalette.ReadPixels(art.Ambient),
+                BoostixDesignTokens.Accent);
+            art.Floor = ArtPalette.Floor(art.Accent);
+            lock (stageCache)
+            {
+                stageCache[key] = art;
+            }
+            return art;
+        }
+
+        /// <summary>
+        /// The game's own icon at full size, for games without any cover art.
+        /// </summary>
+        internal static ImageSource Icon(ShelfGame game)
+        {
+            string path = game == null ? null : game.ExecutablePath;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+            string key = "icon:" + path;
+            lock (cache)
+            {
+                ImageSource cached;
+                if (cache.TryGetValue(key, out cached))
+                {
+                    return cached;
+                }
+            }
+            ImageSource icon = LargeIcon.Read(path);
+            lock (cache)
+            {
+                cache[key] = icon;
+            }
+            return icon;
         }
 
         internal static ImageSource FallbackCover(string key)
@@ -681,6 +849,12 @@ namespace Boostix
             get { return points.Count >= 2; }
         }
 
+        /// <summary>
+        /// The colour of the memory line; the stage draws it in the game's
+        /// accent, every other place in the theme's data colour.
+        /// </summary>
+        public Color? LineColor { get; set; }
+
         protected override void OnRender(DrawingContext context)
         {
             double width = ActualWidth;
@@ -689,7 +863,7 @@ namespace Boostix
             {
                 return;
             }
-            Color data = BoostixDesignTokens.Data;
+            Color data = LineColor ?? BoostixDesignTokens.Data;
             Color muted = BoostixDesignTokens.MutedText;
             var gridPen = new Pen(new SolidColorBrush(BoostixDesignTokens.WithAlpha(muted, 40)), 1);
             gridPen.Freeze();

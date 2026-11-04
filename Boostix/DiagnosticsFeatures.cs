@@ -774,7 +774,7 @@ namespace Boostix
 
     internal static class DiagnosticSessionHistory
     {
-        public const int MaximumSessionCount = 10;
+        public const int MaximumSessionCount = 120;
         private const int MaximumCandidateFiles = 256;
         private const long MaximumReportBytes = 1024L * 1024L;
 
@@ -814,7 +814,13 @@ namespace Boostix
                 }
             }
 
+            // Boostix never targets itself; such reports were left by test
+            // launches of versions before 4.0 and are not games.
             return reports.Values
+                .Where(item => !string.Equals(
+                    item.TargetName,
+                    Boostix.Branding.ProductBrand.ProductName,
+                    StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(item => item.StartedUtc)
                 .ThenByDescending(item => item.EndedUtc ?? DateTime.MinValue)
                 .Take(count)

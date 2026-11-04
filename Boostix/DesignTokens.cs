@@ -508,6 +508,7 @@ namespace Boostix
         public const string File = "M14,2.5 H6.5 V21.5 H17.5 V6 Z M14,2.5 V6 H17.5 M9,12 H15 M9,16 H15";
         public const string Zap = "M13,2.5 L4,13.5 H11.5 L10.5,21.5 L20,10 H12.5 Z";
         public const string Plus = "M12,5 V19 M5,12 H19";
+        public const string Picture = "M3.5,5 H20.5 V19 H3.5 Z M3.5,16 L9,11 L13,15 L16,12.5 L20.5,16.5 M15.5,8.5 H15.51";
         public const string Stop = "M7,7 H17 V17 H7 Z";
         public const string Export = "M12,15 V3.5 M7.5,8 L12,3.5 L16.5,8 M4.5,13.5 V20.5 H19.5 V13.5";
 

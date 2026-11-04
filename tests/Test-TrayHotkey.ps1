@@ -147,7 +147,7 @@ try {
     $tab = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $tabCondition)
     $tab.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
     $settingCondition = New-Object Windows.Automation.PropertyCondition(
-        [Windows.Automation.AutomationElement]::AutomationIdProperty, 'Boostix.Center.Setting.8')
+        [Windows.Automation.AutomationElement]::AutomationIdProperty, 'Boostix.Center.Setting.2')
     $until = [DateTime]::UtcNow.AddSeconds(5)
     $hotkeySetting = $null
     while (-not $hotkeySetting -and [DateTime]::UtcNow -lt $until) {

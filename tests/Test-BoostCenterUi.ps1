@@ -308,14 +308,13 @@ function Convert-PixelsToDip {
     return $Pixels * $Dpi / 96.0
 }
 
-# The top bar is the application's only navigation: Games is the shelf with
-# Play, Home ("Now") hosts the Boost control, every other entry is a section
-# page with its primary action.
+# The top bar is the application's only navigation: Games is the stage with
+# Play, every other entry is a section page with its primary action. Manual
+# Boost has no tab: it opens from the stage and counts as part of Games.
 $tabContracts = @(
     @{ Id = 'Boostix.Center.Tab.Games'; Name = '0JjQk9Cg0Ks='; PageElement = 'Boostix.Games.Play' },
-    @{ Id = 'Boostix.Center.Tab.Home'; Name = '0KHQldCZ0KfQkNCh'; PageElement = 'Boostix.Activate' },
+    @{ Id = 'Boostix.Center.Tab.Report'; Name = '0JbQo9Cg0J3QkNCb'; PageElement = 'Boostix.Center.ReportBenchmark' },
     @{ Id = 'Boostix.Center.Tab.Readiness'; Name = '0JrQntCc0J/QrNCu0KLQldCg'; PageElement = 'Boostix.Center.SelectTarget' },
-    @{ Id = 'Boostix.Center.Tab.Report'; Name = '0JjQodCi0J7QoNCY0K8='; PageElement = 'Boostix.Center.ReportBenchmark' },
     @{ Id = 'Boostix.Center.Tab.Settings'; Name = '0J3QkNCh0KLQoNCe0JnQmtCY'; PageElement = 'Boostix.Center.Setting.0' }
 )
 # Escape returns to the shelf.

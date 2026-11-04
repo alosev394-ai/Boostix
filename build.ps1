@@ -249,6 +249,7 @@ $appArguments = @(
     "$projectRoot\Boostix\DiagnosticsFeatures.cs",
     "$projectRoot\Boostix\SessionInsights.cs",
     "$projectRoot\Boostix\BoostCenterOverlay.cs",
+    "$projectRoot\Boostix\BoostCenterPages.cs",
     "$projectRoot\Boostix\PerformanceCapture.cs",
     "$projectRoot\Boostix\OptimizationFlow.cs",
     "$projectRoot\Boostix\UpdateFlow.cs",
@@ -258,6 +259,8 @@ $appArguments = @(
     "$projectRoot\Boostix\GameSignals.cs",
     "$projectRoot\Boostix\GameLibraryScanner.cs",
     "$projectRoot\Boostix\GameShelf.cs",
+    "$projectRoot\Boostix\GameArt.cs",
+    "$projectRoot\Boostix\GameStage.cs",
     "$projectRoot\Boostix\Localization.cs",
     "$projectRoot\Boostix\LocalizationEnglish.cs"
 )

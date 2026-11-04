@@ -281,7 +281,6 @@ Assert-Contains $program 'ApplyWindowTint(' 'tint follows window activation'
 # Activation changes fade like the DWM backdrop instead of jumping.
 Assert-Contains $program 'FadeWindowTint(' 'tint fades on activation'
 $center = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\BoostCenterOverlay.cs'))
-Assert-Contains $center 'BoostixDesignTokens.SidebarTintBrushKey' 'sidebar uses the shared tint resource'
 try {
     $glass.SetValue($null, $true, $null)
     $tintResources = New-Object System.Windows.ResourceDictionary

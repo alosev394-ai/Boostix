@@ -55,6 +55,7 @@ namespace Boostix
                 Visible = true
             };
             icon.DoubleClick += delegate { Raise(OpenRequested); };
+            icon.BalloonTipClicked += delegate { Raise(OpenRequested); };
             icon.MouseClick += delegate(object sender, System.Windows.Forms.MouseEventArgs e)
             {
                 if (e.Button == System.Windows.Forms.MouseButtons.Left)
@@ -82,7 +83,7 @@ namespace Boostix
 
         /// <summary>
         /// The tray gauge: needle at rest and a dim zone while Boost is off,
-        /// needle in the lit lemon zone while it runs.
+        /// needle in the lit orange zone while it runs.
         /// </summary>
         internal static System.Drawing.Bitmap CreateGaugeBitmap(bool active)
         {
@@ -97,23 +98,23 @@ namespace Boostix
                 graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
                 graphics.Clear(System.Drawing.Color.Transparent);
                 using (var tile = RoundedTile(new System.Drawing.RectangleF(1, 1, 30, 30), 7))
-                using (var fill = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(15, 76, 92)))
+                using (var fill = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(20, 39, 61)))
                 {
                     graphics.FillPath(fill, tile);
                 }
 
-                var lemon = System.Drawing.Color.FromArgb(255, 244, 79);
-                var haze = System.Drawing.Color.FromArgb(159, 192, 198);
+                var lit = System.Drawing.Color.FromArgb(255, 122, 47);
+                var haze = System.Drawing.Color.FromArgb(168, 189, 211);
                 const float centerX = 16F;
                 const float centerY = 18.5F;
                 const float radius = 9.75F;
                 var arc = new System.Drawing.RectangleF(centerX - radius, centerY - radius, radius * 2, radius * 2);
                 using (var scalePen = new System.Drawing.Pen(haze, 2.2F))
                 using (var zonePen = new System.Drawing.Pen(
-                    active ? lemon : System.Drawing.Color.FromArgb(70, lemon),
+                    active ? lit : System.Drawing.Color.FromArgb(70, lit),
                     active ? 3.2F : 2.6F))
-                using (var needlePen = new System.Drawing.Pen(active ? lemon : haze, 2.4F))
-                using (var hub = new System.Drawing.SolidBrush(active ? lemon : haze))
+                using (var needlePen = new System.Drawing.Pen(active ? lit : haze, 2.4F))
+                using (var hub = new System.Drawing.SolidBrush(active ? lit : haze))
                 {
                     scalePen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
                     scalePen.EndCap = System.Drawing.Drawing2D.LineCap.Round;

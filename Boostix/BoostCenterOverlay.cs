@@ -401,7 +401,7 @@ namespace Boostix
     /// Home page hosts the Boost controls owned by the main window; every
     /// other section is rendered here from the data the window supplies.
     /// </summary>
-    internal sealed class BoostCenterOverlay : Grid
+    internal sealed partial class BoostCenterOverlay : Grid
     {
         internal const int PageTransitionExitMilliseconds = 90;
         internal const int PageTransitionEnterMilliseconds = 130;
@@ -415,23 +415,22 @@ namespace Boostix
         private const double NavigationItemGap = 4;
         private const double ChromeReservedWidth = 96;
 
-        // 4.0: the games shelf is the main page; Home is the live Boost page
-        // ("Сейчас") owned by the window; Readiness also lists background
-        // programs; Report is the history.
+        // The stage of games is the main page. Home is the manual Boost page
+        // owned by the window: it has no tab of its own and counts as part of
+        // Games. Report is the journal; Readiness also lists background
+        // programs.
         private enum CenterPage
         {
             Games,
-            Home,
-            Readiness,
             Report,
-            Settings
+            Readiness,
+            Settings,
+            Home
         }
 
-        private const double TopBarHeight = 64;
-        private const double GameCardWidth = 134;
-        private const double GameCoverHeight = 201;
-        private const double GameCardGap = 16;
-        private const double GameDetailWidth = 320;
+        private const int TabPageCount = 4;
+        private const int GameRescanMinutes = 30;
+        private const double TopBarHeight = GameStage.TopInset;
 
         private sealed class ToggleVisuals
         {
@@ -444,7 +443,6 @@ namespace Boostix
         {
             public SolidColorBrush Background;
             public SolidColorBrush Label;
-            public SolidColorBrush Icon;
             public Border Indicator;
             public ScaleTransform IndicatorScale;
         }
@@ -537,9 +535,11 @@ namespace Boostix
         private CenterPage currentPage = CenterPage.Games;
         private CenterPage renderedPage = CenterPage.Games;
         private readonly Border topBar;
-        private readonly Grid gamesHost;
+        private readonly GameStage gameStage;
+        private readonly Grid debriefLayer;
+        private readonly Image ambientArt;
+        private readonly Border ambientVeil;
         private Button statusPill;
-        private string selectedGameKey;
         private string gameMessage;
         private bool gameMessageError;
         private BoostPreflightReport preflight;
@@ -582,6 +582,15 @@ namespace Boostix
         private bool smoothScrollAnimating;
         private int pageTransitionGeneration;
         private bool pageTransitionAnimating;
+        private Color? stageAccent;
+        private DateTime lastGameScanUtc = DateTime.MinValue;
+        private IList<SessionTimelinePoint> liveTimeline;
+        private int liveCpuPercent = -1;
+        private ShelfGame liveGame;
+        private DateTime liveStartedUtc;
+        private DateTime debriefArmedUntilUtc = DateTime.MinValue;
+        private BoostSessionReport pendingDebrief;
+        private bool windowActive = true;
 
         public BoostCenterOverlay(
             FontFamily normalFont,
@@ -602,18 +611,85 @@ namespace Boostix
                 this,
                 "Boostix.Center");
 
-            // 4.0: navigation runs across the top, so the games shelf and
-            // every section get the full width of the window.
+            // Navigation floats across the top of the window; the stage runs
+            // under it, edge to edge.
             RowDefinitions.Add(new RowDefinition { Height = new GridLength(TopBarHeight) });
             RowDefinitions.Add(new RowDefinition
             {
                 Height = new GridLength(1, GridUnitType.Star)
             });
 
+            // Behind the other sections the selected game stays as a soft
+            // wash of its colours.
+            ambientArt = new Image
+            {
+                Stretch = Stretch.Fill,
+                Opacity = 0.5,
+                IsHitTestVisible = false,
+                Effect = new System.Windows.Media.Effects.BlurEffect { Radius = 70 },
+                Margin = new Thickness(-90)
+            };
+            Grid.SetRowSpan(ambientArt, 2);
+            Children.Add(ambientArt);
+            ambientVeil = new Border { IsHitTestVisible = false };
+            Grid.SetRowSpan(ambientVeil, 2);
+            Children.Add(ambientVeil);
+
+            gameStage = new GameStage(regularFont, semiboldFont, BuildSwitch);
+            gameStage.PlayRequested += delegate(object sender, ShelfGameEventArgs e)
+            {
+                gameMessage = null;
+                EventHandler<ShelfGameEventArgs> handler = GameLaunchRequested;
+                if (handler != null)
+                {
+                    handler(this, e);
+                }
+            };
+            gameStage.AutoChanged += delegate(object sender, ShelfAutoEventArgs e)
+            {
+                SetShelfAutoBoost(e.Game, e.Enabled);
+            };
+            gameStage.RemoveRequested += delegate(object sender, ShelfGameEventArgs e)
+            {
+                EventHandler<BoostProfileEventArgs> handler = ProfileRemoveRequested;
+                if (handler != null)
+                {
+                    handler(this, new BoostProfileEventArgs(e.Game.ExecutablePath, false));
+                }
+            };
+            gameStage.PictureRequested += delegate(object sender, ShelfGameEventArgs e)
+            {
+                ChooseGamePicture(e.Game);
+            };
+            gameStage.OtherGameRequested += delegate { Raise(TargetSelectionRequested); };
+            gameStage.StopRequested += delegate { Raise(StopBoostRequested); };
+            gameStage.StartWithWindowsRequested += delegate
+            {
+                settings.StartWithWindows = true;
+                Raise(SettingsChanged);
+                UpdateBackgroundTip();
+            };
+            gameStage.ArtChanged += delegate(object sender, StageArtEventArgs e)
+            {
+                ApplyStageArt(e.Art);
+            };
+            gameStage.DebriefRequested += delegate(object sender, SessionReportEventArgs e)
+            {
+                OpenDebrief(e.Report, e.Game);
+            };
+            Grid.SetRowSpan(gameStage, 2);
+            Children.Add(gameStage);
+
             topBar = BuildTopBar();
             sidebar = topBar;
             Grid.SetRow(topBar, 0);
+            Panel.SetZIndex(topBar, 5);
             Children.Add(topBar);
+
+            debriefLayer = new Grid { Visibility = Visibility.Collapsed };
+            Grid.SetRowSpan(debriefLayer, 2);
+            Panel.SetZIndex(debriefLayer, 3);
+            Children.Add(debriefLayer);
 
             contentRoot = new Grid
             {
@@ -645,15 +721,6 @@ namespace Boostix
             };
             AutomationProperties.SetAutomationId(homeHost, "Boostix.Center.Home");
             pageArea.Children.Add(homeHost);
-
-            gamesHost = new Grid
-            {
-                Margin = new Thickness(0, 0, 0, 24),
-                Visibility = Visibility.Collapsed
-            };
-            AutomationProperties.SetAutomationId(gamesHost, "Boostix.Games");
-            AutomationProperties.SetName(gamesHost, L.T("Ваши игры"));
-            pageArea.Children.Add(gamesHost);
 
             pageStack = new Grid
             {
@@ -774,6 +841,7 @@ namespace Boostix
         public event EventHandler<BoostProfileEventArgs> ProfileAutoBoostChanged;
         public event EventHandler<BoostProfileEventArgs> ProfileRemoveRequested;
         public event EventHandler InstalledGamesScanRequested;
+        public event EventHandler StopBoostRequested;
         public event EventHandler<InstalledGameEventArgs> InstalledGameAddRequested;
 
         /// <summary>
@@ -793,9 +861,9 @@ namespace Boostix
         {
             get
             {
-                BoostCenterTabButton home;
-                return tabButtons.TryGetValue(CenterPage.Home, out home)
-                    ? home
+                BoostCenterTabButton games;
+                return tabButtons.TryGetValue(CenterPage.Games, out games)
+                    ? games
                     : null;
             }
         }
@@ -832,8 +900,7 @@ namespace Boostix
                 {
                     visuals.Background.BeginAnimation(SolidColorBrush.ColorProperty, null);
                     visuals.Label.BeginAnimation(SolidColorBrush.ColorProperty, null);
-                    visuals.Icon.BeginAnimation(SolidColorBrush.ColorProperty, null);
-                    visuals.Indicator.Background = new SolidColorBrush(TextColor);
+                        visuals.Indicator.Background = new SolidColorBrush(TextColor);
                 }
                 pair.Value.FocusVisualStyle =
                     MakeKeyboardFocusVisualStyle(BoostixDesignTokens.RadiusSmall);
@@ -846,6 +913,29 @@ namespace Boostix
             FinishPageTransitionImmediately();
             RenderCurrentPage();
             UpdateTabs(false);
+        }
+
+        /// <summary>
+        /// Art only moves while the window is in front.
+        /// </summary>
+        public void SetWindowActive(bool active)
+        {
+            windowActive = active;
+            gameStage.SetWindowActive(active);
+            if (active)
+            {
+                ShowPendingDebrief();
+            }
+        }
+
+        /// <summary>
+        /// Boost has just started for a game the player pressed Play on, or
+        /// Windows refused to start it (null): the stage shows the launch.
+        /// </summary>
+        public void SetGameLaunching(ShelfGame game)
+        {
+            gameMessage = null;
+            gameStage.SetLaunching(game);
         }
 
         public void SetHomeContent(FrameworkElement content)
@@ -874,6 +964,7 @@ namespace Boostix
         public void SetSessionReport(BoostSessionReport report)
         {
             sessionReport = report;
+            ConsiderDebrief();
             if (IsOpen && currentPage == CenterPage.Report)
             {
                 RenderCurrentPage();
@@ -935,7 +1026,9 @@ namespace Boostix
             SessionGuardPressureState pressureState,
             PagefileAssessment pagefile,
             bool active,
-            DateTime? startedUtc)
+            DateTime? startedUtc,
+            IList<SessionTimelinePoint> timeline,
+            int cpuPercent)
         {
             selectedTarget = target;
             sessionGuardSample = sample;
@@ -945,11 +1038,68 @@ namespace Boostix
             pagefileAssessment = pagefile;
             boostSessionActive = active;
             boostSessionStartedUtc = startedUtc;
+            liveTimeline = timeline;
+            liveCpuPercent = cpuPercent;
             UpdateSidebarStatus();
+            UpdateStageLive();
             if (IsOpen && currentPage == CenterPage.Readiness)
             {
                 RenderCurrentPage();
             }
+        }
+
+        /// <summary>
+        /// While Boost runs the stage shows the running game. A target that is
+        /// not on the shelf (manual Boost of any program) gets a card of its own.
+        /// </summary>
+        private void UpdateStageLive()
+        {
+            if (demoLive)
+            {
+                return;
+            }
+            if (!boostSessionActive || selectedTarget == null || !boostSessionStartedUtc.HasValue)
+            {
+                if (liveGame != null)
+                {
+                    debriefArmedUntilUtc = DateTime.UtcNow.AddSeconds(30);
+                    ConsiderDebrief();
+                }
+                liveGame = null;
+                gameStage.SetLive(null);
+                return;
+            }
+            liveStartedUtc = boostSessionStartedUtc.Value;
+            string path = selectedTarget.ExecutablePath;
+            if (liveGame == null ||
+                !string.Equals(liveGame.ExecutablePath, path, StringComparison.OrdinalIgnoreCase))
+            {
+                liveGame = GameShelf.Build(gameProfiles, installedGames, sessionHistory)
+                    .FirstOrDefault(game => string.Equals(game.ExecutablePath, path, StringComparison.OrdinalIgnoreCase)) ??
+                    new ShelfGame
+                    {
+                        Name = GameShelf.PrettyName(selectedTarget.ProcessName, path),
+                        ExecutablePath = path,
+                        SteamAppId = GameLibraryScanner.SteamAppIdForExecutable(path)
+                    };
+            }
+            bool memoryKnown = sessionGuardSample != null && sessionGuardSample.SystemMetricsAvailable;
+            bool gpuKnown = diagnosticSnapshot != null &&
+                diagnosticSnapshot.GpuUsageAvailable &&
+                diagnosticSnapshot.GpuTotalAvailable;
+            gameStage.SetLive(new StageLiveState
+            {
+                Game = liveGame,
+                Name = liveGame.Name,
+                StartedUtc = boostSessionStartedUtc.Value,
+                AvailableBytes = memoryKnown ? sessionGuardSample.AvailablePhysicalBytes : 0,
+                TotalBytes = memoryKnown ? sessionGuardSample.TotalPhysicalBytes : 0,
+                CpuPercent = liveCpuPercent,
+                GpuUsedBytes = gpuKnown ? diagnosticSnapshot.GpuDedicatedUsageBytes : 0,
+                GpuTotalBytes = gpuKnown ? diagnosticSnapshot.GpuDedicatedTotalBytes : 0,
+                LowMemory = sessionGuardPressureState != null && sessionGuardPressureState.CriticalAlertActive,
+                Timeline = liveTimeline
+            });
         }
 
         public void SetImpactResults(
@@ -1152,10 +1302,21 @@ namespace Boostix
             {
                 bool reverse =
                     (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
-                int pageCount = Enum.GetValues(typeof(CenterPage)).Length;
-                int next = ((int)currentPage + (reverse ? pageCount - 1 : 1)) %
-                    pageCount;
+                int next = ((int)TabPageFor(currentPage) + (reverse ? TabPageCount - 1 : 1)) %
+                    TabPageCount;
                 SwitchPage((CenterPage)next, true);
+                e.Handled = true;
+                return;
+            }
+            if (e.Key == Key.Escape && DebriefOpen)
+            {
+                CloseDebrief();
+                e.Handled = true;
+                return;
+            }
+            if (e.Key == Key.Escape && currentPage == CenterPage.Home)
+            {
+                SwitchPage(CenterPage.Games, false);
                 e.Handled = true;
                 return;
             }
@@ -1166,7 +1327,7 @@ namespace Boostix
 
             if (e.Key == Key.Escape)
             {
-                // Escape returns to the shelf, the main page; on the shelf
+                // Escape returns to the stage, the main page; on the stage
                 // itself there is nothing to leave.
                 if (currentPage != CenterPage.Games && !benchmarkBusy)
                 {
@@ -1183,15 +1344,8 @@ namespace Boostix
 
         private Border BuildTopBar()
         {
-            var host = new Border
-            {
-                BorderBrush = new SolidColorBrush(DividerColor),
-                BorderThickness = new Thickness(0, 0, 0, 1)
-            };
-            // Translucent over Windows 11 glass, opaque elsewhere.
-            host.SetResourceReference(
-                Border.BackgroundProperty,
-                BoostixDesignTokens.SidebarTintBrushKey);
+            // The bar has no surface of its own: it floats over the art.
+            var host = new Border { Background = Brushes.Transparent };
             AutomationProperties.SetAutomationId(host, "Boostix.Sidebar");
             var layout = new Grid();
             layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1352,11 +1506,11 @@ namespace Boostix
                 Height = 34,
                 Padding = new Thickness(14, 0, 16, 0),
                 Background = new SolidColorBrush(boostSessionActive
-                    ? BoostixDesignTokens.WithAlpha(dotColor, 34)
-                    : SurfaceColor),
+                    ? BoostixDesignTokens.WithAlpha(dotColor, 46)
+                    : BoostixDesignTokens.WithAlpha(Color.FromRgb(8, 14, 24), 150)),
                 BorderBrush = new SolidColorBrush(boostSessionActive
                     ? BoostixDesignTokens.WithAlpha(dotColor, 120)
-                    : BorderColor),
+                    : BoostixDesignTokens.WithAlpha(Colors.White, 34)),
                 BorderThickness = new Thickness(1),
                 Cursor = Cursors.Hand,
                 Template = MakeFlatButtonTemplate(17),
@@ -1367,8 +1521,13 @@ namespace Boostix
             pill.ToolTip = title + ". " + detail;
             // Right after the five sections, before the page content.
             KeyboardNavigation.SetTabIndex(pill, 5);
-            AutomationProperties.SetHelpText(pill, L.T("Открыть раздел «Сейчас»"));
-            pill.Click += delegate { SwitchPage(CenterPage.Home, false); };
+            AutomationProperties.SetHelpText(
+                pill,
+                boostSessionActive ? L.T("Открыть идущую игру") : L.T("Открыть Boost вручную"));
+            pill.Click += delegate
+            {
+                SwitchPage(boostSessionActive ? CenterPage.Games : CenterPage.Home, false);
+            };
             statusPill = pill;
             sidebarStatusCard.Child = pill;
         }
@@ -1423,11 +1582,10 @@ namespace Boostix
                 tabs,
                 "Boostix.Center.Tabs");
 
-            AddTab(tabs, CenterPage.Games, L.T("Игры"), BoostixIcons.Gamepad, 0);
-            AddTab(tabs, CenterPage.Home, L.T("Сейчас"), BoostixIcons.Zap, 1);
-            AddTab(tabs, CenterPage.Readiness, L.T("Компьютер"), BoostixIcons.Activity, 2);
-            AddTab(tabs, CenterPage.Report, L.T("История"), BoostixIcons.Chart, 3);
-            AddTab(tabs, CenterPage.Settings, L.T("Настройки"), BoostixIcons.Sliders, 4);
+            AddTab(tabs, CenterPage.Games, L.T("Игры"), 0);
+            AddTab(tabs, CenterPage.Report, L.T("Журнал"), 1);
+            AddTab(tabs, CenterPage.Readiness, L.T("Компьютер"), 2);
+            AddTab(tabs, CenterPage.Settings, L.T("Настройки"), 3);
 
             // One highlight slides along the bar to the selected section and
             // takes its width; the accent line under it marks the choice.
@@ -1435,12 +1593,12 @@ namespace Boostix
             selectionMarkerStretch = new ScaleTransform(1, 1);
             selectionMarker = new Border
             {
-                Width = 18,
+                Width = 26,
                 Height = 3,
                 CornerRadius = new CornerRadius(2),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Bottom,
-                Margin = new Thickness(0, 0, 0, 3),
+                Margin = new Thickness(0, 0, 0, 4),
                 RenderTransformOrigin = new Point(0.5, 0.5),
                 RenderTransform = selectionMarkerStretch
             };
@@ -1479,8 +1637,8 @@ namespace Boostix
             {
                 return;
             }
-            selectionPill.Background = new SolidColorBrush(ButtonColor);
-            selectionMarker.Background = new SolidColorBrush(AccentColor);
+            selectionPill.Background = Brushes.Transparent;
+            selectionMarker.Background = new SolidColorBrush(stageAccent ?? AccentColor);
         }
 
         private void MoveSelectionMarker(bool animate)
@@ -1491,13 +1649,13 @@ namespace Boostix
             }
             BoostCenterTabButton tab;
             bool show = !SystemParameters.HighContrast &&
-                tabButtons.TryGetValue(currentPage, out tab);
+                tabButtons.TryGetValue(TabPageFor(currentPage), out tab);
             selectionPill.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
             if (!show)
             {
                 return;
             }
-            tabButtons.TryGetValue(currentPage, out tab);
+            tabButtons.TryGetValue(TabPageFor(currentPage), out tab);
             if (tab.ActualWidth <= 0)
             {
                 return;
@@ -1556,11 +1714,19 @@ namespace Boostix
             selectionMarkerStretch.BeginAnimation(ScaleTransform.ScaleXProperty, stretch);
         }
 
+        /// <summary>
+        /// The tab that shows as selected on a page: the manual Boost page has
+        /// none of its own and belongs to Games.
+        /// </summary>
+        private static CenterPage TabPageFor(CenterPage page)
+        {
+            return page == CenterPage.Home ? CenterPage.Games : page;
+        }
+
         private void AddTab(
             BoostCenterTabStrip tabs,
             CenterPage page,
             string title,
-            string iconData,
             int column)
         {
             tabs.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1570,7 +1736,6 @@ namespace Boostix
                 Background = new SolidColorBrush(
                     BoostixDesignTokens.WithAlpha(SidebarColor, 0)),
                 Label = new SolidColorBrush(SecondaryColor),
-                Icon = new SolidColorBrush(MutedColor),
                 IndicatorScale = new ScaleTransform(1, 0.4)
             };
             visuals.Indicator = new Border
@@ -1597,21 +1762,13 @@ namespace Boostix
                 Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(12, 0, 14, 0)
+                Margin = new Thickness(13, 0, 13, 0)
             };
-            FrameworkElement icon = BoostixIcons.Create(
-                iconData,
-                16,
-                visuals.Icon,
-                1.9);
-            icon.VerticalAlignment = VerticalAlignment.Center;
-            icon.Margin = new Thickness(0, 0, 8, 0);
-            line.Children.Add(icon);
             var label = new TextBlock
             {
                 Text = title,
                 FontFamily = semiboldFont,
-                FontSize = 14,
+                FontSize = 15,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = visuals.Label,
                 VerticalAlignment = VerticalAlignment.Center
@@ -1621,7 +1778,7 @@ namespace Boostix
 
             var button = new BoostCenterTabButton(
                 tabs,
-                delegate { return currentPage == page; },
+                delegate { return TabPageFor(currentPage) == page; },
                 delegate(bool preserveTabFocus)
                 {
                     SwitchPage(page, preserveTabFocus);
@@ -1693,6 +1850,7 @@ namespace Boostix
             bool preserveTabFocus,
             bool boostDecision)
         {
+            CloseDebrief();
             if (currentPage == page)
             {
                 if (preserveTabFocus)
@@ -1760,7 +1918,7 @@ namespace Boostix
         {
             foreach (KeyValuePair<CenterPage, BoostCenterTabButton> pair in tabButtons)
             {
-                bool selected = pair.Key == currentPage;
+                bool selected = pair.Key == TabPageFor(currentPage);
                 UpdateTab(pair.Key, animate);
                 AutomationProperties.SetHelpText(
                     pair.Value,
@@ -1781,16 +1939,14 @@ namespace Boostix
             {
                 return;
             }
-            bool selected = page == currentPage;
+            bool selected = page == TabPageFor(currentPage);
             bool hovered = button.IsMouseOver;
             // The shared sliding highlight paints the selected item; High
             // Contrast keeps per-item backgrounds and indicators instead.
             bool ownSelection = SystemParameters.HighContrast;
-            Color background = selected
-                ? BoostixDesignTokens.WithAlpha(ButtonColor, 0)
-                : (hovered
-                    ? SurfaceColor
-                    : BoostixDesignTokens.WithAlpha(SidebarColor, 0));
+            Color background = !selected && hovered
+                ? BoostixDesignTokens.WithAlpha(Colors.White, 20)
+                : BoostixDesignTokens.WithAlpha(SidebarColor, 0);
             if (ownSelection)
             {
                 background = selected ? HoverColor : SidebarColor;
@@ -1799,10 +1955,6 @@ namespace Boostix
             AnimateTabColor(
                 visuals.Label,
                 selected || hovered ? TextColor : SecondaryColor,
-                animate);
-            AnimateTabColor(
-                visuals.Icon,
-                selected ? AccentTextColor : (hovered ? SecondaryColor : MutedColor),
                 animate);
             AnimateTabIndicator(
                 visuals.Indicator,
@@ -1841,6 +1993,10 @@ namespace Boostix
                 FocusSelectedTab(nextPage);
             }
 
+            if (previousPage == CenterPage.Games)
+            {
+                FadeStage(0, PageTransitionExitMilliseconds);
+            }
             AnimatePageVisual(
                 headerStack,
                 headerTranslation,
@@ -1866,6 +2022,10 @@ namespace Boostix
 
                     renderedPage = currentPage;
                     RenderCurrentPageCore();
+                    if (currentPage == CenterPage.Games)
+                    {
+                        FadeStage(1, PageTransitionEnterMilliseconds + 60);
+                    }
                     PreparePageVisual(
                         headerStack,
                         headerTranslation,
@@ -1939,6 +2099,22 @@ namespace Boostix
             ResetPageVisual(headerStack, headerTranslation);
             ResetPageVisual(pageArea, pageTranslation);
             pageArea.IsHitTestVisible = true;
+            gameStage.BeginAnimation(UIElement.OpacityProperty, null);
+            gameStage.Opacity = 1;
+        }
+
+        private void FadeStage(double target, int milliseconds)
+        {
+            double start = gameStage.Opacity;
+            gameStage.BeginAnimation(UIElement.OpacityProperty, null);
+            gameStage.Opacity = target;
+            gameStage.BeginAnimation(
+                UIElement.OpacityProperty,
+                new DoubleAnimation(start, target, TimeSpan.FromMilliseconds(milliseconds))
+                {
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                    FillBehavior = FillBehavior.Stop
+                });
         }
 
         private static void PreparePageVisual(
@@ -2091,7 +2267,7 @@ namespace Boostix
         private void FocusSelectedTab(CenterPage page)
         {
             BoostCenterTabButton selectedTab;
-            if (tabButtons.TryGetValue(page, out selectedTab) &&
+            if (tabButtons.TryGetValue(TabPageFor(page), out selectedTab) &&
                 selectedTab.IsEnabled &&
                 selectedTab.IsVisible)
             {
@@ -2124,10 +2300,10 @@ namespace Boostix
             bool home = currentPage == CenterPage.Home;
             bool games = currentPage == CenterPage.Games;
             homeHost.Visibility = home ? Visibility.Visible : Visibility.Collapsed;
-            gamesHost.Visibility = games ? Visibility.Visible : Visibility.Collapsed;
             pageStack.Visibility = home || games ? Visibility.Collapsed : Visibility.Visible;
-            // The shelf has its own heading next to its actions.
-            headerStack.Visibility = games ? Visibility.Collapsed : Visibility.Visible;
+            // The stage owns the whole window, heading included.
+            gameStage.Visibility = games ? Visibility.Visible : Visibility.Collapsed;
+            contentRoot.Visibility = games ? Visibility.Collapsed : Visibility.Visible;
 
             if (games)
             {
@@ -2136,7 +2312,7 @@ namespace Boostix
             }
             else if (home)
             {
-                headerTitle.Text = L.T("Сейчас");
+                headerTitle.Text = L.T("Boost вручную");
                 subtitle.Text = boostSessionActive
                     ? L.T("Boost работает. Остановите его здесь или просто закройте игру.")
                     : L.T("Boost для любой запущенной программы. Для игр с «Авто» он включается сам.");
@@ -2146,10 +2322,11 @@ namespace Boostix
                 headerTitle.Text = L.T("Компьютер");
                 RenderReadiness();
                 RenderImpactSection();
+                RenderChecks();
             }
             else if (currentPage == CenterPage.Report)
             {
-                headerTitle.Text = L.T("История");
+                headerTitle.Text = L.T("Журнал");
                 RenderReport();
             }
             else
@@ -2169,692 +2346,46 @@ namespace Boostix
 
         private void RenderGames()
         {
-            gamesHost.Children.Clear();
-            gamesHost.ColumnDefinitions.Clear();
-            gamesHost.RowDefinitions.Clear();
-
-            if (installedGames == null && !installedGamesScanning)
+            if (!installedGamesScanning &&
+                (installedGames == null ||
+                 DateTime.UtcNow - lastGameScanUtc > TimeSpan.FromMinutes(GameRescanMinutes)))
             {
-                // The first visit looks through Steam, Epic Games and GOG.
+                // Looks through Steam, Epic Games and GOG on the first visit
+                // and again now and then, so new installs appear by themselves.
                 installedGamesScanning = true;
+                lastGameScanUtc = DateTime.UtcNow;
                 Raise(InstalledGamesScanRequested);
             }
 
             List<ShelfGame> games = GameShelf.Build(gameProfiles, installedGames, sessionHistory);
-            ShelfGame selected = games.FirstOrDefault(game =>
-                string.Equals(game.Key, selectedGameKey, StringComparison.Ordinal)) ??
-                games.FirstOrDefault();
-            selectedGameKey = selected == null ? null : selected.Key;
-
-            gamesHost.ColumnDefinitions.Add(new ColumnDefinition
-            {
-                Width = new GridLength(1, GridUnitType.Star)
-            });
-            gamesHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
-            gamesHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(GameDetailWidth) });
-
-            var shelf = new Grid { Margin = new Thickness(0, 26, 0, 0) };
-            shelf.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            shelf.RowDefinitions.Add(new RowDefinition
-            {
-                Height = new GridLength(1, GridUnitType.Star)
-            });
-            shelf.Children.Add(BuildShelfHeader(games));
-
-            FrameworkElement body = games.Count == 0
-                ? BuildEmptyShelf()
-                : BuildShelfGrid(games, selected);
-            Grid.SetRow(body, 1);
-            shelf.Children.Add(body);
-            gamesHost.Children.Add(shelf);
-
-            FrameworkElement detail = selected == null
-                ? BuildShelfIntroPanel()
-                : BuildGameDetail(selected);
-            Grid.SetColumn(detail, 2);
-            gamesHost.Children.Add(detail);
+            gameStage.SetGames(games, null, installedGamesScanning);
+            gameStage.SetMessage(gameMessage, gameMessageError);
+            UpdateBackgroundTip();
+            preferredFocusButton = gameStage.PreferredButton;
         }
 
-        private FrameworkElement BuildShelfHeader(List<ShelfGame> games)
+        /// <summary>
+        /// Auto only works while Boostix runs, so the stage offers to start it
+        /// with Windows as soon as a game relies on Auto.
+        /// </summary>
+        private void UpdateBackgroundTip()
         {
-            var header = new Grid { Margin = new Thickness(0, 0, 0, 18) };
-            header.ColumnDefinitions.Add(new ColumnDefinition
-            {
-                Width = new GridLength(1, GridUnitType.Star)
-            });
-            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            var words = new StackPanel();
-            var title = MakeText(
-                L.T("Игры"),
-                BoostixDesignTokens.PageTitleSize + 4,
-                TextColor,
-                semiboldFont,
-                FontWeights.SemiBold);
-            AutomationProperties.SetAutomationId(title, "Boostix.Games.Title");
-            words.Children.Add(title);
-            int auto = games.Count(game => game.AutoBoost);
-            string summary = installedGamesScanning && games.Count == 0
-                ? L.T("Ищем игры в Steam, Epic Games и GOG…")
-                : games.Count == 0
-                    ? L.T("Пока ни одной игры")
-                    : auto == 0
-                        ? string.Format(
-                            CultureInfo.CurrentCulture,
-                            L.T("{0} в списке. Включите «Авто» у игры, и Boost будет стартовать вместе с ней."),
-                            games.Count)
-                        : string.Format(
-                            CultureInfo.CurrentCulture,
-                            L.T("{0} в списке, «Авто» у {1}: с ними Boost включается сам"),
-                            games.Count,
-                            auto);
-            var detail = MakeText(
-                summary,
-                BoostixDesignTokens.BodyTextSize,
-                MutedColor,
-                regularFont,
-                FontWeights.Normal);
-            detail.TextWrapping = TextWrapping.Wrap;
-            detail.Margin = new Thickness(0, 4, 0, 0);
-            AutomationProperties.SetAutomationId(detail, "Boostix.Games.Summary");
-            AutomationProperties.SetLiveSetting(detail, AutomationLiveSetting.Polite);
-            words.Children.Add(detail);
-            header.Children.Add(words);
-
-            var actions = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                VerticalAlignment = VerticalAlignment.Bottom,
-                Margin = new Thickness(16, 0, 0, 0)
-            };
-            var rescan = MakeActionButton(
-                installedGamesScanning ? L.T("Ищем…") : L.T("Найти игры"),
-                BoostixButtonKind.Ghost,
-                BoostixIcons.Refresh);
-            rescan.IsEnabled = !installedGamesScanning;
-            rescan.Click += delegate
-            {
-                installedGamesScanning = true;
-                RenderCurrentPage();
-                Raise(InstalledGamesScanRequested);
-            };
-            AutomationProperties.SetAutomationId(rescan, "Boostix.Games.Scan");
-            AutomationProperties.SetName(rescan, L.T("Найти игры в Steam, Epic Games и GOG"));
-            actions.Children.Add(rescan);
-            var manual = MakeActionButton(
-                L.T("Boost вручную"),
-                BoostixButtonKind.Secondary,
-                BoostixIcons.Zap);
-            manual.Margin = new Thickness(8, 0, 0, 0);
-            manual.Click += delegate { Raise(TargetSelectionRequested); };
-            AutomationProperties.SetAutomationId(manual, "Boostix.Games.Manual");
-            AutomationProperties.SetName(manual, L.T("Выбрать запущенную программу для Boost"));
-            actions.Children.Add(manual);
-            Grid.SetColumn(actions, 1);
-            header.Children.Add(actions);
-            return header;
+            gameStage.SetBackgroundTip(
+                !settings.StartWithWindows &&
+                gameProfiles.Any(profile => profile.AutoBoost));
         }
 
-        private FrameworkElement BuildShelfGrid(List<ShelfGame> games, ShelfGame selected)
+        /// <summary>
+        /// The selected game colours the whole window: its art stays as a wash
+        /// behind the other sections and its accent marks the open section.
+        /// </summary>
+        private void ApplyStageArt(StageArt art)
         {
-            var wrap = new WrapPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Margin = new Thickness(0, 0, 0, 8)
-            };
-            AutomationProperties.SetAutomationId(wrap, "Boostix.Games.Shelf");
-            AutomationProperties.SetName(wrap, L.T("Полка игр"));
-            int index = 0;
-            foreach (ShelfGame game in games)
-            {
-                wrap.Children.Add(BuildGameCard(game, game == selected, index++));
-            }
-            var scroller = new ScrollViewer
-            {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                Content = wrap,
-                Focusable = false,
-                Padding = new Thickness(0, 0, 4, 0)
-            };
-            scroller.Resources[typeof(ScrollBar)] = MakeBoostixVerticalScrollBarStyle();
-            return scroller;
-        }
-
-        private Button BuildGameCard(ShelfGame game, bool selected, int index)
-        {
-            var cover = new Border
-            {
-                Width = GameCardWidth,
-                Height = GameCoverHeight,
-                CornerRadius = new CornerRadius(BoostixDesignTokens.RadiusLarge),
-                Background = new SolidColorBrush(SurfaceColor)
-            };
-            ImageSource art = GameArtwork.Cover(game);
-            if (art != null)
-            {
-                cover.Background = new ImageBrush(art)
-                {
-                    Stretch = Stretch.UniformToFill,
-                    AlignmentY = AlignmentY.Top
-                };
-            }
-            var coverLayers = new Grid();
-            if (!GameArtwork.HasOwnCover(game))
-            {
-                // Boostix art carries the title the way a real cover would.
-                var coverTitle = MakeText(
-                    game.Name,
-                    17,
-                    Color.FromRgb(238, 244, 250),
-                    semiboldFont,
-                    FontWeights.SemiBold);
-                coverTitle.TextWrapping = TextWrapping.Wrap;
-                coverTitle.TextTrimming = TextTrimming.CharacterEllipsis;
-                coverTitle.MaxHeight = 70;
-                coverTitle.VerticalAlignment = VerticalAlignment.Bottom;
-                coverTitle.Margin = new Thickness(12, 0, 12, 14);
-                coverLayers.Children.Add(coverTitle);
-            }
-            if (game.AutoBoost)
-            {
-                var autoBadge = new Border
-                {
-                    Background = new SolidColorBrush(BoostixDesignTokens.WithAlpha(BackgroundColor, 215)),
-                    CornerRadius = new CornerRadius(9),
-                    Padding = new Thickness(8, 3, 9, 4),
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    VerticalAlignment = VerticalAlignment.Top,
-                    Margin = new Thickness(8)
-                };
-                var badgeLine = new StackPanel { Orientation = Orientation.Horizontal };
-                FrameworkElement badgeIcon = BoostixIcons.Create(BoostixIcons.Zap, 12, AccentTextColor);
-                badgeIcon.Margin = new Thickness(0, 0, 4, 0);
-                badgeIcon.VerticalAlignment = VerticalAlignment.Center;
-                badgeLine.Children.Add(badgeIcon);
-                var badgeText = MakeText(L.T("Авто"), 11.5, TextColor, semiboldFont, FontWeights.SemiBold);
-                badgeText.VerticalAlignment = VerticalAlignment.Center;
-                badgeLine.Children.Add(badgeText);
-                autoBadge.Child = badgeLine;
-                coverLayers.Children.Add(autoBadge);
-            }
-            cover.Child = coverLayers;
-
-            var ring = new Border
-            {
-                CornerRadius = new CornerRadius(BoostixDesignTokens.RadiusLarge + 3),
-                BorderThickness = new Thickness(2),
-                BorderBrush = new SolidColorBrush(selected
-                    ? BoostixDesignTokens.Data
-                    : BoostixDesignTokens.WithAlpha(BackgroundColor, 0)),
-                Padding = new Thickness(2),
-                Child = cover
-            };
-            var lift = new ScaleTransform(1, 1);
-            ring.RenderTransformOrigin = new Point(0.5, 0.5);
-            ring.RenderTransform = lift;
-
-            var stack = new StackPanel { Width = GameCardWidth + 8 };
-            stack.Children.Add(ring);
-            var name = MakeText(
-                game.Name,
-                13.5,
-                selected ? TextColor : SecondaryColor,
-                semiboldFont,
-                FontWeights.SemiBold);
-            name.Margin = new Thickness(4, 8, 4, 0);
-            stack.Children.Add(name);
-            var meta = MakeText(
-                DescribeShelfGame(game),
-                BoostixDesignTokens.MetadataTextSize,
-                MutedColor,
-                regularFont,
-                FontWeights.Normal);
-            meta.Margin = new Thickness(4, 2, 4, 0);
-            stack.Children.Add(meta);
-
-            var button = new Button
-            {
-                Content = stack,
-                Margin = new Thickness(0, 0, GameCardGap - 8, GameCardGap),
-                Padding = new Thickness(0),
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0),
-                Cursor = Cursors.Hand,
-                Template = MakeFlatButtonTemplate(BoostixDesignTokens.RadiusLarge + 3),
-                FocusVisualStyle = MakeKeyboardFocusVisualStyle(BoostixDesignTokens.RadiusLarge + 3),
-                VerticalAlignment = VerticalAlignment.Top
-            };
-            AutomationProperties.SetName(button, game.Name + ". " + DescribeShelfGame(game));
-            AutomationProperties.SetAutomationId(
-                button,
-                "Boostix.Games.Card." + index.ToString(CultureInfo.InvariantCulture));
-            AutomationProperties.SetItemStatus(button, selected ? L.T("Выбрано") : string.Empty);
-            button.MouseEnter += delegate { AnimateCardLift(lift, 1.035); };
-            button.MouseLeave += delegate { AnimateCardLift(lift, 1); };
-            button.Click += delegate
-            {
-                if (string.Equals(selectedGameKey, game.Key, StringComparison.Ordinal))
-                {
-                    return;
-                }
-                selectedGameKey = game.Key;
-                gameMessage = null;
-                RenderCurrentPage();
-                FocusShelfCard(game.Key);
-            };
-            button.Tag = game.Key;
-            return button;
-        }
-
-        private void FocusShelfCard(string key)
-        {
-            Dispatcher.BeginInvoke(new Action(delegate
-            {
-                foreach (Button card in FindShelfCards(gamesHost))
-                {
-                    if (string.Equals(card.Tag as string, key, StringComparison.Ordinal))
-                    {
-                        card.Focus();
-                        return;
-                    }
-                }
-            }), System.Windows.Threading.DispatcherPriority.Input);
-        }
-
-        private static IEnumerable<Button> FindShelfCards(DependencyObject root)
-        {
-            int count = VisualTreeHelper.GetChildrenCount(root);
-            for (int index = 0; index < count; index++)
-            {
-                DependencyObject child = VisualTreeHelper.GetChild(root, index);
-                var button = child as Button;
-                if (button != null && button.Tag is string)
-                {
-                    yield return button;
-                }
-                foreach (Button nested in FindShelfCards(child))
-                {
-                    yield return nested;
-                }
-            }
-        }
-
-        private static void AnimateCardLift(ScaleTransform lift, double target)
-        {
-            if (!SystemParameters.ClientAreaAnimation)
-            {
-                lift.ScaleX = target;
-                lift.ScaleY = target;
-                return;
-            }
-            var animation = new DoubleAnimation(
-                target,
-                TimeSpan.FromMilliseconds(target > 1 ? 160 : 120))
-            {
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-            };
-            lift.BeginAnimation(ScaleTransform.ScaleXProperty, animation);
-            lift.BeginAnimation(ScaleTransform.ScaleYProperty, animation);
-        }
-
-        private static string DescribeShelfGame(ShelfGame game)
-        {
-            BoostSessionReport last = game.LastSession;
-            if (last != null)
-            {
-                TimeSpan played = (last.EndedUtc ?? DateTime.UtcNow) - last.StartedUtc;
-                return FormatPlayed(played) + ", " + FormatWhen(last.StartedUtc);
-            }
-            if (!string.IsNullOrWhiteSpace(game.Source))
-            {
-                return game.Source;
-            }
-            return game.Saved ? L.T("Добавлена вами") : L.T("Найдена на диске");
-        }
-
-        private static string FormatPlayed(TimeSpan played)
-        {
-            if (played.TotalMinutes < 1)
-            {
-                return L.T("меньше минуты");
-            }
-            if (played.TotalHours >= 1)
-            {
-                return string.Format(
-                    CultureInfo.CurrentCulture,
-                    L.T("{0} ч {1:00} мин"),
-                    (int)played.TotalHours,
-                    played.Minutes);
-            }
-            return string.Format(CultureInfo.CurrentCulture, L.T("{0} мин"), (int)played.TotalMinutes);
-        }
-
-        private static string FormatWhen(DateTime startedUtc)
-        {
-            DateTime local = startedUtc.ToLocalTime();
-            DateTime today = DateTime.Now.Date;
-            if (local.Date == today)
-            {
-                return L.T("сегодня");
-            }
-            if (local.Date == today.AddDays(-1))
-            {
-                return L.T("вчера");
-            }
-            return local.ToString("d MMM", L.DateCulture);
-        }
-
-        private FrameworkElement BuildEmptyShelf()
-        {
-            var stack = new StackPanel
-            {
-                HorizontalAlignment = HorizontalAlignment.Left,
-                MaxWidth = 520,
-                Margin = new Thickness(0, 6, 0, 0)
-            };
-            ImageSource art = GameArtwork.EmptyShelf();
-            if (art != null)
-            {
-                stack.Children.Add(new Border
-                {
-                    Width = 480,
-                    Height = 320,
-                    CornerRadius = new CornerRadius(BoostixDesignTokens.RadiusLarge + 4),
-                    Background = new ImageBrush(art) { Stretch = Stretch.UniformToFill },
-                    HorizontalAlignment = HorizontalAlignment.Left
-                });
-            }
-            var title = MakeText(
-                installedGamesScanning ? L.T("Ищем ваши игры") : L.T("Здесь появятся ваши игры"),
-                BoostixDesignTokens.SectionTitleSize + 3,
-                TextColor,
-                semiboldFont,
-                FontWeights.SemiBold);
-            title.Margin = new Thickness(0, 18, 0, 6);
-            stack.Children.Add(title);
-            var detail = MakeText(
-                L.T("Boostix находит игры Steam, Epic Games и GOG. Игры, запущенные с Boost, тоже попадают сюда."),
-                BoostixDesignTokens.BodyTextSize,
-                MutedColor,
-                regularFont,
-                FontWeights.Normal);
-            detail.TextWrapping = TextWrapping.Wrap;
-            stack.Children.Add(detail);
-            AutomationProperties.SetAutomationId(stack, "Boostix.Games.Empty");
-            return stack;
-        }
-
-        private FrameworkElement BuildShelfIntroPanel()
-        {
-            var panel = BoostixUi.Card(new Thickness(22, 22, 22, 22));
-            panel.Margin = new Thickness(0, 26, 0, 0);
-            panel.VerticalAlignment = VerticalAlignment.Top;
-            var stack = new StackPanel();
-            var title = MakeText(L.T("Как это работает"), BoostixDesignTokens.SectionTitleSize + 1, TextColor, semiboldFont, FontWeights.SemiBold);
-            stack.Children.Add(title);
-            foreach (string line in new[]
-            {
-                L.T("Выберите игру на полке и нажмите «Играть»."),
-                L.T("Пока игра открыта, Boost держит Windows в игровом режиме."),
-                L.T("После игры здесь появится разбор: хватило ли памяти и что можно улучшить.")
-            })
-            {
-                var text = MakeText(line, BoostixDesignTokens.BodyTextSize, SecondaryColor, regularFont, FontWeights.Normal);
-                text.TextWrapping = TextWrapping.Wrap;
-                text.Margin = new Thickness(0, 10, 0, 0);
-                stack.Children.Add(text);
-            }
-            panel.Child = stack;
-            return panel;
-        }
-
-        private FrameworkElement BuildGameDetail(ShelfGame game)
-        {
-            var panel = new Border
-            {
-                Background = new SolidColorBrush(SurfaceColor),
-                BorderBrush = new SolidColorBrush(BorderColor),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(BoostixDesignTokens.RadiusLarge + 4),
-                Margin = new Thickness(0, 26, 0, 0),
-                ClipToBounds = true
-            };
-            AutomationProperties.SetAutomationId(panel, "Boostix.Games.Detail");
-            AutomationProperties.SetName(panel, game.Name);
-
-            var layout = new Grid();
-            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(176) });
-            layout.RowDefinitions.Add(new RowDefinition
-            {
-                Height = new GridLength(1, GridUnitType.Star)
-            });
-            panel.Child = layout;
-
-            layout.Children.Add(BuildGameHero(game));
-
-            var body = new StackPanel { Margin = new Thickness(20, 16, 20, 20) };
-            var scroller = new ScrollViewer
-            {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                Content = body,
-                Focusable = false
-            };
-            scroller.Resources[typeof(ScrollBar)] = MakeBoostixVerticalScrollBarStyle();
-            Grid.SetRow(scroller, 1);
-            layout.Children.Add(scroller);
-
-            var name = MakeText(game.Name, 20, TextColor, semiboldFont, FontWeights.SemiBold);
-            name.TextWrapping = TextWrapping.Wrap;
-            AutomationProperties.SetAutomationId(name, "Boostix.Games.Detail.Title");
-            body.Children.Add(name);
-            string origin = string.IsNullOrWhiteSpace(game.Source) ? L.T("Добавлена вами") : game.Source;
-            var source = MakeText(
-                origin + ", " + System.IO.Path.GetFileName(game.ExecutablePath ?? string.Empty),
-                BoostixDesignTokens.MetadataTextSize,
-                MutedColor,
-                regularFont,
-                FontWeights.Normal);
-            source.Margin = new Thickness(0, 3, 0, 14);
-            body.Children.Add(source);
-
-            var play = MakeActionButton(L.T("Играть"), BoostixButtonKind.Primary, BoostixIcons.Play);
-            play.HorizontalAlignment = HorizontalAlignment.Stretch;
-            play.Height = 46;
-            play.FontSize = 15;
-            play.Click += delegate
-            {
-                gameMessage = null;
-                EventHandler<ShelfGameEventArgs> handler = GameLaunchRequested;
-                if (handler != null)
-                {
-                    handler(this, new ShelfGameEventArgs(game));
-                }
-            };
-            AutomationProperties.SetAutomationId(play, "Boostix.Games.Play");
-            AutomationProperties.SetName(play, L.T("Играть в ") + game.Name);
-            AutomationProperties.SetHelpText(play, L.T("Запускает игру и включает «Авто», чтобы Boost стартовал вместе с ней."));
-            body.Children.Add(play);
-            preferredFocusButton = play;
-
-            CheckBox auto = BuildSwitch(
-                L.T("Boost вместе с игрой («Авто»)"),
-                game.AutoBoost,
-                delegate(bool enabled) { SetShelfAutoBoost(game, enabled); });
-            auto.Margin = new Thickness(0, 14, 0, 0);
-            AutomationProperties.SetAutomationId(auto, "Boostix.Games.Auto");
-            body.Children.Add(auto);
-
-            if (!string.IsNullOrWhiteSpace(gameMessage))
-            {
-                var note = MakeText(
-                    gameMessage,
-                    BoostixDesignTokens.MetadataTextSize + 0.5,
-                    gameMessageError ? ErrorColor : SecondaryColor,
-                    regularFont,
-                    FontWeights.Normal);
-                note.TextWrapping = TextWrapping.Wrap;
-                note.Margin = new Thickness(0, 10, 0, 0);
-                AutomationProperties.SetAutomationId(note, "Boostix.Games.Message");
-                AutomationProperties.SetLiveSetting(note, AutomationLiveSetting.Assertive);
-                body.Children.Add(note);
-            }
-
-            body.Children.Add(BuildGameDebrief(game));
-
-            if (game.Saved)
-            {
-                var remove = MakeActionButton(L.T("Убрать из списка"), BoostixButtonKind.Ghost, BoostixIcons.Trash);
-                remove.HorizontalAlignment = HorizontalAlignment.Left;
-                remove.Margin = new Thickness(-8, 14, 0, 0);
-                remove.Click += delegate
-                {
-                    EventHandler<BoostProfileEventArgs> handler = ProfileRemoveRequested;
-                    if (handler != null)
-                    {
-                        handler(this, new BoostProfileEventArgs(game.ExecutablePath, false));
-                    }
-                };
-                AutomationProperties.SetAutomationId(remove, "Boostix.Games.Remove");
-                body.Children.Add(remove);
-            }
-            return panel;
-        }
-
-        private FrameworkElement BuildGameHero(ShelfGame game)
-        {
-            var hero = new Grid();
-            ImageSource banner = GameArtwork.Hero(game) ?? GameArtwork.Cover(game);
-            if (banner != null)
-            {
-                hero.Children.Add(new Border
-                {
-                    Background = new ImageBrush(banner)
-                    {
-                        Stretch = Stretch.UniformToFill,
-                        AlignmentY = AlignmentY.Center
-                    }
-                });
-            }
-            ImageSource logo = GameArtwork.Logo(game);
-            if (logo != null)
-            {
-                // Steam logos have transparent backgrounds and sit on the art
-                // the way the Steam library shows them.
-                var image = new Image
-                {
-                    Source = logo,
-                    Stretch = Stretch.Uniform,
-                    MaxHeight = 70,
-                    MaxWidth = 230,
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    VerticalAlignment = VerticalAlignment.Bottom,
-                    Margin = new Thickness(18, 0, 18, 14)
-                };
-                RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
-                AutomationProperties.SetName(image, game.Name);
-                hero.Children.Add(image);
-            }
-            return hero;
-        }
-
-        private FrameworkElement BuildGameDebrief(ShelfGame game)
-        {
-            var stack = new StackPanel { Margin = new Thickness(0, 22, 0, 0) };
-            AutomationProperties.SetAutomationId(stack, "Boostix.Games.Debrief");
-            BoostSessionReport last = game.LastSession;
-            if (last == null)
-            {
-                var title = MakeText(L.T("Разбор игры"), BoostixDesignTokens.SectionTitleSize, TextColor, semiboldFont, FontWeights.SemiBold);
-                stack.Children.Add(title);
-                var hint = MakeText(
-                    L.T("Сыграйте с Boost, и здесь появится разбор: график памяти и процессора за всю игру и что можно улучшить."),
-                    BoostixDesignTokens.BodyTextSize,
-                    MutedColor,
-                    regularFont,
-                    FontWeights.Normal);
-                hint.TextWrapping = TextWrapping.Wrap;
-                hint.Margin = new Thickness(0, 6, 0, 0);
-                stack.Children.Add(hint);
-                return stack;
-            }
-
-            var heading = new Grid();
-            heading.ColumnDefinitions.Add(new ColumnDefinition
-            {
-                Width = new GridLength(1, GridUnitType.Star)
-            });
-            heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            heading.Children.Add(MakeText(L.T("Последняя игра"), BoostixDesignTokens.SectionTitleSize, TextColor, semiboldFont, FontWeights.SemiBold));
-            TimeSpan played = (last.EndedUtc ?? DateTime.UtcNow) - last.StartedUtc;
-            var when = MakeText(
-                FormatPlayed(played) + ", " + FormatWhen(last.StartedUtc),
-                BoostixDesignTokens.MetadataTextSize,
-                MutedColor,
-                regularFont,
-                FontWeights.Normal);
-            when.VerticalAlignment = VerticalAlignment.Bottom;
-            Grid.SetColumn(when, 1);
-            heading.Children.Add(when);
-            stack.Children.Add(heading);
-
-            var chart = new SessionChart(last.Timeline, last.PhysicalMemoryTotalBytes)
-            {
-                Height = 84,
-                Margin = new Thickness(0, 12, 0, 6)
-            };
-            if (chart.HasData)
-            {
-                stack.Children.Add(chart);
-                var legend = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
-                legend.Children.Add(MakeLegendSwatch(BoostixDesignTokens.Data, L.T("память")));
-                legend.Children.Add(MakeLegendSwatch(BoostixDesignTokens.SecondaryText, L.T("процессор")));
-                legend.Children.Add(MakeLegendSwatch(BoostixDesignTokens.Warning, L.T("минимум")));
-                stack.Children.Add(legend);
-            }
-
-            foreach (SessionVerdict verdict in SessionVerdicts.Describe(last))
-            {
-                stack.Children.Add(BuildVerdictRow(verdict));
-            }
-
-            if (game.Sessions.Count > 1)
-            {
-                var earlier = MakeText(L.T("Раньше"), BoostixDesignTokens.MetadataTextSize + 1, SecondaryColor, semiboldFont, FontWeights.SemiBold);
-                earlier.Margin = new Thickness(0, 16, 0, 4);
-                stack.Children.Add(earlier);
-                foreach (BoostSessionReport report in game.Sessions.Skip(1).Take(4))
-                {
-                    TimeSpan length = (report.EndedUtc ?? report.StartedUtc) - report.StartedUtc;
-                    var row = new Grid { Margin = new Thickness(0, 4, 0, 0) };
-                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                    row.ColumnDefinitions.Add(new ColumnDefinition
-                    {
-                        Width = new GridLength(1, GridUnitType.Star)
-                    });
-                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                    bool tight = string.Equals(report.WorstResourcePressure, "Critical", StringComparison.OrdinalIgnoreCase) ||
-                        !string.IsNullOrWhiteSpace(report.TargetCrashCode);
-                    FrameworkElement dot = BoostixUi.StatusDot(tight ? WarningColor : SuccessColor, 6);
-                    dot.VerticalAlignment = VerticalAlignment.Center;
-                    dot.Margin = new Thickness(0, 0, 9, 0);
-                    row.Children.Add(dot);
-                    var date = MakeText(
-                        report.StartedUtc.ToLocalTime().ToString("d MMM, HH:mm", L.DateCulture),
-                        BoostixDesignTokens.MetadataTextSize,
-                        SecondaryColor,
-                        regularFont,
-                        FontWeights.Normal);
-                    Grid.SetColumn(date, 1);
-                    row.Children.Add(date);
-                    var duration = MakeText(FormatPlayed(length), BoostixDesignTokens.MetadataTextSize, MutedColor, regularFont, FontWeights.Normal);
-                    Grid.SetColumn(duration, 2);
-                    row.Children.Add(duration);
-                    stack.Children.Add(row);
-                }
-            }
-            return stack;
+            stageAccent = art == null ? (Color?)null : art.Accent;
+            ambientArt.Source = art == null || SystemParameters.HighContrast ? null : art.Soft;
+            Color floor = art == null ? BackgroundColor : art.Floor;
+            ambientVeil.Background = new SolidColorBrush(BoostixDesignTokens.WithAlpha(floor, 208));
+            ApplySelectionMarkerColors();
         }
 
         private FrameworkElement MakeLegendSwatch(Color color, string text)
@@ -2933,29 +2464,23 @@ namespace Boostix
                     L.T("Проверено в {0:HH:mm}"),
                     preflight.CapturedUtc.ToLocalTime());
 
-            pageContent.Children.Add(BuildLiveSessionCard());
-
+            pageContent.Children.Add(BuildPcVerdict());
             if (diagnosticSnapshot != null)
             {
-                pageContent.Children.Add(BuildResourceSnapshot(diagnosticSnapshot));
-            }
-
-            pageContent.Children.Add(MakeSectionHeading(L.T("Что проверили"), null));
-            if (preflight == null)
-            {
-                pageContent.Children.Add(MakeEmptyState(
-                    BoostixIcons.Activity,
-                    L.T("Идёт проверка"),
-                    L.T("Собираем только безопасные данные без изменения Windows.")));
-            }
-            else
-            {
-                var list = MakeListCard();
-                foreach (BoostCheckResult check in preflight.Checks)
+                pageContent.Children.Add(BuildPcMeters(diagnosticSnapshot));
+                if (!string.IsNullOrWhiteSpace(diagnosticSnapshot.PressureReason))
                 {
-                    AddListRow(list, BuildCheckRow(check));
+                    var reason = MakeText(
+                        TranslatePressureReason(diagnosticSnapshot),
+                        BoostixDesignTokens.BodyTextSize,
+                        SecondaryColor,
+                        regularFont,
+                        FontWeights.Normal);
+                    reason.TextWrapping = TextWrapping.Wrap;
+                    reason.HorizontalAlignment = HorizontalAlignment.Center;
+                    reason.Margin = new Thickness(0, 0, 0, 6);
+                    pageContent.Children.Add(reason);
                 }
-                pageContent.Children.Add(list);
             }
 
             var refresh = MakeActionButton(
@@ -3009,106 +2534,23 @@ namespace Boostix
             }
         }
 
-        private FrameworkElement BuildLiveSessionCard()
+        private void RenderChecks()
         {
-            var card = BoostixUi.Card(new Thickness(16, 14, 16, 14));
-            card.Margin = new Thickness(0, 0, 0, 16);
-            var content = new Grid();
-            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            content.ColumnDefinitions.Add(new ColumnDefinition
+            pageContent.Children.Add(MakeSectionHeading(L.T("Что проверили"), null));
+            if (preflight == null)
             {
-                Width = new GridLength(1, GridUnitType.Star)
-            });
-            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            FrameworkElement icon = MakeTargetIcon(
-                selectedTarget == null ? null : selectedTarget.ExecutablePath,
-                40);
-            content.Children.Add(icon);
-
-            string targetName = selectedTarget == null
-                ? L.T("Игра не выбрана")
-                : DescribeTarget(selectedTarget);
-            var target = new StackPanel
+                pageContent.Children.Add(MakeEmptyState(
+                    BoostixIcons.Activity,
+                    L.T("Идёт проверка"),
+                    L.T("Собираем только безопасные данные без изменения Windows.")));
+                return;
+            }
+            var list = MakeListCard();
+            foreach (BoostCheckResult check in preflight.Checks)
             {
-                Margin = new Thickness(14, 0, 12, 0),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            target.Children.Add(MakeText(
-                targetName,
-                15,
-                TextColor,
-                semiboldFont,
-                FontWeights.SemiBold));
-            string targetDetail = selectedTarget == null
-                ? L.T("Нажмите «Играть» на полке или выберите программу в разделе «Сейчас».")
-                : L.T("Игра запущена");
-            var detail = MakeText(
-                targetDetail,
-                BoostixDesignTokens.MetadataTextSize,
-                MutedColor,
-                regularFont,
-                FontWeights.Normal);
-            detail.Margin = new Thickness(0, 3, 0, 0);
-            target.Children.Add(detail);
-            Grid.SetColumn(target, 1);
-            content.Children.Add(target);
-
-            bool pressure = sessionGuardPressureState != null &&
-                sessionGuardPressureState.CriticalAlertActive;
-            string state = boostSessionActive
-                ? (pressure ? L.T("Мало памяти") : L.T("Boost включён"))
-                : (selectedTarget == null ? L.T("Игра не выбрана") : L.T("Готов"));
-            Color stateColor = pressure
-                ? WarningColor
-                : (boostSessionActive ? SuccessColor : SecondaryColor);
-            FrameworkElement stateMetric = MakeInlineStat(L.T("Сеанс"), state, stateColor);
-            Grid.SetColumn(stateMetric, 2);
-            content.Children.Add(stateMetric);
-
-            string commit = sessionGuardSample != null &&
-                sessionGuardSample.SystemMetricsAvailable
-                ? FormatBytesCompact(sessionGuardSample.CommitHeadroomBytes)
-                : "—";
-            FrameworkElement commitMetric = MakeInlineStat(
-                L.T("Запас памяти"),
-                commit,
-                pressure ? WarningColor : TextColor);
-            commitMetric.Margin = new Thickness(22, 0, 0, 0);
-            Grid.SetColumn(commitMetric, 3);
-            content.Children.Add(commitMetric);
-
-            card.Child = content;
-            AutomationProperties.SetName(
-                card,
-                targetName + L.T(". Состояние: ") + state + L.T(". Запас памяти: ") + commit + ".");
-            AutomationProperties.SetAutomationId(
-                card,
-                "Boostix.Center.LiveSession");
-            return card;
-        }
-
-        private FrameworkElement MakeInlineStat(string label, string value, Color valueColor)
-        {
-            var block = new StackPanel
-            {
-                VerticalAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Right
-            };
-            TextBlock labelText = BoostixUi.FieldLabel(label);
-            labelText.HorizontalAlignment = HorizontalAlignment.Right;
-            block.Children.Add(labelText);
-            var valueText = MakeText(
-                value,
-                15,
-                valueColor,
-                semiboldFont,
-                FontWeights.SemiBold);
-            valueText.HorizontalAlignment = HorizontalAlignment.Right;
-            valueText.Margin = new Thickness(0, 2, 0, 0);
-            block.Children.Add(valueText);
-            return block;
+                AddListRow(list, BuildCheckRow(check));
+            }
+            pageContent.Children.Add(list);
         }
 
         /// <summary>
@@ -3574,30 +3016,9 @@ namespace Boostix
 
         private void RenderReport()
         {
-            subtitle.Text =
-                L.T("Что происходило во время игры и как изменился FPS.");
+            subtitle.Text = L.T("Каждая игра с Boost: как прошла и что можно улучшить.");
             reportStack = BuildReportPage();
             pageContent.Children.Add(reportStack);
-
-            IEnumerable<BoostSessionReport> recent = sessionHistory
-                .Where(item => item != null &&
-                    (sessionReport == null ||
-                     !string.Equals(
-                         item.SessionId,
-                         sessionReport.SessionId,
-                         StringComparison.OrdinalIgnoreCase)))
-                .Take(5);
-            if (recent.Any())
-            {
-                pageContent.Children.Add(MakeSectionHeading(L.T("Прошлые сеансы"), null));
-                var list = MakeListCard();
-                int historyIndex = 0;
-                foreach (BoostSessionReport report in recent)
-                {
-                    AddListRow(list, BuildHistoryRow(report, historyIndex++));
-                }
-                pageContent.Children.Add(list);
-            }
 
             var export = MakeActionButton(
                 L.T("Диагностика"),
@@ -3704,128 +3125,8 @@ namespace Boostix
                 report.Children.Add(BuildPerformanceProofCard(proofSnapshot));
             }
 
-            if (sessionReport == null && sessionHistory.Count > 0)
-            {
-                // Opens on the latest game instead of an empty page.
-                sessionReport = sessionHistory[0];
-            }
-            if (sessionReport == null)
-            {
-                report.Children.Add(MakeEmptyState(
-                    BoostixIcons.Chart,
-                    L.T("Здесь пока пусто"),
-                    L.T("Запустите Boost перед игрой, и здесь появится отчёт.")));
-                return report;
-            }
-
-            BoostCrashInsight crashInsight =
-                BoostCrashAssistant.Analyze(sessionReport);
-            if (crashInsight.Category != BoostCrashCategory.None)
-            {
-                report.Children.Add(BuildCrashInsight(crashInsight));
-            }
-
-            report.Children.Add(MakeSectionHeading(
-                L.T("Последний сеанс"),
-                FormatSessionStatus(sessionReport)));
-            report.Children.Add(BuildSessionSummary(sessionReport));
-            FrameworkElement debrief = BuildReportDebrief(sessionReport);
-            if (debrief != null)
-            {
-                report.Children.Add(debrief);
-            }
-            if (sessionReport.Performance != null &&
-                sessionReport.Performance.Available)
-            {
-                report.Children.Add(BuildPerformanceGrid(sessionReport.Performance));
-                BoostPerformanceComparison comparison =
-                    BoostSessionComparison.Compare(
-                        sessionReport,
-                        sessionHistory);
-                if (comparison.Available)
-                {
-                    report.Children.Add(
-                        BuildPerformanceComparison(comparison));
-                }
-            }
-
-            report.Children.Add(MakeSectionHeading(L.T("Что сделал Boostix"), null));
-            IEnumerable<BoostActionRecord> actions =
-                (sessionReport.Actions ?? new List<BoostActionRecord>())
-                    .OrderByDescending(item => item.TimestampUtc)
-                    .Take(20);
-            if (!actions.Any())
-            {
-                report.Children.Add(MakeText(
-                    L.T("Пока ничего не сделано."),
-                    BoostixDesignTokens.MetadataTextSize,
-                    MutedColor,
-                    regularFont,
-                    FontWeights.Normal));
-            }
-            else
-            {
-                var list = MakeListCard();
-                foreach (BoostActionRecord action in actions)
-                {
-                    AddListRow(list, BuildActionRow(action));
-                }
-                report.Children.Add(list);
-            }
+            AddJournal(report);
             return report;
-        }
-
-        /// <summary>
-        /// The game debrief on the History page: the whole session as a chart
-        /// and three plain conclusions side by side.
-        /// </summary>
-        private FrameworkElement BuildReportDebrief(BoostSessionReport report)
-        {
-            if (report == null || !report.EndedUtc.HasValue)
-            {
-                return null;
-            }
-            var card = BoostixUi.Card(new Thickness(18, 16, 18, 18));
-            card.Margin = new Thickness(0, 0, 0, 18);
-            AutomationProperties.SetAutomationId(card, "Boostix.Center.Debrief");
-            var stack = new StackPanel();
-            stack.Children.Add(MakeText(L.T("Разбор игры"), BoostixDesignTokens.SectionTitleSize, TextColor, semiboldFont, FontWeights.SemiBold));
-            var chart = new SessionChart(report.Timeline, report.PhysicalMemoryTotalBytes)
-            {
-                Height = 130,
-                Margin = new Thickness(0, 12, 0, 6)
-            };
-            if (chart.HasData)
-            {
-                stack.Children.Add(chart);
-                var legend = new StackPanel { Orientation = Orientation.Horizontal };
-                legend.Children.Add(MakeLegendSwatch(BoostixDesignTokens.Data, L.T("память")));
-                legend.Children.Add(MakeLegendSwatch(BoostixDesignTokens.SecondaryText, L.T("процессор")));
-                legend.Children.Add(MakeLegendSwatch(BoostixDesignTokens.Warning, L.T("минимум")));
-                stack.Children.Add(legend);
-            }
-            else
-            {
-                var note = MakeText(
-                    L.T("График появится после следующей игры: Boostix 4.0 записывает память и процессор каждые 10 секунд."),
-                    BoostixDesignTokens.MetadataTextSize + 0.5,
-                    MutedColor,
-                    regularFont,
-                    FontWeights.Normal);
-                note.TextWrapping = TextWrapping.Wrap;
-                note.Margin = new Thickness(0, 6, 0, 0);
-                stack.Children.Add(note);
-            }
-            var verdicts = new UniformGrid { Columns = 3, Margin = new Thickness(0, 6, 0, 0) };
-            foreach (SessionVerdict verdict in SessionVerdicts.Describe(report))
-            {
-                FrameworkElement row = BuildVerdictRow(verdict);
-                ((FrameworkElement)row).Margin = new Thickness(0, 10, 16, 0);
-                verdicts.Children.Add(row);
-            }
-            stack.Children.Add(verdicts);
-            card.Child = stack;
-            return card;
         }
 
         private FrameworkElement BuildPerformanceProofCard(
@@ -3974,148 +3275,6 @@ namespace Boostix
                 host,
                 insight.Title + ". " + insight.Summary);
             return host;
-        }
-
-        private FrameworkElement BuildResourceSnapshot(DiagnosticSnapshot snapshot)
-        {
-            var section = new StackPanel();
-            section.Children.Add(MakeSectionHeading(
-                L.T("Память сейчас"),
-                null,
-                BoostixUi.Chip(
-                    FormatPressure(snapshot.Pressure.ToString()),
-                    GetPressureColor(snapshot.Pressure))));
-
-            var grid = MakeTileGrid(2);
-            AddTile(grid, 0, BuildResourceTile(
-                BoostixIcons.Memory,
-                L.T("Оперативная память"),
-                snapshot.MemoryAvailable
-                    ? FormatBytesCompact(snapshot.PhysicalAvailableBytes) + L.T(" свободно")
-                    : L.T("Недоступно"),
-                snapshot.MemoryAvailable
-                    ? L.T("из ") + FormatBytesCompact(snapshot.PhysicalTotalBytes)
-                    : string.Empty,
-                snapshot.MemoryAvailable && snapshot.PhysicalTotalBytes > 0
-                    ? 1.0 - (double)snapshot.PhysicalAvailableBytes / snapshot.PhysicalTotalBytes
-                    : double.NaN));
-            AddTile(grid, 1, BuildResourceTile(
-                BoostixIcons.Layers,
-                L.T("Резерв памяти Windows"),
-                snapshot.MemoryAvailable
-                    ? FormatBytesCompact(snapshot.CommitHeadroomBytes)
-                    : L.T("Недоступно"),
-                snapshot.MemoryAvailable
-                    ? L.T("из ") + FormatBytesCompact(snapshot.CommitLimitBytes)
-                    : string.Empty,
-                snapshot.MemoryAvailable && snapshot.CommitLimitBytes > 0
-                    ? 1.0 - (double)snapshot.CommitHeadroomBytes / snapshot.CommitLimitBytes
-                    : double.NaN));
-            bool gpuKnown = snapshot.GpuUsageAvailable &&
-                snapshot.GpuTotalAvailable &&
-                snapshot.GpuDedicatedTotalBytes > 0;
-            AddTile(grid, 2, BuildResourceTile(
-                BoostixIcons.Cpu,
-                L.T("Видеопамять"),
-                gpuKnown
-                    ? FormatBytesCompact(snapshot.GpuDedicatedUsageBytes) + L.T(" занято")
-                    : L.T("Недоступно"),
-                gpuKnown
-                    ? L.T("из ") + FormatBytesCompact(snapshot.GpuDedicatedTotalBytes)
-                    : string.Empty,
-                gpuKnown
-                    ? (double)snapshot.GpuDedicatedUsageBytes / snapshot.GpuDedicatedTotalBytes
-                    : double.NaN));
-            AddTile(grid, 3, BuildResourceTile(
-                BoostixIcons.File,
-                L.T("Файл подкачки"),
-                snapshot.PageFileAvailable
-                    ? FormatBytesCompact(snapshot.PageFileUsedBytes) + L.T(" занято")
-                    : FormatUnavailablePageFile(snapshot),
-                snapshot.PageFileAvailable
-                    ? L.T("из ") + FormatBytesCompact(snapshot.PageFileAllocatedBytes)
-                    : string.Empty,
-                snapshot.PageFileAvailable && snapshot.PageFileAllocatedBytes > 0
-                    ? (double)snapshot.PageFileUsedBytes / snapshot.PageFileAllocatedBytes
-                    : double.NaN));
-            section.Children.Add(grid);
-
-            if (!string.IsNullOrWhiteSpace(snapshot.PressureReason))
-            {
-                var reason = MakeText(
-                    TranslatePressureReason(snapshot),
-                    BoostixDesignTokens.MetadataTextSize,
-                    MutedColor,
-                    regularFont,
-                    FontWeights.Normal);
-                reason.TextWrapping = TextWrapping.Wrap;
-                reason.TextTrimming = TextTrimming.None;
-                reason.Margin = new Thickness(2, 10, 0, 0);
-                section.Children.Add(reason);
-            }
-            AutomationProperties.SetName(
-                section,
-                L.T("Память сейчас. ") +
-                FormatPressure(snapshot.Pressure.ToString()));
-            return section;
-        }
-
-        private FrameworkElement BuildResourceTile(
-            string iconData,
-            string title,
-            string value,
-            string caption,
-            double usedFraction)
-        {
-            var card = BoostixUi.Card(new Thickness(14, 12, 14, 14));
-            var content = new StackPanel();
-            var heading = new StackPanel
-            {
-                Orientation = Orientation.Horizontal
-            };
-            FrameworkElement icon = BoostixIcons.Create(iconData, 15, MutedColor);
-            icon.Margin = new Thickness(0, 0, 7, 0);
-            heading.Children.Add(icon);
-            heading.Children.Add(BoostixUi.FieldLabel(title));
-            content.Children.Add(heading);
-
-            var valueLine = new WrapPanel
-            {
-                Margin = new Thickness(0, 8, 0, 0)
-            };
-            var valueText = MakeText(
-                value,
-                17,
-                TextColor,
-                semiboldFont,
-                FontWeights.SemiBold);
-            valueLine.Children.Add(valueText);
-            if (!string.IsNullOrEmpty(caption))
-            {
-                var captionText = MakeText(
-                    " " + caption,
-                    BoostixDesignTokens.MetadataTextSize,
-                    MutedColor,
-                    regularFont,
-                    FontWeights.Normal);
-                captionText.VerticalAlignment = VerticalAlignment.Bottom;
-                captionText.Margin = new Thickness(2, 0, 0, 2);
-                valueLine.Children.Add(captionText);
-            }
-            content.Children.Add(valueLine);
-
-            if (!double.IsNaN(usedFraction))
-            {
-                Color fill = usedFraction >= 0.92
-                    ? ErrorColor
-                    : (usedFraction >= 0.8 ? WarningColor : SecondaryColor);
-                Grid bar = BoostixUi.ProgressBar(usedFraction, fill, 4);
-                bar.Margin = new Thickness(0, 10, 0, 0);
-                content.Children.Add(bar);
-            }
-            card.Child = content;
-            AutomationProperties.SetName(card, title + ": " + value + " " + caption);
-            return card;
         }
 
         private FrameworkElement BuildPerformanceComparison(
@@ -4572,15 +3731,43 @@ namespace Boostix
             }
             try
             {
-                pageContent.Children.Add(MakeSectionHeading(L.T("Запуск"), null));
-                var launch = MakeListCard();
-                AddListRow(launch, BuildSettingToggle(
+                pageContent.Children.Add(MakeSectionHeading(L.T("Работа в фоне"), null));
+                var background = MakeListCard();
+                AddListRow(background, BuildSettingToggle(
+                    settingIndex++,
+                    L.T("Запускать вместе с Windows"),
+                    L.T("Boostix стартует свёрнутым к часам. С «Авто» у игры Boost включится сам."),
+                    settings.StartWithWindows,
+                    delegate(bool value) { settings.StartWithWindows = value; }));
+                AddListRow(background, BuildSettingToggle(
+                    settingIndex++,
+                    L.T("Сворачивать в трей"),
+                    L.T("Кнопка «Свернуть» прячет окно к часам. Boostix продолжает работать."),
+                    settings.MinimizeToTray,
+                    delegate(bool value) { settings.MinimizeToTray = value; }));
+                pageContent.Children.Add(background);
+
+                pageContent.Children.Add(MakeSectionHeading(L.T("Во время игры"), null));
+                var control = MakeListCard();
+                AddListRow(control, BuildSettingToggle(
+                    settingIndex++,
+                    L.T("Горячая клавиша ") + BoostHotkey.DisplayText,
+                    L.T("Включает и выключает Boost прямо из игры."),
+                    settings.GlobalHotkey,
+                    delegate(bool value) { settings.GlobalHotkey = value; }));
+                AddListRow(control, BuildSettingToggle(
+                    settingIndex++,
+                    L.T("Сигналы в игре"),
+                    L.T("Звук и плашка при ") + BoostHotkey.DisplayText + L.T(", итог после игры."),
+                    settings.GameSignals,
+                    delegate(bool value) { settings.GameSignals = value; }));
+                AddListRow(control, BuildSettingToggle(
                     settingIndex++,
                     L.T("Проверка перед запуском"),
                     L.T("Перед запуском Boost проверять компьютер и предупреждать о проблемах."),
                     settings.CheckBeforeBoost,
                     delegate(bool value) { settings.CheckBeforeBoost = value; }));
-                pageContent.Children.Add(launch);
+                pageContent.Children.Add(control);
 
                 pageContent.Children.Add(MakeSectionHeading(
                     L.T("Закрывать при запуске Boost"),
@@ -4640,34 +3827,6 @@ namespace Boostix
                     !settings.KeepNvidiaOverlay,
                     delegate(bool value) { settings.KeepNvidiaOverlay = !value; }));
                 pageContent.Children.Add(close);
-
-                pageContent.Children.Add(MakeSectionHeading(L.T("Управление"), null));
-                var control = MakeListCard();
-                AddListRow(control, BuildSettingToggle(
-                    settingIndex++,
-                    L.T("Горячая клавиша ") + BoostHotkey.DisplayText,
-                    L.T("Включает и выключает Boost прямо из игры."),
-                    settings.GlobalHotkey,
-                    delegate(bool value) { settings.GlobalHotkey = value; }));
-                AddListRow(control, BuildSettingToggle(
-                    settingIndex++,
-                    L.T("Сворачивать в трей"),
-                    L.T("Кнопка «Свернуть» прячет окно к часам. Boostix продолжает работать."),
-                    settings.MinimizeToTray,
-                    delegate(bool value) { settings.MinimizeToTray = value; }));
-                AddListRow(control, BuildSettingToggle(
-                    settingIndex++,
-                    L.T("Сигналы в игре"),
-                    L.T("Звук и плашка при ") + BoostHotkey.DisplayText + L.T(", итог после игры."),
-                    settings.GameSignals,
-                    delegate(bool value) { settings.GameSignals = value; }));
-                AddListRow(control, BuildSettingToggle(
-                    settingIndex++,
-                    L.T("Запускать вместе с Windows"),
-                    L.T("Boostix стартует свёрнутым к часам. С «Авто» у игры Boost включится сам."),
-                    settings.StartWithWindows,
-                    delegate(bool value) { settings.StartWithWindows = value; }));
-                pageContent.Children.Add(control);
 
                 pageContent.Children.Add(MakeSectionHeading(L.T("Оформление"), null));
                 pageContent.Children.Add(BuildThemePicker());
@@ -5451,6 +4610,11 @@ namespace Boostix
             string iconData)
         {
             return BoostixUi.ActionButton(text, kind, iconData);
+        }
+
+        internal static ControlTemplate FlatButtonTemplate(double radius)
+        {
+            return MakeFlatButtonTemplate(radius);
         }
 
         private static ControlTemplate MakeFlatButtonTemplate(double radius)

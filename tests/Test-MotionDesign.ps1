@@ -121,9 +121,9 @@ foreach ($row in 0..5) {
     }
 }
 
-# The tray icon shows the needle in a lit lemon zone only while Boost runs.
+# The tray icon shows the needle in a lit orange zone only while Boost runs.
 $iconFactory = Get-Method 'Boostix.BoostixTrayIcon' 'CreateGaugeBitmap'
-function Get-LemonPixels {
+function Get-LitPixels {
     param([bool]$Active)
     $bitmap = [System.Drawing.Bitmap]$iconFactory.Invoke($null, @($Active))
     try {
@@ -131,17 +131,17 @@ function Get-LemonPixels {
         for ($x = 0; $x -lt $bitmap.Width; $x++) {
             for ($y = 0; $y -lt $bitmap.Height; $y++) {
                 $c = $bitmap.GetPixel($x, $y)
-                if ($c.A -gt 200 -and $c.R -gt 220 -and $c.G -gt 210 -and $c.B -lt 140) { $count++ }
+                if ($c.A -gt 200 -and $c.R -gt 220 -and $c.G -gt 90 -and $c.G -lt 170 -and $c.B -lt 110) { $count++ }
             }
         }
         return $count
     }
     finally { $bitmap.Dispose() }
 }
-$activeLemon = Get-LemonPixels $true
-$idleLemon = Get-LemonPixels $false
-if ($activeLemon -lt 20 -or $idleLemon -ge ($activeLemon / 3)) {
-    throw "Tray icon does not show Boost state: active lemon pixels=$activeLemon idle=$idleLemon"
+$activeLit = Get-LitPixels $true
+$idleLit = Get-LitPixels $false
+if ($activeLit -lt 20 -or $idleLit -ge ($activeLit / 3)) {
+    throw "Tray icon does not show Boost state: active lit pixels=$activeLit idle=$idleLit"
 }
 
 Write-Host 'Motion design contracts passed: self-test, live needle, rolling digits, sliding marker and tray state.' -ForegroundColor Green

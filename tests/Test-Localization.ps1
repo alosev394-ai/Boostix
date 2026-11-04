@@ -286,8 +286,9 @@ try {
         throw ("English Settings still show Russian:`n" + ($russian -join "`n"))
     }
 
-    $homeTab = Wait-ForElement $window 'Boostix.Center.Tab.Home' $process.Id
-    $homeTab.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    $statusPill = Wait-ForElement $window 'Boostix.StatusPill' $process.Id
+    $statusPill.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    [void](Wait-ForElement $window 'Boostix.Activate' $process.Id)
     Start-Sleep -Milliseconds 600
     $russian = Get-RussianNames $window
     if ($russian.Count -gt 0) {
@@ -300,6 +301,21 @@ try {
     $russian = Get-RussianNames $window
     if ($russian.Count -gt 0) {
         throw ("English Games still show Russian:`n" + ($russian -join "`n"))
+    }
+    $reportTab = Wait-ForElement $window 'Boostix.Center.Tab.Report' $process.Id
+    $reportTab.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    $journalRow = Wait-ForElement $window 'Boostix.Center.History.0' $process.Id
+    Start-Sleep -Milliseconds 600
+    $russian = Get-RussianNames $window
+    if ($russian.Count -gt 0) {
+        throw ("English journal still shows Russian:`n" + ($russian -join "`n"))
+    }
+    $journalRow.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    [void](Wait-ForElement $window 'Boostix.Center.Debrief.Headline' $process.Id)
+    Start-Sleep -Milliseconds 400
+    $russian = Get-RussianNames $window
+    if ($russian.Count -gt 0) {
+        throw ("English debrief still shows Russian:`n" + ($russian -join "`n"))
     }
 }
 finally {

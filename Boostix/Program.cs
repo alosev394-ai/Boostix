@@ -456,6 +456,12 @@ namespace Boostix
         private bool hotkeyRegistered;
         private BoostCenterOverlay boostCenterOverlay;
         private readonly SystemLoadSampler loadSampler = new SystemLoadSampler();
+        private int liveCpuPercent = -1;
+        private const int BackgroundUpdateFirstCheckMinutes = 3;
+        private const int BackgroundUpdateIntervalHours = 6;
+        private DispatcherTimer backgroundUpdateTimer;
+        private bool updateCheckPending;
+        private bool updateNoticeShown;
         // Separate from the gauge's sampler so each chart point averages the
         // whole 10 s since the previous one.
         private readonly SystemLoadSampler timelineLoadSampler = new SystemLoadSampler();
@@ -701,8 +707,23 @@ namespace Boostix
             }
             Loaded += BoostWindowLoaded;
             SourceInitialized += BoostWindowSourceInitialized;
-            Activated += delegate { FadeWindowTint(true); };
-            Deactivated += delegate { FadeWindowTint(false); };
+            Activated += delegate
+            {
+                FadeWindowTint(true);
+                if (boostCenterOverlay != null)
+                {
+                    boostCenterOverlay.SetWindowActive(true);
+                }
+                RunPendingUpdateCheck();
+            };
+            Deactivated += delegate
+            {
+                FadeWindowTint(false);
+                if (boostCenterOverlay != null)
+                {
+                    boostCenterOverlay.SetWindowActive(false);
+                }
+            };
             KeyDown += WindowKeyDown;
             PreviewMouseLeftButtonDown += WindowMouseLeftButtonDown;
             Closing += BoostWindowClosing;
@@ -873,6 +894,13 @@ namespace Boostix
                 BoostCenterInstalledGameAddRequested;
             boostCenterOverlay.GameLaunchRequested +=
                 BoostCenterGameLaunchRequested;
+            boostCenterOverlay.StopBoostRequested += delegate
+            {
+                if (boostActive)
+                {
+                    ToggleBoost();
+                }
+            };
             boostCenterOverlay.ExportDiagnosticsRequested +=
                 BoostCenterExportDiagnosticsRequested;
             Panel.SetZIndex(boostCenterOverlay, 10);
@@ -3181,7 +3209,9 @@ namespace Boostix
                 boostGauge.SetReadout(liveTimerText.Text, L.T("остановить"));
                 if (IsVisible && WindowState != WindowState.Minimized)
                 {
-                    boostGauge.SetLiveLoad(loadSampler.Sample());
+                    double load = loadSampler.Sample();
+                    boostGauge.SetLiveLoad(load);
+                    liveCpuPercent = double.IsNaN(load) ? -1 : (int)Math.Round(load * 100);
                 }
             }
             AutomationProperties.SetName(
@@ -3202,6 +3232,7 @@ namespace Boostix
             SessionGuardSample sample;
             SessionGuardPressureState pressureState;
             PagefileAssessment pagefile;
+            List<SessionTimelinePoint> timeline;
             lock (activeMaintenanceSync)
             {
                 sample = latestSessionGuardSample;
@@ -3209,6 +3240,9 @@ namespace Boostix
                     ? null
                     : sessionGuardPressureState.Clone();
                 pagefile = latestPagefileAssessment;
+                timeline = currentSession == null || currentSession.Timeline == null
+                    ? null
+                    : new List<SessionTimelinePoint>(currentSession.Timeline);
             }
             boostCenterOverlay.SetLiveSession(
                 selectedTarget,
@@ -3218,7 +3252,9 @@ namespace Boostix
                 boostActive,
                 currentSession == null
                     ? (DateTime?)null
-                    : currentSession.StartedUtc);
+                    : currentSession.StartedUtc,
+                timeline,
+                liveCpuPercent);
             boostCenterOverlay.SetPerformanceProofSnapshot(
                 proofCoordinator == null
                     ? null
@@ -5734,6 +5770,56 @@ namespace Boostix
             }
             Activate();
             QueueGaugeSelfTest();
+            RunPendingUpdateCheck();
+        }
+
+        /// <summary>
+        /// A copy that stays in the tray for days still hears about new
+        /// versions: it asks in the background, never during a game, and only
+        /// tells the player. The update itself starts when the window opens.
+        /// </summary>
+        private void StartBackgroundUpdateChecks()
+        {
+            if (demoMode || safeMode || updateOverlay == null || backgroundUpdateTimer != null)
+            {
+                return;
+            }
+            backgroundUpdateTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMinutes(startInTray ? BackgroundUpdateFirstCheckMinutes : BackgroundUpdateIntervalHours * 60)
+            };
+            backgroundUpdateTimer.Tick += async delegate
+            {
+                backgroundUpdateTimer.Interval = TimeSpan.FromHours(BackgroundUpdateIntervalHours);
+                if (boostActive || animationRunning || updateNoticeShown)
+                {
+                    return;
+                }
+                if (await updateOverlay.IsNewerVersionAvailableAsync())
+                {
+                    updateCheckPending = true;
+                    updateNoticeShown = true;
+                    if (!IsAwayFromWindow)
+                    {
+                        RunPendingUpdateCheck();
+                    }
+                    else if (trayIcon != null)
+                    {
+                        trayIcon.Notify(L.T("Вышла новая версия Boostix. Откройте окно, чтобы обновить."));
+                    }
+                }
+            };
+            backgroundUpdateTimer.Start();
+        }
+
+        private async void RunPendingUpdateCheck()
+        {
+            if (!updateCheckPending || boostActive || animationRunning || updateOverlay == null)
+            {
+                return;
+            }
+            updateCheckPending = false;
+            await updateOverlay.RecheckForUpdatesAsync();
         }
 
         private void SetBoostAutomationState(bool active)
@@ -6575,12 +6661,23 @@ namespace Boostix
                 (!demoMode || updateDemo) &&
                 updateOverlay != null)
             {
-                canContinue = await updateOverlay.CheckForUpdatesAsync();
+                if (startInTray)
+                {
+                    // Started with Windows there is nobody at the window: the
+                    // update screen would hide Boost and Auto behind it. The
+                    // check waits until the window opens.
+                    updateCheckPending = true;
+                }
+                else
+                {
+                    canContinue = await updateOverlay.CheckForUpdatesAsync();
+                }
             }
             if (!canContinue)
             {
                 return;
             }
+            StartBackgroundUpdateChecks();
 
             boostButton.IsEnabled = !safeMode;
             if (!safeMode && optimizationOverlay != null)
@@ -6678,10 +6775,19 @@ namespace Boostix
                 RememberBoostCenterFocusReturn(centerButton);
                 boostCenterOverlay.OpenHistory();
             }
-            else if (boostCenterOverlay != null && (selectedTarget != null || boostActive))
+            else if (HasLaunchArgument(launchArguments, "--demo-live") &&
+                     boostCenterOverlay != null)
             {
-                // A game is already chosen (a test picked one, or Boost is
-                // running): open the live page instead of the shelf.
+                boostCenterOverlay.ShowDemoLive();
+            }
+            else if (HasLaunchArgument(launchArguments, "--demo-debrief") &&
+                     boostCenterOverlay != null)
+            {
+                boostCenterOverlay.ShowDemoDebrief();
+            }
+            else if (boostCenterOverlay != null && demoMode && selectedTarget != null)
+            {
+                // A test picked a target: it presses Boost on the manual page.
                 boostCenterOverlay.OpenHome();
             }
         }
@@ -6695,6 +6801,11 @@ namespace Boostix
             ShelfGame game = e.Game;
             if (demoMode)
             {
+                if (HasLaunchArgument(launchArguments, "--demo-launch"))
+                {
+                    boostCenterOverlay.SetGameLaunching(game);
+                    return;
+                }
                 boostCenterOverlay.SetGameMessage(
                     L.T("В демо-режиме игры не запускаются."),
                     false);
@@ -6721,15 +6832,11 @@ namespace Boostix
             string error;
             if (GameLauncher.TryLaunch(game, out error))
             {
-                boostCenterOverlay.SetGameMessage(
-                    string.Format(
-                        CultureInfo.CurrentCulture,
-                        L.T("Запускаем {0}. Boost включится, как только игра откроется."),
-                        game.Name),
-                    false);
+                boostCenterOverlay.SetGameLaunching(game);
             }
             else
             {
+                boostCenterOverlay.SetGameLaunching(null);
                 boostCenterOverlay.SetGameMessage(error, true);
             }
             UpdateBoostCenterSessionData();

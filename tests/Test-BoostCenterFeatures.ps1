@@ -9,7 +9,9 @@ if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $program = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\Program.cs'))
-$center = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\BoostCenterOverlay.cs'))
+$center = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\BoostCenterOverlay.cs')) +
+    [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\BoostCenterPages.cs')) +
+    [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\GameStage.cs'))
 $features = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\BoostFeatures.cs'))
 $capture = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\PerformanceCapture.cs'))
 $profiles = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\GameTargetProfiles.cs'))
@@ -245,12 +247,12 @@ foreach ($forbidden in @(
 }
 
 foreach ($required in @(
-    # 4.0: the games shelf is the first page; Home is the live Boost page
-    # ("Now"); navigation runs across the top bar.
+    # The stage of games is the first page; Home is the manual Boost page,
+    # part of Games, without a tab; navigation runs across the top bar.
     'CenterPage.Games',
     'CenterPage.Home',
     'AddTab(tabs, CenterPage.Games',
-    'AddTab(tabs, CenterPage.Home',
+    'TabPageFor(currentPage)',
     'SetHomeContent(',
     'BuildTopBar()',
     'RenderGames()',
@@ -525,7 +527,7 @@ foreach ($required in @(
 
 foreach ($required in @(
     'WriteAllTextAtomic',
-    'MaxReports = 20',
+    'MaxReports = 200',
     'BoostPreflightService',
     'AvailableMemoryStartBytes',
     'ExternalOverridePreserved'
