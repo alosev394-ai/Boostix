@@ -85,6 +85,7 @@ namespace Boostix
         private const double SelectedCoverScale = 1.1;
         private const double RailHeight = 200;
         private const int ArtFadeMilliseconds = 560;
+        private const int ArtSettleSeconds = 8;
         private const int LaunchTimeoutSeconds = 120;
 
         private readonly FontFamily regularFont;
@@ -124,7 +125,7 @@ namespace Boostix
         private bool scanning;
         private bool backgroundTip;
         private bool windowActive = true;
-        private bool driftRunning;
+        private TranslateTransform launchRunner;
         private int artGeneration;
         private ShelfGame launching;
         private DateTime launchStartedUtc;
@@ -307,7 +308,7 @@ namespace Boostix
 
             MouseMove += StageMouseMove;
             MouseLeave += delegate { MoveParallax(0, 0); };
-            IsVisibleChanged += delegate { UpdateDrift(); };
+            IsVisibleChanged += delegate { ApplyWindowState(); };
             PreviewKeyDown += StagePreviewKeyDown;
         }
 
@@ -411,13 +412,21 @@ namespace Boostix
         }
 
         /// <summary>
-        /// Window focus decides whether the art may drift: nothing on the stage
-        /// animates while a game has the screen.
+        /// Nothing on the stage moves while a game has the screen.
         /// </summary>
         public void SetWindowActive(bool active)
         {
             windowActive = active;
-            UpdateDrift();
+            ApplyWindowState();
+        }
+
+        private void ApplyWindowState()
+        {
+            if (!windowActive || !IsVisible)
+            {
+                heroDrift.BeginAnimation(TranslateTransform.XProperty, null);
+            }
+            UpdateLaunchRunner();
         }
 
         public void SetLaunching(ShelfGame game)
@@ -433,6 +442,7 @@ namespace Boostix
             {
                 launchTimer.Start();
             }
+            UpdateLaunchRunner();
             infoSignature = string.Empty;
             RefreshInfo();
         }
@@ -601,8 +611,8 @@ namespace Boostix
             if (motion)
             {
                 AnimateInfoIn();
+                SettleArt();
             }
-            UpdateDrift();
             EventHandler<StageArtEventArgs> handler = ArtChanged;
             if (handler != null)
             {
@@ -627,34 +637,30 @@ namespace Boostix
             }
         }
 
-        private void UpdateDrift()
+        /// <summary>
+        /// New art slides into place once and stops. It must never loop: a
+        /// moving picture redraws the whole window on every frame, which cost
+        /// nearly half a processor core.
+        /// </summary>
+        private void SettleArt()
         {
-            bool run = BoostixDesignTokens.MotionEnabled &&
-                !SystemParameters.HighContrast &&
-                IsVisible &&
-                windowActive &&
-                currentArt != null &&
-                currentArt.Hero != null;
-            if (run == driftRunning)
+            heroDrift.BeginAnimation(TranslateTransform.XProperty, null);
+            if (!BoostixDesignTokens.MotionEnabled ||
+                SystemParameters.HighContrast ||
+                !IsVisible ||
+                !windowActive ||
+                currentArt == null ||
+                currentArt.Hero == null)
             {
                 return;
             }
-            driftRunning = run;
-            if (run)
-            {
-                heroDrift.BeginAnimation(
-                    TranslateTransform.XProperty,
-                    new DoubleAnimation(-HeroBleed * 0.5, HeroBleed * 0.5, TimeSpan.FromSeconds(26))
-                    {
-                        AutoReverse = true,
-                        RepeatBehavior = RepeatBehavior.Forever,
-                        EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-                    });
-            }
-            else
-            {
-                heroDrift.BeginAnimation(TranslateTransform.XProperty, null);
-            }
+            heroDrift.BeginAnimation(
+                TranslateTransform.XProperty,
+                new DoubleAnimation(-HeroBleed * 0.5, 0, TimeSpan.FromSeconds(ArtSettleSeconds))
+                {
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                    FillBehavior = FillBehavior.Stop
+                });
         }
 
         private void StageMouseMove(object sender, MouseEventArgs e)
@@ -1204,7 +1210,7 @@ namespace Boostix
             row.Children.Add(playButton);
 
             CheckBox auto = makeSwitch(
-                L.T("Boost сам"),
+                L.T("Авто Boost"),
                 game.AutoBoost,
                 delegate(bool enabled)
                 {
@@ -1395,9 +1401,33 @@ namespace Boostix
             };
             track.Children.Add(runner);
             row.Children.Add(track);
-            if (BoostixDesignTokens.MotionEnabled)
+            if (launchRunner != null)
             {
-                runnerShift.BeginAnimation(
+                launchRunner.BeginAnimation(TranslateTransform.XProperty, null);
+            }
+            launchRunner = runnerShift;
+            UpdateLaunchRunner();
+            return row;
+        }
+
+        /// <summary>
+        /// The one endless animation on the stage. It stops as soon as the
+        /// game opens over the window, and with the launch itself.
+        /// </summary>
+        private void UpdateLaunchRunner()
+        {
+            if (launchRunner == null)
+            {
+                return;
+            }
+            launchRunner.BeginAnimation(TranslateTransform.XProperty, null);
+            if (launching == null)
+            {
+                launchRunner = null;
+            }
+            else if (BoostixDesignTokens.MotionEnabled && IsVisible && windowActive)
+            {
+                launchRunner.BeginAnimation(
                     TranslateTransform.XProperty,
                     new DoubleAnimation(-120, 360, TimeSpan.FromMilliseconds(1300))
                     {
@@ -1407,9 +1437,8 @@ namespace Boostix
             }
             else
             {
-                runnerShift.X = 120;
+                launchRunner.X = 120;
             }
-            return row;
         }
 
         private FrameworkElement BuildBackgroundTip()
@@ -1712,15 +1741,6 @@ namespace Boostix
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(1, 1, 9, 0)
             };
-            if (BoostixDesignTokens.MotionEnabled)
-            {
-                dot.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.35, TimeSpan.FromSeconds(1.1))
-                {
-                    AutoReverse = true,
-                    RepeatBehavior = RepeatBehavior.Forever,
-                    EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-                });
-            }
             status.Children.Add(dot);
             liveStateText = Label(L.T("Идёт игра, Boost работает"), 15, StageText, displayFont, FontWeights.SemiBold);
             AutomationProperties.SetAutomationId(liveStateText, "Boostix.Games.Live.State");

@@ -59,6 +59,26 @@ namespace Boostix
         public const long OneGibibyte = 1024L * 1024L * 1024L;
         public const long TwoGibibytes = 2L * 1024L * 1024L * 1024L;
 
+        public static long PhysicalCriticalBytes(long physicalTotalBytes)
+        {
+            return Math.Max(OneGibibyte, Percentage(physicalTotalBytes, 8));
+        }
+
+        public static long PhysicalElevatedBytes(long physicalTotalBytes)
+        {
+            return Math.Max(TwoGibibytes, Percentage(physicalTotalBytes, 15));
+        }
+
+        public static long CommitCriticalBytes(long commitLimitBytes)
+        {
+            return Math.Max(OneGibibyte, Percentage(commitLimitBytes, 5));
+        }
+
+        public static long CommitElevatedBytes(long commitLimitBytes)
+        {
+            return Math.Max(TwoGibibytes, Percentage(commitLimitBytes, 10));
+        }
+
         public static DiagnosticPressureLevel Classify(DiagnosticSnapshot snapshot)
         {
             string ignored;
@@ -80,18 +100,10 @@ namespace Boostix
 
             long available = Math.Max(0, snapshot.PhysicalAvailableBytes);
             long commitHeadroom = Math.Max(0, snapshot.CommitHeadroomBytes);
-            long physicalCritical = Math.Max(
-                OneGibibyte,
-                Percentage(snapshot.PhysicalTotalBytes, 8));
-            long physicalElevated = Math.Max(
-                TwoGibibytes,
-                Percentage(snapshot.PhysicalTotalBytes, 15));
-            long commitCritical = Math.Max(
-                OneGibibyte,
-                Percentage(snapshot.CommitLimitBytes, 5));
-            long commitElevated = Math.Max(
-                TwoGibibytes,
-                Percentage(snapshot.CommitLimitBytes, 10));
+            long physicalCritical = PhysicalCriticalBytes(snapshot.PhysicalTotalBytes);
+            long physicalElevated = PhysicalElevatedBytes(snapshot.PhysicalTotalBytes);
+            long commitCritical = CommitCriticalBytes(snapshot.CommitLimitBytes);
+            long commitElevated = CommitElevatedBytes(snapshot.CommitLimitBytes);
 
             if (available <= physicalCritical)
             {

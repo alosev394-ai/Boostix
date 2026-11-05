@@ -276,6 +276,21 @@ namespace Boostix
                     PagefileRecommendationCode.PreferSystemManaged,
                 "A fixed page file did not receive system-managed guidance.");
 
+            PagefileAssessment fixedLarge = PagefileAdvisor.Assess(
+                new PagefileConfigurationSnapshot(
+                    DateTime.UtcNow,
+                    PagefileConfigurationKind.Fixed,
+                    32 * GiB,
+                    32 * GiB,
+                    16 * GiB,
+                    40 * GiB,
+                    200 * GiB,
+                    ""));
+            Assert(
+                fixedLarge.Recommendation == PagefileRecommendationCode.None &&
+                !fixedLarge.RequiresAttention,
+                "A fixed page file twice the size of memory was flagged.");
+
             PagefileAssessment lowDisk = PagefileAdvisor.Assess(
                 CreatePagefile(PagefileConfigurationKind.SystemManaged, 2 * GiB));
             Assert(

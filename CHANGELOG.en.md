@@ -3,6 +3,29 @@
 The English interface arrived in 3.2.0. Earlier versions are described in
 [`CHANGELOG.md`](CHANGELOG.md), in Russian.
 
+## 5.1.0 — 2026-11-06
+
+### Fixes
+
+- Boostix no longer takes resources from the game. In 5.0 the stage kept
+  redrawing: the window behind a game used a fifth of a processor core, and
+  the open stage almost half. Now the picture settles and stops, and the load
+  is close to zero.
+- The debrief no longer mixes up memory and video memory. If only video memory
+  ran out, it says so.
+- The page file tip appears only when the page file really is in the way: a
+  fixed one at least the size of your memory now counts as fine.
+- After a normal exit from a game the debrief no longer mentions a Windows
+  event it could not find.
+- The switch on the stage is now called Auto Boost, as in the hints.
+
+### New
+
+- Who took the memory: the debrief shows which programs held the most memory
+  at the worst moment, and the tip says what to close before the next game.
+- What's new tells you about everything you missed if you updated across
+  several versions at once.
+
 ## 5.0.0 — 2026-11-05
 
 ### New

@@ -318,6 +318,7 @@ namespace Boostix
             get { return L.T("ВОССТАНОВЛЕНИЕ ПЛАНА ПИТАНИЯ"); }
         }
         private const int SessionPowerPlanShutdownGraceMilliseconds = 500;
+        private const int MemoryHogCaptureSeconds = 60;
         private const int MonitorDefaultToNearest = 2;
         private const int SwpNoActivate = 0x0010;
         private const int SwpNoZOrder = 0x0004;
@@ -502,6 +503,7 @@ namespace Boostix
         private BoostPreflightReport latestPreflight;
         private DiagnosticSnapshot latestDiagnosticSnapshot;
         private BoostSessionReport currentSession;
+        private DateTime lastMemoryHogCaptureUtc = DateTime.MinValue;
         private BoostSessionReport lastSession;
         private List<BoostSessionReport> sessionHistory =
             new List<BoostSessionReport>();
@@ -2080,7 +2082,7 @@ namespace Boostix
                 }
                 if (show)
                 {
-                    IList<string> highlights = WhatsNewContent.LoadHighlights(version);
+                    IList<string> highlights = WhatsNewContent.LoadHighlightsSince(lastSeen, version);
                     if (highlights.Count > 0)
                     {
                         whatsNewOverlay.Show(version, highlights);
@@ -2980,6 +2982,7 @@ namespace Boostix
             }
 
             SessionGuardPressureEvaluation evaluation;
+            string memoryHogTarget = null;
             lock (activeMaintenanceSync)
             {
                 if (!IsActiveMaintenanceGeneration(generation))
@@ -3008,6 +3011,14 @@ namespace Boostix
                             : Math.Min(
                                 currentSession.MinimumCommitHeadroomBytes,
                                 sample.CommitHeadroomBytes);
+                    if (sample.AvailablePhysicalBytes <= currentSession.MinimumAvailableMemoryBytes &&
+                        sample.AvailablePhysicalBytes <=
+                            DiagnosticPressureClassifier.PhysicalElevatedBytes(sample.TotalPhysicalBytes) &&
+                        DateTime.UtcNow - lastMemoryHogCaptureUtc >= TimeSpan.FromSeconds(MemoryHogCaptureSeconds))
+                    {
+                        lastMemoryHogCaptureUtc = DateTime.UtcNow;
+                        memoryHogTarget = currentSession.TargetName ?? string.Empty;
+                    }
                     if (sample.TargetMetricsAvailable)
                     {
                         currentSession.PeakTargetWorkingSetBytes = Math.Max(
@@ -3031,17 +3042,56 @@ namespace Boostix
                 }
             }
 
+            if (memoryHogTarget != null)
+            {
+                CaptureMemoryHogs(generation, memoryHogTarget);
+            }
             if (evaluation.Decision ==
                 SessionGuardPressureDecision.CriticalAlertRaised)
             {
                 RecordSessionAction(
                     L.T("SESSION GUARD — ДАВЛЕНИЕ ПАМЯТИ"),
-                    L.T("Памяти долго не хватает. ") +
-                    L.T("Закройте лишние программы или увеличьте ") +
-                    L.T("файл подкачки."),
+                    DescribeLongMemoryPressure(sample.CommitHeadroomBytes, sample.CommitLimitBytes),
                     BoostActionOutcome.Skipped);
             }
             UpdateLiveSessionSummaryOnDispatcher();
+        }
+
+        /// <summary>
+        /// Off the sampling path: at a new memory low, at most once a minute,
+        /// the session remembers which programs held the memory.
+        /// </summary>
+        private void CaptureMemoryHogs(int generation, string targetName)
+        {
+            Task.Run(delegate
+            {
+                List<BoostMemoryHog> hogs = MemoryHogRanking.Capture(targetName);
+                lock (activeMaintenanceSync)
+                {
+                    if (hogs.Count > 0 &&
+                        currentSession != null &&
+                        IsActiveMaintenanceGeneration(generation))
+                    {
+                        currentSession.MemoryHogs = hogs;
+                    }
+                }
+            });
+        }
+
+        /// <summary>
+        /// A bigger page file helps only near the commit limit: with room to
+        /// spare the memory is simply taken by other programs.
+        /// </summary>
+        internal static string DescribeLongMemoryPressure(long commitHeadroomBytes, long commitLimitBytes)
+        {
+            if (commitLimitBytes > 0 &&
+                commitHeadroomBytes > DiagnosticPressureClassifier.CommitElevatedBytes(commitLimitBytes))
+            {
+                return L.T("Памяти долго не хватает. ") + L.T("Закройте лишние программы.");
+            }
+            return L.T("Памяти долго не хватает. ") +
+                L.T("Закройте лишние программы или увеличьте ") +
+                L.T("файл подкачки.");
         }
 
         private void HandleSessionGuardHeavySample(
@@ -3922,7 +3972,9 @@ namespace Boostix
                     (string.IsNullOrWhiteSpace(resolutionError)
                         ? string.Empty
                         : " " + resolutionError),
-                    BoostActionOutcome.Skipped);
+                    correlation != null && correlation.Status == CrashCorrelationStatus.NoEvidence
+                        ? BoostActionOutcome.AlreadyOptimal
+                        : BoostActionOutcome.Skipped);
             }
             try { BoostSessionReportStore.Save(report); }
             catch (Exception ex)

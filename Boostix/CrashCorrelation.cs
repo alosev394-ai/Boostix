@@ -376,9 +376,7 @@ namespace Boostix
                     Status = CrashCorrelationStatus.NoEvidence,
                     ProcessId = target.ProcessId,
                     ProcessName = NormalizeProcessName(target.ProcessName),
-                    Summary =
-                        L.T("Рядом с завершением выбранного процесса не найдено подходящее событие Windows. ") +
-                        L.T("Причина завершения не определена.")
+                    Summary = L.T("Сбоев этой игры в журнале Windows нет.")
                 };
             }
 

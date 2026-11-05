@@ -762,6 +762,20 @@ namespace Boostix
                     "Free space on the system drive before a long gaming session.");
             }
 
+            // A fixed file at least the size of memory leaves as much commit
+            // room as Windows would give itself.
+            if (snapshot.Kind == PagefileConfigurationKind.Fixed &&
+                snapshot.InstalledPhysicalMemoryBytes > 0 &&
+                Math.Max(snapshot.ConfiguredBytes, snapshot.AllocatedBytes) >=
+                    snapshot.InstalledPhysicalMemoryBytes)
+            {
+                return NewAssessment(
+                    PagefileRecommendationCode.None,
+                    false,
+                    "The fixed page file is at least as large as installed memory.",
+                    "No page-file change is recommended.");
+            }
+
             if (snapshot.Kind == PagefileConfigurationKind.Fixed)
             {
                 return NewAssessment(

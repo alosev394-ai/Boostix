@@ -690,8 +690,12 @@ namespace Boostix
             chartCard.Child = chartStack;
             body.Children.Add(chartCard);
 
-            var verdicts = new UniformGrid { Columns = 3, Margin = new Thickness(0, 8, 0, 0) };
-            foreach (SessionVerdict verdict in SessionVerdicts.Describe(report))
+            // The headline is already at the top of the page.
+            List<SessionVerdict> others = SessionVerdicts.Describe(report)
+                .Where(verdict => headline == null || verdict.Title != headline.Title)
+                .ToList();
+            var verdicts = new UniformGrid { Columns = others.Count, Margin = new Thickness(0, 8, 0, 0) };
+            foreach (SessionVerdict verdict in others)
             {
                 FrameworkElement row = BuildVerdictRow(verdict);
                 row.Margin = new Thickness(0, 10, 22, 0);

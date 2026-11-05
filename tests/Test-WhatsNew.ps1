@@ -46,6 +46,28 @@ if (-not $parse -or -not $shouldShow -or -not $load) {
 }
 $version = [string]$assembly.GetType('Boostix.Branding.ProductBrand', $true).GetField('ProductVersion', $allStatic).GetRawConstantValue()
 
+# Someone who skipped versions hears about all of them, newest first, and
+# someone who updated from the previous one only about the new one.
+$since = $contentType.GetMethod('ParseHighlightsSince', $allStatic)
+$skipped = @(
+    '## 5.1.0 - 2030-02-02', '', '- Patch item.', '',
+    '## 5.0.0 - 2030-02-01', '', '- Big item.', '',
+    '## 4.0.0 - 2030-01-01', '', '- Older item.', '',
+    '## 3.2.0 - 2029-12-01', '', '- Already seen.'
+) -join "`r`n"
+$fromOld = @($since.Invoke($null, [object[]]@([string]$skipped, [string]'3.2.0', [string]'5.1.0')))
+if (($fromOld -join '|') -cne 'Patch item.|Big item.|Older item.') {
+    throw "Skipped versions gave: $($fromOld -join '|')"
+}
+$fromPrevious = @($since.Invoke($null, [object[]]@([string]$skipped, [string]'5.0.0', [string]'5.1.0')))
+if (($fromPrevious -join '|') -cne 'Patch item.') {
+    throw "The previous version gave: $($fromPrevious -join '|')"
+}
+$fromUnknown = @($since.Invoke($null, [object[]]@([string]$skipped, [string]'', [string]'5.1.0')))
+if (($fromUnknown -join '|') -cne 'Patch item.') {
+    throw "An unknown earlier version gave: $($fromUnknown -join '|')"
+}
+
 # Parsing: only the requested version, bullets joined across wrapped lines,
 # markdown emphasis, code and links reduced to plain text.
 $changelog = @(

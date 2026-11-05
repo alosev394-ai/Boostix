@@ -249,7 +249,9 @@ try {
             if ($process.HasExited) { return $null }
             # A collapsed WPF card stays in the UIA tree, reported offscreen.
             foreach ($text in $window.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)) {
-                if ($text.Current.Name.Contains($Fragment) -and -not $text.Current.IsOffscreen) { return $text }
+                # An element that is going away can report no name at all.
+                $name = $text.Current.Name
+                if ($name -and $name.Contains($Fragment) -and -not $text.Current.IsOffscreen) { return $text }
             }
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $until)

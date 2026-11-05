@@ -22,9 +22,13 @@ namespace Boostix
     {
         internal const string ChangelogResourceName = "Boostix.Changelog.md";
         internal const string EnglishChangelogResourceName = "Boostix.Changelog.en.md";
+        private const int MaximumHighlights = 14;
         private static readonly Regex LinkPattern = new Regex(
             @"\[(?<text>[^\]]+)\]\([^)]*\)",
             RegexOptions.CultureInvariant);
+        private static readonly Regex VersionHeading = new Regex(
+            @"^## (?<version>\d+\.\d+\.\d+)",
+            RegexOptions.CultureInvariant | RegexOptions.Multiline);
 
         /// <summary>
         /// The English changelog for the English interface; the Russian one
@@ -32,18 +36,27 @@ namespace Boostix
         /// </summary>
         internal static IList<string> LoadHighlights(string version)
         {
+            return LoadHighlightsSince(null, version);
+        }
+
+        /// <summary>
+        /// What changed since the version this user last ran: someone who
+        /// skipped a big release must not hear only about the small one after it.
+        /// </summary>
+        internal static IList<string> LoadHighlightsSince(string lastSeenVersion, string version)
+        {
             if (L.Language == L.English)
             {
-                IList<string> english = LoadHighlightsFrom(EnglishChangelogResourceName, version);
+                IList<string> english = LoadHighlightsFrom(EnglishChangelogResourceName, lastSeenVersion, version);
                 if (english.Count > 0)
                 {
                     return english;
                 }
             }
-            return LoadHighlightsFrom(ChangelogResourceName, version);
+            return LoadHighlightsFrom(ChangelogResourceName, lastSeenVersion, version);
         }
 
-        private static IList<string> LoadHighlightsFrom(string resourceName, string version)
+        private static IList<string> LoadHighlightsFrom(string resourceName, string lastSeenVersion, string version)
         {
             try
             {
@@ -56,7 +69,7 @@ namespace Boostix
                     }
                     using (var reader = new StreamReader(stream, Encoding.UTF8, true))
                     {
-                        return ParseHighlights(reader.ReadToEnd(), version);
+                        return ParseHighlightsSince(reader.ReadToEnd(), lastSeenVersion, version);
                     }
                 }
             }
@@ -65,6 +78,33 @@ namespace Boostix
                 CrashLog.Write("Could not read the embedded changelog.", ex);
                 return new List<string>();
             }
+        }
+
+        /// <summary>
+        /// The items of every version after the last seen one, newest first.
+        /// An unknown last version means only the current one.
+        /// </summary>
+        internal static IList<string> ParseHighlightsSince(string changelog, string lastSeenVersion, string version)
+        {
+            Version lastSeen;
+            Version current;
+            if (string.IsNullOrWhiteSpace(changelog) ||
+                !Version.TryParse((lastSeenVersion ?? string.Empty).Trim(), out lastSeen) ||
+                !Version.TryParse(version ?? string.Empty, out current))
+            {
+                return ParseHighlights(changelog, version);
+            }
+            var items = new List<string>();
+            foreach (Match heading in VersionHeading.Matches(changelog.Replace("\r\n", "\n")))
+            {
+                string text = heading.Groups["version"].Value;
+                Version candidate = Version.Parse(text);
+                if (candidate > lastSeen && candidate <= current && items.Count < MaximumHighlights)
+                {
+                    items.AddRange(ParseHighlights(changelog, text));
+                }
+            }
+            return items;
         }
 
         /// <summary>

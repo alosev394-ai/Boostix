@@ -688,6 +688,14 @@ namespace Boostix
                 TargetCrashCode = crashCode,
                 StopReason = L.T("Игра закрылась.")
             };
+            if (pressure == "Critical")
+            {
+                report.MemoryHogs = new List<BoostMemoryHog>
+                {
+                    new BoostMemoryHog { Name = "Firefox", Bytes = 3 * GiB + GiB / 8 },
+                    new BoostMemoryHog { Name = "Discord", Bytes = GiB * 2 / 3 }
+                };
+            }
             var random = new Random(seed);
             int dip = minutes * 60 * 2 / 5;
             int deepest = pressure == "Critical" ? 1700 : pressure == "Elevated" ? 2600 : 5200;
@@ -728,14 +736,29 @@ namespace Boostix
 
             long minimum = report.MinimumAvailableMemoryBytes;
             string pressure = report.WorstResourcePressure ?? string.Empty;
-            if (string.Equals(pressure, "Critical", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(pressure, "Critical", StringComparison.OrdinalIgnoreCase) &&
+                OnlyVideoMemoryRanOut(report))
+            {
+                verdicts.Add(new SessionVerdict
+                {
+                    Title = L.T("Видеопамять почти закончилась"),
+                    Detail = string.Format(
+                        CultureInfo.CurrentCulture,
+                        L.T("Пик: {0} из {1}. Обычной памяти хватало."),
+                        FormatGigabytes(report.PeakGpuDedicatedUsageBytes),
+                        FormatGigabytes(report.GpuDedicatedTotalBytes)),
+                    Tone = BoostixDesignTokens.Warning
+                });
+            }
+            else if (string.Equals(pressure, "Critical", StringComparison.OrdinalIgnoreCase))
             {
                 verdicts.Add(new SessionVerdict
                 {
                     Title = L.T("Памяти почти не осталось"),
-                    Detail = minimum > 0
+                    Detail = (minimum > 0
                         ? string.Format(CultureInfo.CurrentCulture, L.T("В худший момент свободно было {0}."), FormatGigabytes(minimum))
-                        : L.T("Windows почти исчерпала память во время игры."),
+                        : L.T("Windows почти исчерпала память во время игры.")) +
+                        DescribeHogs(report),
                     Tone = BoostixDesignTokens.Warning
                 });
             }
@@ -744,9 +767,10 @@ namespace Boostix
                 verdicts.Add(new SessionVerdict
                 {
                     Title = L.T("Памяти было впритык"),
-                    Detail = minimum > 0
+                    Detail = (minimum > 0
                         ? string.Format(CultureInfo.CurrentCulture, L.T("Минимум свободной памяти: {0}."), FormatGigabytes(minimum))
-                        : L.T("Иногда памяти было меньше, чем хотелось бы."),
+                        : L.T("Иногда памяти было меньше, чем хотелось бы.")) +
+                        DescribeHogs(report),
                     Tone = BoostixDesignTokens.Warning
                 });
             }
@@ -785,20 +809,69 @@ namespace Boostix
             return verdicts;
         }
 
+        private static bool IsVideoMemoryFull(BoostSessionReport report)
+        {
+            long gpuTotal = report.GpuDedicatedTotalBytes;
+            return gpuTotal > 0 && report.PeakGpuDedicatedUsageBytes >= gpuTotal / 100L * 95L;
+        }
+
+        /// <summary>
+        /// The worst pressure of a session can come from the graphics card
+        /// alone. Reports without the memory size cannot tell, so they stay
+        /// with the memory verdict.
+        /// </summary>
+        private static bool OnlyVideoMemoryRanOut(BoostSessionReport report)
+        {
+            if (!IsVideoMemoryFull(report) ||
+                report.PhysicalMemoryTotalBytes <= 0 ||
+                report.MinimumAvailableMemoryBytes <= 0)
+            {
+                return false;
+            }
+            bool memoryRanOut = report.MinimumAvailableMemoryBytes <=
+                DiagnosticPressureClassifier.PhysicalCriticalBytes(report.PhysicalMemoryTotalBytes);
+            bool commitRanOut = report.CommitLimitBytes > 0 &&
+                report.MinimumCommitHeadroomBytes <=
+                    DiagnosticPressureClassifier.CommitCriticalBytes(report.CommitLimitBytes);
+            return !memoryRanOut && !commitRanOut;
+        }
+
+        private static string DescribeHogs(BoostSessionReport report)
+        {
+            if (report.MemoryHogs == null || report.MemoryHogs.Count == 0)
+            {
+                return string.Empty;
+            }
+            return " " + string.Format(
+                CultureInfo.CurrentCulture,
+                L.T("Больше всего занимали: {0}."),
+                string.Join(", ", report.MemoryHogs.Select(hog => hog.Name + " " + FormatGigabytes(hog.Bytes))));
+        }
+
         private static SessionVerdict Advice(BoostSessionReport report)
         {
             string pressure = report.WorstResourcePressure ?? string.Empty;
             bool tight = string.Equals(pressure, "Critical", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pressure, "Elevated", StringComparison.OrdinalIgnoreCase);
-            long gpuTotal = report.GpuDedicatedTotalBytes;
-            bool videoFull = gpuTotal > 0 &&
-                report.PeakGpuDedicatedUsageBytes >= gpuTotal / 100L * 95L;
-            if (videoFull)
+            if (IsVideoMemoryFull(report))
             {
                 return new SessionVerdict
                 {
                     Title = L.T("Совет: снизьте текстуры"),
                     Detail = L.T("Видеопамять заполнялась почти до конца. Текстуры на ступень ниже уберут подтормаживания."),
+                    Tone = BoostixDesignTokens.Data
+                };
+            }
+            if (tight && report.MemoryHogs != null && report.MemoryHogs.Count > 0)
+            {
+                BoostMemoryHog biggest = report.MemoryHogs[0];
+                return new SessionVerdict
+                {
+                    Title = string.Format(CultureInfo.CurrentCulture, L.T("Совет: закройте {0}"), biggest.Name),
+                    Detail = string.Format(
+                        CultureInfo.CurrentCulture,
+                        L.T("Перед следующей игрой это освободит около {0}."),
+                        FormatGigabytes(biggest.Bytes)),
                     Tone = BoostixDesignTokens.Data
                 };
             }
