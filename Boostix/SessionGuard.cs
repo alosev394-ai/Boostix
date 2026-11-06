@@ -885,6 +885,56 @@ namespace Boostix
     /// <summary>
     /// Defines safe sampling cadences and a bounded history size.
     /// </summary>
+    /// <summary>
+    /// Reads a process's memory through a limited handle. Process.WorkingSet64
+    /// and PrivateMemorySize64 read the whole process list for these two
+    /// numbers, about 4 ms a time on a busy PC, right behind a running game.
+    /// </summary>
+    internal static class ProcessMemoryReader
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ProcessMemoryCounters
+        {
+            public uint Size;
+            public uint PageFaultCount;
+            public UIntPtr PeakWorkingSetSize;
+            public UIntPtr WorkingSetSize;
+            public UIntPtr QuotaPeakPagedPoolUsage;
+            public UIntPtr QuotaPagedPoolUsage;
+            public UIntPtr QuotaPeakNonPagedPoolUsage;
+            public UIntPtr QuotaNonPagedPoolUsage;
+            public UIntPtr PagefileUsage;
+            public UIntPtr PeakPagefileUsage;
+            public UIntPtr PrivateUsage;
+        }
+
+        [DllImport("psapi.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetProcessMemoryInfo(
+            IntPtr processHandle,
+            ref ProcessMemoryCounters counters,
+            uint size);
+
+        internal static bool TryRead(
+            IntPtr limitedHandle,
+            out long workingSetBytes,
+            out long privateBytes)
+        {
+            workingSetBytes = 0;
+            privateBytes = 0;
+            var counters = new ProcessMemoryCounters();
+            counters.Size = (uint)Marshal.SizeOf(typeof(ProcessMemoryCounters));
+            if (limitedHandle == IntPtr.Zero ||
+                !GetProcessMemoryInfo(limitedHandle, ref counters, counters.Size))
+            {
+                return false;
+            }
+            workingSetBytes = (long)counters.WorkingSetSize.ToUInt64();
+            privateBytes = (long)counters.PrivateUsage.ToUInt64();
+            return true;
+        }
+    }
+
     internal sealed class SessionGuardSamplerOptions
     {
         public SessionGuardSamplerOptions(
@@ -1750,8 +1800,14 @@ namespace Boostix
                         }
 
                         TimeSpan processorTime = process.TotalProcessorTime;
-                        privateBytes = Math.Max(0L, process.PrivateMemorySize64);
-                        workingSet = Math.Max(0L, process.WorkingSet64);
+                        if (!ProcessMemoryReader.TryRead(
+                                limitedHandle,
+                                out workingSet,
+                                out privateBytes))
+                        {
+                            privateBytes = Math.Max(0L, process.PrivateMemorySize64);
+                            workingSet = Math.Max(0L, process.WorkingSet64);
+                        }
 
                         IoCountersNative io;
                         bool ioAvailable = GetProcessIoCounters(

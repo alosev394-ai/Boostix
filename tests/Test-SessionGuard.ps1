@@ -107,7 +107,48 @@ namespace Boostix
             TestSamplingCadenceAndDisposal();
             TestBlockingHeavyStopAndDeferredDisposal();
             TestDefensiveValidation();
+            TestProcessMemoryReader();
             return "Session Guard regression harness passed.";
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        // Process.WorkingSet64 reads the whole process list for two numbers,
+        // about 4 ms a time behind a running game. The same figures come from
+        // the limited handle the sampler already holds.
+        private static void TestProcessMemoryReader()
+        {
+            using (Process self = Process.GetCurrentProcess())
+            {
+                IntPtr limited = OpenProcess(0x1000, false, self.Id);
+                Assert(limited != IntPtr.Zero, "A limited handle was not granted.");
+                try
+                {
+                    long workingSet;
+                    long privateBytes;
+                    Assert(
+                        ProcessMemoryReader.TryRead(limited, out workingSet, out privateBytes),
+                        "Memory could not be read through a limited handle.");
+                    self.Refresh();
+                    Assert(
+                        Math.Abs(workingSet - self.WorkingSet64) < self.WorkingSet64 / 2,
+                        "The working set differs from what Windows reports.");
+                    Assert(
+                        Math.Abs(privateBytes - self.PrivateMemorySize64) < self.PrivateMemorySize64 / 2,
+                        "Private memory differs from what Windows reports.");
+                    Assert(
+                        !ProcessMemoryReader.TryRead(IntPtr.Zero, out workingSet, out privateBytes),
+                        "An empty handle produced memory figures.");
+                }
+                finally
+                {
+                    CloseHandle(limited);
+                }
+            }
         }
 
         private static void TestRingBuffer()

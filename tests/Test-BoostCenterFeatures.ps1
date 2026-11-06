@@ -54,7 +54,7 @@ foreach ($required in @(
     '"Boostix.Target.Select"',
     'gameTargetService.EnumerateCandidates()',
     'gameTargetService.TryResolve(',
-    'TryMatchSavedAutoBoostProfile(',
+    'TryFindRunningAutoBoostGame(',
     'gameProfileStore.SetAutoBoost('
 )) {
     if (-not $program.Contains($required)) {
@@ -389,7 +389,7 @@ foreach ($required in @(
     'current.StartTimeUtc != identity.ProcessStartTimeUtc',
     'GameExecutablePath.AreEquivalent(',
     'internal bool TryResolve(',
-    'internal bool TryMatchSavedAutoBoostProfile(',
+    'internal bool TryFindRunningAutoBoostGame(',
     'internal bool SetAutoBoost(string executablePath, bool enabled)',
     'TryGetAutoBoostProfile(',
     'StringComparison.OrdinalIgnoreCase',

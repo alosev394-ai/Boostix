@@ -243,6 +243,108 @@ if (-not $savedHogs -or $savedHogs.Count -ne 2 -or
     throw 'The memory hogs did not survive saving the report.'
 }
 
+# A game from Steam needs Steam running: of the first four real debriefs on 5.1
+# two named its web helper as the biggest program to close.
+function New-HogReport {
+    param([string]$GamePath, [long]$GpuPeak, [object[]]$Hogs)
+    $report = New-MemoryReport ([long](0.4 * $gib)) $GpuPeak
+    $reportType.GetField('TargetExecutablePath', $instance).SetValue($report, $GamePath)
+    $list = [Activator]::CreateInstance([Collections.Generic.List``1].MakeGenericType($hogType))
+    foreach ($named in $Hogs) {
+        $item = [Activator]::CreateInstance($hogType, $true)
+        $hogType.GetField('Name').SetValue($item, [string]$named[0])
+        $hogType.GetField('Bytes').SetValue($item, [long]$named[1] * 1048576L)
+        $list.Add($item)
+    }
+    $reportType.GetField('MemoryHogs', $instance).SetValue($report, $list)
+    return $report
+}
+$steamGame = 'D:\SteamLibrary\steamapps\common\Some Game\game.exe'
+$steamHelper = 'Steam Client WebHelper'
+$advice = Get-VerdictText (Get-Verdicts (New-HogReport $steamGame (4 * $gib) @(@($steamHelper, 1800), @('Discord', 1300))))[2] 'Title'
+if ($advice.Contains('Steam') -or -not $advice.Contains('Discord')) {
+    throw "With a Steam game the advice was: $advice"
+}
+$advice = Get-VerdictText (Get-Verdicts (New-HogReport 'C:\Games\Other\game.exe' (4 * $gib) @(@($steamHelper, 1800), @('Discord', 1300))))[2] 'Title'
+if (-not $advice.Contains('Steam')) {
+    throw "Without a Steam game Steam can be closed, but the advice was: $advice"
+}
+$advice = Get-VerdictText (Get-Verdicts (New-HogReport $steamGame (4 * $gib) @(,@($steamHelper, 1800))))[2] 'Title'
+if ($advice.Contains('Steam')) {
+    throw "Only Steam held memory and the advice was: $advice"
+}
+
+# All four real sessions ran short of both memories. The texture tip must not
+# hide what to close; with plenty of ordinary memory there is nothing to close.
+$bothTip = Get-VerdictText (Get-Verdicts (New-HogReport $steamGame ([long](7.9 * $gib)) @(,@('Firefox', 2100))))[2] 'Detail'
+if (-not $bothTip.Contains('Firefox')) {
+    throw 'With both memories short the advice does not say what to close.'
+}
+$videoOnlyReport = New-HogReport $steamGame ([long](7.9 * $gib)) @(,@('Firefox', 2100))
+$reportType.GetField('MinimumAvailableMemoryBytes', $instance).SetValue($videoOnlyReport, 6 * $gib)
+if ((Get-VerdictText (Get-Verdicts $videoOnlyReport)[2] 'Detail').Contains('Firefox')) {
+    throw 'With only the video memory short the advice must not ask to close a program.'
+}
+
+# While the game loads there is still time to close something: all seven real
+# sessions so far ran short of memory.
+$forecast = $assembly.GetType('Boostix.MemoryForecast', $true)
+$typicalOf = $forecast.GetMethod('TypicalGameBytes', $flags)
+$describeForecast = $forecast.GetMethod('Describe', $flags)
+function New-PlayedReport {
+    param([string]$GamePath, [long]$Peak)
+    $report = New-Report 60 '' 'Critical'
+    $reportType.GetField('TargetExecutablePath', $instance).SetValue($report, $GamePath)
+    $reportType.GetField('PeakTargetWorkingSetBytes', $instance).SetValue($report, $Peak)
+    return $report
+}
+$played = [Activator]::CreateInstance([Collections.Generic.List``1].MakeGenericType($reportType))
+foreach ($peak in @(5, 7, 6, 6, 6, 9)) {
+    $played.Add((New-PlayedReport $steamGame ($peak * $gib)))
+}
+$played.Add((New-PlayedReport 'C:\Games\Other\game.exe' (12 * $gib)))
+$typical = [long]$typicalOf.Invoke($null, [object[]]@($played, $steamGame.ToUpperInvariant()))
+if ($typical -ne 7 * $gib) {
+    throw "The typical size of a game must be the largest of its last five sessions, got $typical."
+}
+if ([long]$typicalOf.Invoke($null, [object[]]@($played, 'C:\Never\played.exe')) -ne 0) {
+    throw 'A game never played has no typical size.'
+}
+
+$forecastHogs = (New-HogReport $steamGame (4 * $gib) @(@($steamHelper, 1800), @('Firefox', 1300)))
+$forecastList = $reportType.GetField('MemoryHogs', $instance).GetValue($forecastHogs)
+function Get-Forecast {
+    param([long]$Free, [long]$GameNow)
+    $forecastArguments = New-Object 'object[]' 6
+    $forecastArguments[0] = $Free
+    $forecastArguments[1] = 7 * $gib
+    $forecastArguments[2] = $GameNow
+    $forecastArguments[3] = 'cs2'
+    $forecastArguments[4] = $forecastList
+    $forecastArguments[5] = $steamGame
+    return [string]$describeForecast.Invoke($null, $forecastArguments)
+}
+$warning = Get-Forecast (4 * $gib) 0
+if (-not $warning.Contains('cs2') -or -not $warning.Contains('Firefox') -or $warning.Contains('Steam')) {
+    throw "The memory warning read: $warning"
+}
+if (Get-Forecast (8 * $gib) 0) {
+    throw 'With enough free memory there is nothing to warn about.'
+}
+if (Get-Forecast (4 * $gib) (5 * $gib)) {
+    throw 'What the game already holds must not count against it.'
+}
+
+# 12 MB free is not "0,0 GB": that reads like a broken number.
+$formatGb = $assembly.GetType('Boostix.SessionVerdicts', $true).GetMethod('FormatGigabytes', $flags)
+$tiny = [string]$formatGb.Invoke($null, [object[]]@([long](12 * 1048576L)))
+if (-not $tiny.StartsWith('<')) {
+    throw "12 MB reads as '$tiny'."
+}
+if (([string]$formatGb.Invoke($null, [object[]]@([long](0.4 * $gib)))).StartsWith('<')) {
+    throw '0.4 GB must stay a plain number.'
+}
+
 # The page file is only worth a word when the commit limit is actually close.
 $window = $assembly.GetType('Boostix.BoostWindow', $true)
 $pressureText = $window.GetMethod('DescribeLongMemoryPressure', $flags)
@@ -252,6 +354,23 @@ if (([string]$pressureText.Invoke($null, [object[]]@([long](18 * $gib), [long](4
 }
 if (-not ([string]$pressureText.Invoke($null, [object[]]@([long](1 * $gib), [long](24 * $gib)))).Contains($pageFileWord)) {
     throw 'Near the commit limit the advice must mention the page file.'
+}
+
+# Every session measures what Boostix itself cost, so the claim can be checked.
+$ownLoad = $window.GetMethod('DescribeOwnLoad', $flags)
+$ownLine = [string]$ownLoad.Invoke($null, [object[]]@([TimeSpan]::FromSeconds(36), [TimeSpan]::FromHours(1)))
+if ($ownLine -notmatch '1[.,]0') {
+    throw "36 s of processor in an hour read as: $ownLine"
+}
+if ([string]$ownLoad.Invoke($null, [object[]]@([TimeSpan]::FromSeconds(1), [TimeSpan]::FromSeconds(20)))) {
+    throw 'A session of seconds has no meaningful load figure.'
+}
+
+# The log said programs were closed even when nothing was. It only reports what
+# the preparation result lists.
+$programSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\Program.cs'))
+if ($programSource.Contains((Convert-UiName '0JfQsNC60YDRi9C70Lgg0L/RgNC+0LPRgNCw0LzQvNGLLCDQvtGC0LzQtdGH0LXQvdC90YvQtQ=='))) {
+    throw 'The session log claims closed programs without reading the result.'
 }
 
 # One name for one switch: the hints say Auto, so the switch does too.

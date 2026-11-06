@@ -54,7 +54,22 @@ namespace Boostix
     {
         IList<GameProcessSnapshot> CaptureAll();
 
+        /// <summary>
+        /// Inspects only the processes with these names; the others are not
+        /// opened at all.
+        /// </summary>
+        IList<GameProcessSnapshot> CaptureNamed(ICollection<string> processNames);
+
         bool TryCapture(
+            int processId,
+            out GameProcessSnapshot snapshot,
+            out string error);
+
+        /// <summary>
+        /// Who the process is, without its window. Cheap enough for a check
+        /// every second: no process list is read and no window is walked.
+        /// </summary>
+        bool TryCaptureIdentity(
             int processId,
             out GameProcessSnapshot snapshot,
             out string error);
@@ -83,7 +98,46 @@ namespace Boostix
                 {
                     GameProcessSnapshot snapshot;
                     string ignored;
-                    if (TryCaptureProcess(process, out snapshot, out ignored))
+                    if (TryCaptureProcess(process, true, out snapshot, out ignored))
+                    {
+                        snapshots.Add(snapshot);
+                    }
+                }
+            }
+
+            return snapshots;
+        }
+
+        public IList<GameProcessSnapshot> CaptureNamed(ICollection<string> processNames)
+        {
+            List<GameProcessSnapshot> snapshots =
+                new List<GameProcessSnapshot>();
+            if (processNames == null || processNames.Count == 0)
+            {
+                return snapshots;
+            }
+
+            HashSet<string> wanted = new HashSet<string>(
+                processNames,
+                StringComparer.OrdinalIgnoreCase);
+            Process[] processes;
+            try
+            {
+                processes = Process.GetProcesses();
+            }
+            catch
+            {
+                return snapshots;
+            }
+
+            foreach (Process process in processes)
+            {
+                using (process)
+                {
+                    GameProcessSnapshot snapshot;
+                    string ignored;
+                    if (wanted.Contains(process.ProcessName) &&
+                        TryCaptureProcess(process, true, out snapshot, out ignored))
                     {
                         snapshots.Add(snapshot);
                     }
@@ -95,6 +149,23 @@ namespace Boostix
 
         public bool TryCapture(
             int processId,
+            out GameProcessSnapshot snapshot,
+            out string error)
+        {
+            return TryCaptureById(processId, true, out snapshot, out error);
+        }
+
+        public bool TryCaptureIdentity(
+            int processId,
+            out GameProcessSnapshot snapshot,
+            out string error)
+        {
+            return TryCaptureById(processId, false, out snapshot, out error);
+        }
+
+        private static bool TryCaptureById(
+            int processId,
+            bool includeWindow,
             out GameProcessSnapshot snapshot,
             out string error)
         {
@@ -111,7 +182,7 @@ namespace Boostix
             {
                 using (Process process = Process.GetProcessById(processId))
                 {
-                    return TryCaptureProcess(process, out snapshot, out error);
+                    return TryCaptureProcess(process, includeWindow, out snapshot, out error);
                 }
             }
             catch (ArgumentException)
@@ -138,6 +209,7 @@ namespace Boostix
 
         private static bool TryCaptureProcess(
             Process process,
+            bool includeWindow,
             out GameProcessSnapshot snapshot,
             out string error)
         {
@@ -154,10 +226,25 @@ namespace Boostix
 
                 DateTime startBefore = process.StartTime.ToUniversalTime();
                 int processId = process.Id;
-                int sessionId = process.SessionId;
-                string processName = process.ProcessName ?? string.Empty;
                 string executablePath =
                     GameExecutablePath.GetProcessImagePath(process);
+                if (!includeWindow)
+                {
+                    // Process.SessionId and ProcessName read the whole process
+                    // list, about 4 ms on a busy PC.
+                    snapshot = new GameProcessSnapshot(
+                        processId,
+                        startBefore,
+                        executablePath,
+                        Path.GetFileNameWithoutExtension(executablePath),
+                        string.Empty,
+                        false,
+                        GameExecutablePath.GetSessionId(process));
+                    return true;
+                }
+
+                int sessionId = process.SessionId;
+                string processName = process.ProcessName ?? string.Empty;
                 IntPtr mainWindow = process.MainWindowHandle;
                 string windowTitle = process.MainWindowTitle ?? string.Empty;
 
@@ -280,6 +367,12 @@ namespace Boostix
             IntPtr process,
             out uint exitCode);
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ProcessIdToSessionId(
+            int processId,
+            out int sessionId);
+
         private const uint StillActive = 259;
         private const int ErrorInvalidParameter = 87;
 
@@ -342,6 +435,14 @@ namespace Boostix
             {
                 CloseHandle(handle);
             }
+        }
+
+        internal static int GetSessionId(Process process)
+        {
+            int sessionId;
+            return ProcessIdToSessionId(process.Id, out sessionId)
+                ? sessionId
+                : process.SessionId;
         }
 
         private static IntPtr OpenLimitedProcessHandle(Process process)
@@ -680,7 +781,7 @@ namespace Boostix
             }
 
             GameProcessSnapshot current;
-            if (!catalog.TryCapture(identity.ProcessId, out current, out error))
+            if (!catalog.TryCaptureIdentity(identity.ProcessId, out current, out error))
             {
                 return false;
             }
@@ -719,53 +820,55 @@ namespace Boostix
 
         /// <summary>
         /// Auto Boost is intentionally store-backed. A process can match only
-        /// a profile the user explicitly saved with AutoBoost enabled.
+        /// a profile the user explicitly saved with AutoBoost enabled. This
+        /// runs every few seconds for as long as Boostix sits at the clock, so
+        /// only processes named like a saved game are inspected, and with
+        /// nothing saved none at all. Two matches are never guessed between.
         /// </summary>
-        internal bool TryMatchSavedAutoBoostProfile(
-            int processId,
+        internal bool TryFindRunningAutoBoostGame(
             GameProfileStore profileStore,
             out GameTargetIdentity identity,
-            out GameProfile profile,
-            out string error)
+            out GameProfile profile)
         {
             identity = null;
             profile = null;
-            error = string.Empty;
 
             if (profileStore == null)
             {
-                error = "The game profile store is unavailable.";
                 return false;
             }
 
-            GameProcessSnapshot snapshot;
-            if (!catalog.TryCapture(processId, out snapshot, out error))
+            ICollection<string> names = profileStore.AutoBoostProcessNames();
+            if (names.Count == 0)
             {
                 return false;
             }
 
-            GameTargetIdentity selected;
-            if (!TryCreateIdentity(
-                    snapshot,
-                    true,
-                    out selected,
-                    out error))
+            foreach (GameProcessSnapshot snapshot in catalog.CaptureNamed(names))
             {
-                return false;
+                GameTargetIdentity selected;
+                GameProfile savedProfile;
+                string ignored;
+                if (!TryCreateIdentity(snapshot, true, out selected, out ignored) ||
+                    !profileStore.TryGetAutoBoostProfile(
+                        selected.ExecutablePath,
+                        out savedProfile))
+                {
+                    continue;
+                }
+
+                if (identity != null)
+                {
+                    identity = null;
+                    profile = null;
+                    return false;
+                }
+
+                identity = selected;
+                profile = savedProfile;
             }
 
-            GameProfile savedProfile;
-            if (!profileStore.TryGetAutoBoostProfile(
-                    selected.ExecutablePath,
-                    out savedProfile))
-            {
-                error = "Auto Boost is not enabled in a saved profile for this game.";
-                return false;
-            }
-
-            identity = selected;
-            profile = savedProfile;
-            return true;
+            return identity != null;
         }
 
         private bool TryCreateIdentity(
@@ -1387,6 +1490,27 @@ namespace Boostix
             profiles[profileIndex] = profiles[profileIndex].WithAutoBoost(enabled);
             Save(profiles);
             return true;
+        }
+
+        internal ICollection<string> AutoBoostProcessNames()
+        {
+            HashSet<string> names = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+            GameProfileLoadResult loaded = Load();
+            if (loaded.Corrupt)
+            {
+                return names;
+            }
+
+            foreach (GameProfile profile in loaded.Profiles)
+            {
+                if (profile.AutoBoost)
+                {
+                    names.Add(Path.GetFileNameWithoutExtension(profile.ExecutablePath));
+                }
+            }
+
+            return names;
         }
 
         internal bool TryGetAutoBoostProfile(

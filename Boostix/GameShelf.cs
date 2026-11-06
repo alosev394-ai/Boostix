@@ -848,23 +848,54 @@ namespace Boostix
                 string.Join(", ", report.MemoryHogs.Select(hog => hog.Name + " " + FormatGigabytes(hog.Bytes))));
         }
 
+        /// <summary>
+        /// A launcher cannot be closed while its game runs, so it stays in the
+        /// list of who held the memory but is never the advice.
+        /// </summary>
+        private static bool GameNeeds(string gamePath, BoostMemoryHog hog)
+        {
+            string path = gamePath ?? string.Empty;
+            string name = hog.Name ?? string.Empty;
+            return (path.IndexOf(@"\steamapps\", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                    name.StartsWith("Steam", StringComparison.OrdinalIgnoreCase)) ||
+                (path.IndexOf(@"\Epic Games\", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                    name.StartsWith("Epic", StringComparison.OrdinalIgnoreCase));
+        }
+
+        internal static BoostMemoryHog BiggestClosable(
+            IEnumerable<BoostMemoryHog> hogs,
+            string gamePath)
+        {
+            return (hogs ?? new List<BoostMemoryHog>())
+                .FirstOrDefault(hog => !GameNeeds(gamePath, hog));
+        }
+
         private static SessionVerdict Advice(BoostSessionReport report)
         {
             string pressure = report.WorstResourcePressure ?? string.Empty;
             bool tight = string.Equals(pressure, "Critical", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pressure, "Elevated", StringComparison.OrdinalIgnoreCase);
+            BoostMemoryHog biggest = BiggestClosable(report.MemoryHogs, report.TargetExecutablePath);
             if (IsVideoMemoryFull(report))
             {
+                string detail = L.T("Видеопамять заполнялась почти до конца. Текстуры на ступень ниже уберут подтормаживания.");
+                if (tight && biggest != null && !OnlyVideoMemoryRanOut(report))
+                {
+                    detail += " " + string.Format(
+                        CultureInfo.CurrentCulture,
+                        L.T("А перед игрой закройте {0}: это освободит около {1}."),
+                        biggest.Name,
+                        FormatGigabytes(biggest.Bytes));
+                }
                 return new SessionVerdict
                 {
                     Title = L.T("Совет: снизьте текстуры"),
-                    Detail = L.T("Видеопамять заполнялась почти до конца. Текстуры на ступень ниже уберут подтормаживания."),
+                    Detail = detail,
                     Tone = BoostixDesignTokens.Data
                 };
             }
-            if (tight && report.MemoryHogs != null && report.MemoryHogs.Count > 0)
+            if (tight && biggest != null)
             {
-                BoostMemoryHog biggest = report.MemoryHogs[0];
                 return new SessionVerdict
                 {
                     Title = string.Format(CultureInfo.CurrentCulture, L.T("Совет: закройте {0}"), biggest.Name),
@@ -895,7 +926,69 @@ namespace Boostix
         internal static string FormatGigabytes(long bytes)
         {
             double gigabytes = Math.Max(0, bytes) / 1073741824.0;
+            if (gigabytes > 0 && gigabytes < 0.05)
+            {
+                // "0,0 GB" free reads like a broken number.
+                return "< " + 0.1.ToString("0.0", CultureInfo.CurrentCulture) + L.T(" ГБ");
+            }
             return gigabytes.ToString(gigabytes >= 10 ? "0" : "0.0", CultureInfo.CurrentCulture) + L.T(" ГБ");
+        }
+    }
+
+    /// <summary>
+    /// While a game loads there is still time to close something, so its
+    /// start is compared with what the same game took in earlier sessions.
+    /// </summary>
+    internal static class MemoryForecast
+    {
+        private const int SessionsToConsider = 5;
+
+        /// <summary>
+        /// The largest of the game's last sessions; history comes newest first.
+        /// </summary>
+        internal static long TypicalGameBytes(
+            IEnumerable<BoostSessionReport> history,
+            string executablePath)
+        {
+            return (history ?? new List<BoostSessionReport>())
+                .Where(report => report.PeakTargetWorkingSetBytes > 0 &&
+                    string.Equals(
+                        report.TargetExecutablePath,
+                        executablePath,
+                        StringComparison.OrdinalIgnoreCase))
+                .Take(SessionsToConsider)
+                .Select(report => report.PeakTargetWorkingSetBytes)
+                .DefaultIfEmpty(0L)
+                .Max();
+        }
+
+        internal static string Describe(
+            long availableBytes,
+            long typicalBytes,
+            long gameNowBytes,
+            string gameName,
+            IEnumerable<BoostMemoryHog> hogs,
+            string executablePath)
+        {
+            if (typicalBytes <= 0 || typicalBytes - gameNowBytes <= availableBytes)
+            {
+                return string.Empty;
+            }
+            BoostMemoryHog biggest = SessionVerdicts.BiggestClosable(hogs, executablePath);
+            return string.Format(
+                    CultureInfo.CurrentCulture,
+                    L.T("{0} обычно занимает {1}, а свободно {2}."),
+                    gameName,
+                    SessionVerdicts.FormatGigabytes(typicalBytes),
+                    SessionVerdicts.FormatGigabytes(availableBytes)) +
+                " " +
+                (biggest == null
+                    ? L.T("Закройте лишние программы.")
+                    : string.Format(
+                        CultureInfo.CurrentCulture,
+                        L.T("Закройте {0}: это освободит около {1}."),
+                        biggest.Name,
+                        SessionVerdicts.FormatGigabytes(biggest.Bytes)));
         }
     }
 

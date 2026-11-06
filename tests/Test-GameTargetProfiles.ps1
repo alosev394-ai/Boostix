@@ -21,7 +21,7 @@ foreach ($required in @(
     'class GameTargetIdentity',
     'ProcessStartTimeUtc',
     'NormalizedExecutablePath',
-    'TryMatchSavedAutoBoostProfile',
+    'TryFindRunningAutoBoostGame',
     'SetAutoBoost',
     'HasVisibleMainWindow',
     'File.Replace(',
@@ -91,6 +91,10 @@ namespace Boostix
         private readonly Dictionary<int, GameProcessSnapshot> snapshots =
             new Dictionary<int, GameProcessSnapshot>();
 
+        internal int FullCaptures;
+        internal int NamedCaptures;
+        internal List<string> LastNames = new List<string>();
+
         internal void Set(GameProcessSnapshot snapshot)
         {
             snapshots[snapshot.ProcessId] = snapshot;
@@ -103,7 +107,19 @@ namespace Boostix
 
         public IList<GameProcessSnapshot> CaptureAll()
         {
+            FullCaptures++;
             return snapshots.Values.ToList();
+        }
+
+        public IList<GameProcessSnapshot> CaptureNamed(ICollection<string> processNames)
+        {
+            NamedCaptures++;
+            LastNames = processNames.ToList();
+            return snapshots.Values
+                .Where(item => processNames.Contains(
+                    Path.GetFileNameWithoutExtension(item.ExecutablePath),
+                    StringComparer.OrdinalIgnoreCase))
+                .ToList();
         }
 
         public bool TryCapture(
@@ -119,6 +135,14 @@ namespace Boostix
 
             error = "not running";
             return false;
+        }
+
+        public bool TryCaptureIdentity(
+            int processId,
+            out GameProcessSnapshot snapshot,
+            out string error)
+        {
+            return TryCapture(processId, out snapshot, out error);
         }
     }
 
@@ -411,14 +435,13 @@ namespace Boostix
                 "The saved profile did not round-trip.");
 
             GameTargetIdentity autoIdentity;
-            Assert(service.TryMatchSavedAutoBoostProfile(
-                    120,
+            Assert(service.TryFindRunningAutoBoostGame(
                     store,
                     out autoIdentity,
-                    out autoProfile,
-                    out error),
-                "A saved Auto Boost profile did not match: " + error);
-            Assert(autoIdentity.ProcessStartTimeUtc == startedUtc,
+                    out autoProfile),
+                "A saved Auto Boost profile did not match.");
+            Assert(autoIdentity.ProcessId == 120 &&
+                autoIdentity.ProcessStartTimeUtc == startedUtc,
                 "Auto Boost did not bind a fresh PID/start-time identity.");
 
             File.Delete(alphaPath);
@@ -444,12 +467,10 @@ namespace Boostix
 
             Assert(store.Remove(alphaPath.ToUpperInvariant()),
                 "Case-insensitive profile removal failed.");
-            Assert(!service.TryMatchSavedAutoBoostProfile(
-                    120,
+            Assert(!service.TryFindRunningAutoBoostGame(
                     store,
                     out autoIdentity,
-                    out autoProfile,
-                    out error),
+                    out autoProfile),
                 "Auto Boost remained enabled after profile removal.");
 
             GameProfile firstCase = GameProfile.CreateFromTarget(
@@ -485,9 +506,166 @@ namespace Boostix
                 "Corrupt profile data was not quarantined.");
 
             RunLimitedAccessProcessCapture();
+            RunAutoBoostDiscovery(root, alphaPath, zetaPath, boostixPath);
+            RunCheapProcessCapture();
 
             Console.WriteLine("Game target/profile regression harness passed.");
             return 0;
+        }
+
+        // Discovery runs every 3 s for as long as Boostix sits at the clock.
+        // In 5.1 it inspected every process each time, about 4% of a core on a
+        // PC with 500 of them; now only the saved game's name is looked at.
+        private static void RunAutoBoostDiscovery(
+            string root,
+            string alphaPath,
+            string zetaPath,
+            string boostixPath)
+        {
+            string profilePath = Path.Combine(root, "discovery", "games.dat");
+            Directory.CreateDirectory(Path.GetDirectoryName(profilePath));
+            GameProfileStore store = new GameProfileStore(
+                profilePath,
+                Path.GetDirectoryName(profilePath));
+            DateTime startedUtc = DateTime.UtcNow.AddMinutes(-5);
+            FakeGameProcessCatalog catalog = new FakeGameProcessCatalog();
+            catalog.Set(Snapshot(200, startedUtc, alphaPath, "AlphaGame", true, 7));
+            catalog.Set(Snapshot(201, startedUtc, zetaPath, "ZetaGame", true, 7));
+            GameTargetService service = new GameTargetService(
+                catalog,
+                boostixPath,
+                9000,
+                7);
+
+            GameTargetIdentity found;
+            GameProfile profile;
+            Assert(!service.TryFindRunningAutoBoostGame(store, out found, out profile),
+                "Discovery found a game although none is saved.");
+            Assert(catalog.NamedCaptures == 0 && catalog.FullCaptures == 0,
+                "Discovery looked at processes with no Auto Boost game saved.");
+
+            GameTargetIdentity alpha;
+            string error;
+            Assert(service.TrySelect(200, out alpha, out error),
+                "The discovery fixture was rejected: " + error);
+            store.Upsert(alpha, "Alpha Game", true);
+
+            Assert(service.TryFindRunningAutoBoostGame(store, out found, out profile),
+                "A running saved game was not found.");
+            Assert(found.ProcessId == 200 && profile.AutoBoost,
+                "Discovery returned the wrong game.");
+            Assert(catalog.FullCaptures == 0,
+                "Discovery inspected every running process.");
+            Assert(catalog.LastNames.Count == 1 &&
+                string.Equals(catalog.LastNames[0], "AlphaGame", StringComparison.OrdinalIgnoreCase),
+                "Discovery asked for more than the saved game's name.");
+
+            catalog.Set(Snapshot(200, startedUtc, alphaPath, "AlphaGame", false, 7));
+            Assert(!service.TryFindRunningAutoBoostGame(store, out found, out profile),
+                "A saved game without a window was selected.");
+            catalog.Set(Snapshot(200, startedUtc, alphaPath, "AlphaGame", true, 7));
+
+            string otherFolder = Path.Combine(root, "other");
+            Directory.CreateDirectory(otherFolder);
+            string sameName = Path.Combine(otherFolder, "AlphaGame.exe");
+            File.WriteAllBytes(sameName, new byte[] { 5 });
+            catalog.Remove(200);
+            catalog.Set(Snapshot(202, startedUtc, sameName, "AlphaGame", true, 7));
+            Assert(!service.TryFindRunningAutoBoostGame(store, out found, out profile),
+                "A program with the same name in another folder was selected.");
+            catalog.Remove(202);
+
+            catalog.Set(Snapshot(200, startedUtc, alphaPath, "AlphaGame", true, 7));
+            catalog.Set(Snapshot(203, startedUtc, alphaPath, "AlphaGame", true, 7));
+            Assert(!service.TryFindRunningAutoBoostGame(store, out found, out profile),
+                "Discovery guessed between two windows of the saved game.");
+            catalog.Remove(203);
+
+            Assert(store.SetAutoBoost(alphaPath, false),
+                "Auto Boost could not be turned off in the fixture.");
+            catalog.NamedCaptures = 0;
+            Assert(!service.TryFindRunningAutoBoostGame(store, out found, out profile) &&
+                catalog.NamedCaptures == 0,
+                "A saved game with Auto Boost off was still looked for.");
+        }
+
+        private static double MeasureProcessor(int rounds, Action action)
+        {
+            action();
+            using (System.Diagnostics.Process self =
+                System.Diagnostics.Process.GetCurrentProcess())
+            {
+                TimeSpan before = self.TotalProcessorTime;
+                for (int index = 0; index < rounds; index++)
+                {
+                    action();
+                }
+                self.Refresh();
+                return (self.TotalProcessorTime - before).TotalMilliseconds / rounds;
+            }
+        }
+
+        // The 1 Hz check of a running game must not read the whole process
+        // list or walk every window: that is what kept a core busy in 5.1.
+        private static void RunCheapProcessCapture()
+        {
+            var catalog = new SystemGameProcessCatalog();
+            using (System.Diagnostics.Process self =
+                System.Diagnostics.Process.GetCurrentProcess())
+            {
+                IList<GameProcessSnapshot> named = catalog.CaptureNamed(
+                    new[] { self.ProcessName.ToUpperInvariant() });
+                Assert(named.Any(item => item.ProcessId == self.Id),
+                    "The named capture missed the current process.");
+                Assert(catalog.CaptureNamed(new[] { "boostix-no-such-process" }).Count == 0,
+                    "The named capture returned a process it was not asked for.");
+                Assert(catalog.CaptureNamed(new string[0]).Count == 0,
+                    "An empty name list returned processes.");
+
+                GameProcessSnapshot full;
+                GameProcessSnapshot cheap;
+                string error;
+                Assert(catalog.TryCapture(self.Id, out full, out error),
+                    "The full capture failed: " + error);
+                Assert(catalog.TryCaptureIdentity(self.Id, out cheap, out error),
+                    "The cheap capture failed: " + error);
+                Assert(cheap.ProcessId == full.ProcessId &&
+                    cheap.StartTimeUtc == full.StartTimeUtc &&
+                    cheap.SessionId == full.SessionId &&
+                    string.Equals(cheap.ProcessName, full.ProcessName, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(cheap.ExecutablePath, full.ExecutablePath, StringComparison.OrdinalIgnoreCase),
+                    "The cheap capture describes a different process.");
+                Assert(!catalog.TryCaptureIdentity(0, out cheap, out error),
+                    "The cheap capture accepted an invalid process id.");
+                Assert(!catalog.TryCaptureIdentity(int.MaxValue - 3, out cheap, out error),
+                    "The cheap capture found a process that does not exist.");
+
+                string ownName = self.ProcessName;
+                int ownId = self.Id;
+                double everything = MeasureProcessor(5, delegate { catalog.CaptureAll(); });
+                double byName = MeasureProcessor(5, delegate { catalog.CaptureNamed(new[] { ownName }); });
+                Console.WriteLine(
+                    "Process capture: all {0:N1} ms, by name {1:N1} ms.", everything, byName);
+                Assert(byName * 2 <= everything + 1,
+                    "The named capture is not cheaper than inspecting everything.");
+
+                double fullCapture = MeasureProcessor(40, delegate
+                {
+                    GameProcessSnapshot ignored;
+                    string ignoredError;
+                    catalog.TryCapture(ownId, out ignored, out ignoredError);
+                });
+                double cheapCapture = MeasureProcessor(40, delegate
+                {
+                    GameProcessSnapshot ignored;
+                    string ignoredError;
+                    catalog.TryCaptureIdentity(ownId, out ignored, out ignoredError);
+                });
+                Console.WriteLine(
+                    "One process: full {0:N2} ms, cheap {1:N2} ms.", fullCapture, cheapCapture);
+                Assert(cheapCapture * 2 <= fullCapture + 0.5,
+                    "The cheap capture still reads the whole process list.");
+            }
         }
 
         // Games started as administrator, and games whose anti-cheat strips

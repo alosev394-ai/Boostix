@@ -3,6 +3,29 @@
 The English interface arrived in 3.2.0. Earlier versions are described in
 [`CHANGELOG.md`](CHANGELOG.md), in Russian.
 
+## 5.2.0 — 2026-11-07
+
+### Fixes
+
+- Boostix at the clock now uses almost no processor. Every 3 seconds the search
+  for a running game went through every process on the PC: 2-4% of a core with
+  no game at all, and the window froze for a moment. Now it looks only for the
+  saved game's name, about 0.3% of a core.
+- During a game the measurements no longer read the list of all processes
+  several times a second.
+- The game log no longer says programs were closed when nothing was.
+- The tip no longer offers to close Steam when the game itself runs from Steam.
+  The same goes for Epic Games.
+- Very little memory now shows as "< 0.1 GB" instead of "0.0 GB".
+
+### New
+
+- A warning before the game: if less memory is free than this game took before,
+  Boostix says so while the game loads and names what to close.
+- If both memory and video memory ran short, the tip covers both the textures
+  and what to close.
+- Every game's log shows how much processor Boostix itself used.
+
 ## 5.1.0 — 2026-11-06
 
 ### Fixes
