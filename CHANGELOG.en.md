@@ -3,6 +3,27 @@
 The English interface arrived in 3.2.0. Earlier versions are described in
 [`CHANGELOG.md`](CHANGELOG.md), in Russian.
 
+## 5.3.0 — 2026-11-07
+
+### New
+
+- Who took the video memory: the debrief shows the programs that held the most,
+  and the tip says what to close before you lower the textures.
+- A warning about hidden programs: if a system program such as cmd.exe holds
+  video memory, Boostix suggests scanning the PC with an antivirus. Hidden miners
+  often look like this.
+- Close for the game: one button closes a program from the debrief before every
+  game. Boostix asks it to close normally and starts it again when the game ends.
+- Comparison with the last game: the debrief shows what changed, for example
+  lowest memory 0.1 to 3.0 GB.
+
+### Fixes
+
+- The low memory warning goes to the log once and in plain words.
+- A program with helpers closes and counts as one, without extra warnings.
+- Discord Clips counts together with Discord.
+- A hotkey held by another program no longer goes to the crash log.
+
 ## 5.2.0 — 2026-11-07
 
 ### Fixes

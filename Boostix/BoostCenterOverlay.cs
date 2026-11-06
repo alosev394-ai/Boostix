@@ -3773,7 +3773,7 @@ namespace Boostix
                     L.T("Закрывать при запуске Boost"),
                     null));
                 var hint = MakeText(
-                    L.T("Отмеченные программы закроются при запуске Boost. После игры откройте их сами."),
+                    L.T("Отмеченные программы закроются при запуске Boost."),
                     BoostixDesignTokens.MetadataTextSize,
                     MutedColor,
                     regularFont,
@@ -3826,6 +3826,30 @@ namespace Boostix
                     L.T("Закрыть оверлей NVIDIA. Запись клипов будет недоступна."),
                     !settings.KeepNvidiaOverlay,
                     delegate(bool value) { settings.KeepNvidiaOverlay = !value; }));
+                foreach (string processName in (settings.CloseForGame ?? new List<string>()).ToList())
+                {
+                    string chosen = processName;
+                    AddListRow(close, BuildSettingToggle(
+                        settingIndex++,
+                        chosen,
+                        L.T("Вкладки браузера вернутся, только если он сам восстанавливает сессию."),
+                        true,
+                        delegate(bool value)
+                        {
+                            settings.CloseForGame.RemoveAll(item =>
+                                string.Equals(item, chosen, StringComparison.OrdinalIgnoreCase));
+                            if (value)
+                            {
+                                settings.CloseForGame.Add(chosen);
+                            }
+                        }));
+                }
+                AddListRow(close, BuildSettingToggle(
+                    settingIndex++,
+                    L.T("Возвращать программы после игры"),
+                    L.T("Закрытые программы запустятся снова, когда игра закончится."),
+                    settings.ReopenAfterGame,
+                    delegate(bool value) { settings.ReopenAfterGame = value; }));
                 pageContent.Children.Add(close);
 
                 pageContent.Children.Add(MakeSectionHeading(L.T("Оформление"), null));

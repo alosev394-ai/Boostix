@@ -168,6 +168,7 @@ try {
             -CloseTeams `
             -CloseWallpaper `
             -CloseNvidiaOverlay `
+            -CloseProcessNames 'firefox, bad;name,Spotify' `
             -ReadySignalPath $ReadyPath `
             -ResultPath $ReportPath
     } $scriptPath (Join-Path $testRoot 'opt-in') $optInReadySignalPath $optInResultPath $optInRequestedNames $cimDiscoveryCount
@@ -186,14 +187,81 @@ try {
         'wallpaper32',
         'wallpaper64',
         'NVIDIA Overlay',
-        'nvsphelper64'
+        'nvsphelper64',
+        'firefox',
+        'Spotify'
     )) {
         if (-not $optInRequestedNames.Contains($requiredOptInProcess)) {
             throw "An opt-in process group is missing: $requiredOptInProcess"
         }
     }
+    if ($optInRequestedNames.Contains('bad;name')) {
+        throw 'A malformed process name reached Get-Process.'
+    }
     if ($cimDiscoveryCount[0] -ne 0) {
         throw 'Opt-in process selection triggered unexpected CIM discovery.'
+    }
+
+    # A program leaves as one: helpers go with the main window, it counts once
+    # and its path is kept so it can come back after the game. Nothing that
+    # ignores the request is ever forced.
+    $groupReadySignalPath = Join-Path $testRoot 'group\ready.flag'
+    $groupResultPath = Join-Path $testRoot 'group\result.ini'
+    & {
+        param($ProductionScript, $FixtureRoot, $ReadyPath, $ReportPath)
+
+        $env:LOCALAPPDATA = $FixtureRoot
+
+        function New-FakeProcess {
+            param([string]$Name, [int]$Id, [bool]$Windowed, [bool]$Leaves, [hashtable]$State)
+            $handle = if ($Windowed) { [IntPtr]1 } else { [IntPtr]::Zero }
+            $fake = [pscustomobject]@{
+                Name = $Name
+                Id = $Id
+                Path = "C:\Fake\$Name.exe"
+                MainWindowHandle = $handle
+                Leaves = $Leaves
+                State = $State
+            }
+            $fake | Add-Member -MemberType ScriptProperty -Name HasExited -Value { $this.Leaves -and $this.State.Closed }
+            $fake | Add-Member -MemberType ScriptMethod -Name CloseMainWindow -Value { $this.State.Closed = $true; return $true }
+            $fake | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($Milliseconds) return $this.HasExited }
+            $fake | Add-Member -MemberType ScriptMethod -Name Kill -Value { throw 'A program was forced to exit.' }
+            return $fake
+        }
+
+        $leaving = @{ Closed = $false }
+        $staying = @{ Closed = $false }
+        $fakes = @{
+            fakeapp = @(
+                (New-FakeProcess 'fakeapp' 102 $false $true $leaving),
+                (New-FakeProcess 'fakeapp' 101 $true $true $leaving))
+            stubborn = @(, (New-FakeProcess 'stubborn' 201 $true $false $staying))
+        }
+
+        function Get-Process {
+            [CmdletBinding()]
+            param([string[]]$Name)
+            foreach ($processName in $Name) {
+                if ($fakes.ContainsKey($processName)) { $fakes[$processName] }
+            }
+        }
+
+        & $ProductionScript `
+            -CloseProcessNames 'fakeapp,stubborn' `
+            -ReadySignalPath $ReadyPath `
+            -ResultPath $ReportPath
+    } $scriptPath (Join-Path $testRoot 'group') $groupReadySignalPath $groupResultPath
+
+    $groupResult = [IO.File]::ReadAllText($groupResultPath)
+    if (-not $groupResult.Contains('Process1=fakeapp|101|C:\Fake\fakeapp.exe')) {
+        throw "A closed program was not reported with its path: $groupResult"
+    }
+    if ($groupResult.Contains('Process2=')) {
+        throw 'A program with helpers was reported more than once.'
+    }
+    if (-not $groupResult.Contains('WarningCount=1') -or -not $groupResult.Contains('stubborn')) {
+        throw 'A program that stayed open was not reported.'
     }
 
     'Active Boost one-shot preparation regression test passed.'

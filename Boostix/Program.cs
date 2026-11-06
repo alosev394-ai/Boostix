@@ -470,6 +470,9 @@ namespace Boostix
         private DispatcherTimer activeBoostTimer;
         private DispatcherTimer autoBoostDiscoveryTimer;
         private TimeSpan sessionProcessorStart;
+        private List<ClosedProgram> closedForGame = new List<ClosedProgram>();
+        private bool memoryPressureRecorded;
+        private DateTime lastVideoMemoryCaptureUtc;
         private Process boostProcess;
         private string readinessSignalPath;
         private DateTime readinessDeadline;
@@ -499,7 +502,8 @@ namespace Boostix
             KeepOneDrive = true,
             KeepTeams = true,
             KeepWallpaper = true,
-            KeepNvidiaOverlay = true
+            KeepNvidiaOverlay = true,
+            ReopenAfterGame = true
         };
         private BoostPreflightReport latestPreflight;
         private DiagnosticSnapshot latestDiagnosticSnapshot;
@@ -2123,6 +2127,9 @@ namespace Boostix
             centerSettings.MinimizeToTray = GetPreference(values, "MinimizeToTray");
             centerSettings.GameSignals = !values.ContainsKey("GameSignals") ||
                 GetPreference(values, "GameSignals");
+            centerSettings.ReopenAfterGame = !values.ContainsKey("ReopenAfterGame") ||
+                GetPreference(values, "ReopenAfterGame");
+            centerSettings.CloseForGame = SessionCloseList.Parse(ReadTextPreference("CloseForGame"));
             // Windows' own Run key decides start-up; test launches never touch it.
             centerSettings.StartWithWindows = !demoMode && AutostartRegistration.IsEnabled();
             // The theme itself was applied at start-up, before any colour was read.
@@ -2172,6 +2179,8 @@ namespace Boostix
                         "GlobalHotkey=" + centerSettings.GlobalHotkey,
                         "MinimizeToTray=" + centerSettings.MinimizeToTray,
                         "GameSignals=" + centerSettings.GameSignals,
+                        "ReopenAfterGame=" + centerSettings.ReopenAfterGame,
+                        "CloseForGame=" + string.Join(";", (centerSettings.CloseForGame ?? new List<string>()).ToArray()),
                         "Theme=" + BoostixDesignTokens.PaletteId,
                         "Language=" + (centerSettings.Language ?? L.Language)
                     }) + Environment.NewLine;
@@ -2513,6 +2522,15 @@ namespace Boostix
                 if (!centerSettings.KeepNvidiaOverlay)
                 {
                     scriptArguments.Append(" -CloseNvidiaOverlay");
+                }
+                string chosenPrograms = SessionCloseList.Format(
+                    centerSettings.CloseForGame,
+                    selectedTarget == null ? null : selectedTarget.ProcessName);
+                if (chosenPrograms.Length > 0)
+                {
+                    scriptArguments.Append(" -CloseProcessNames \"");
+                    scriptArguments.Append(chosenPrograms);
+                    scriptArguments.Append("\"");
                 }
                 if (currentSession != null)
                 {
@@ -3024,10 +3042,12 @@ namespace Boostix
                 CaptureMemoryHogs(generation, memoryHogTarget);
             }
             if (evaluation.Decision ==
-                SessionGuardPressureDecision.CriticalAlertRaised)
+                    SessionGuardPressureDecision.CriticalAlertRaised &&
+                !memoryPressureRecorded)
             {
+                memoryPressureRecorded = true;
                 RecordSessionAction(
-                    L.T("SESSION GUARD — ДАВЛЕНИЕ ПАМЯТИ"),
+                    L.T("МАЛО ПАМЯТИ"),
                     DescribeLongMemoryPressure(sample.CommitHeadroomBytes, sample.CommitLimitBytes),
                     BoostActionOutcome.Skipped);
             }
@@ -3156,6 +3176,7 @@ namespace Boostix
                             currentSession.ApplyDiagnosticSnapshot(snapshot);
                         }
                     }
+                    CaptureVideoMemoryHogsAtPeak(generation, snapshot);
                     try
                     {
                         Dispatcher.BeginInvoke(new Action(delegate
@@ -3992,54 +4013,148 @@ namespace Boostix
 
         /// <summary>
         /// Off the UI thread: the process list takes a moment and the session
-        /// is starting. The warning stays in the report either way; the
+        /// is starting. A warning stays in the report either way; the
         /// notification follows the game signals setting.
         /// </summary>
-        private void WarnIfGameWillRunOutOfMemory(long availableBytes)
+        private void CheckComputerBeforeGame(long availableBytes)
         {
             GameTargetIdentity target = selectedTarget;
-            if (demoMode || target == null || availableBytes <= 0)
+            if (demoMode || target == null)
             {
                 return;
             }
             long typicalBytes = MemoryForecast.TypicalGameBytes(
                 sessionHistory,
                 target.ExecutablePath);
-            if (typicalBytes <= 0)
-            {
-                return;
-            }
 
             Task.Run(delegate
             {
-                string warning = MemoryForecast.Describe(
-                    availableBytes,
-                    typicalBytes,
-                    ReadWorkingSet(target.ProcessId),
-                    target.ProcessName,
-                    MemoryHogRanking.Capture(target.ProcessName),
-                    target.ExecutablePath);
-                if (warning.Length == 0)
+                List<BoostMemoryHog> videoHogs = VideoMemoryRanking.Capture(target.ProcessName);
+                lock (activeMaintenanceSync)
+                {
+                    if (currentSession != null && videoHogs.Count > 0)
+                    {
+                        currentSession.VideoMemoryHogs = videoHogs;
+                    }
+                }
+                BoostMemoryHog suspicious = videoHogs.FirstOrDefault(
+                    hog => VideoMemoryRanking.IsSystemTool(hog.ProcessName));
+                if (suspicious != null)
+                {
+                    WarnBeforeGame(L.T("ПРОВЕРЬТЕ КОМПЬЮТЕР"), SessionVerdicts.DescribeSuspicious(suspicious));
+                }
+                if (availableBytes > 0 && typicalBytes > 0)
+                {
+                    WarnBeforeGame(
+                        L.T("ПАМЯТИ МОЖЕТ НЕ ХВАТИТЬ"),
+                        MemoryForecast.Describe(
+                            availableBytes,
+                            typicalBytes,
+                            ReadWorkingSet(target.ProcessId),
+                            target.ProcessName,
+                            MemoryHogRanking.Capture(target.ProcessName),
+                            target.ExecutablePath));
+                }
+            });
+        }
+
+        private void WarnBeforeGame(string title, string warning)
+        {
+            if (warning.Length == 0)
+            {
+                return;
+            }
+            RecordSessionAction(title, warning, BoostActionOutcome.Skipped);
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    if (centerSettings.GameSignals && trayIcon != null)
+                    {
+                        trayIcon.Notify(warning);
+                    }
+                }));
+            }
+            catch (InvalidOperationException) { }
+            catch (TaskCanceledException) { }
+        }
+
+        /// <summary>
+        /// Near a new peak, at most every five minutes: the first reading of
+        /// these counters costs about 0.3 s of processor time.
+        /// </summary>
+        private void CaptureVideoMemoryHogsAtPeak(int generation, DiagnosticSnapshot snapshot)
+        {
+            string targetName;
+            lock (activeMaintenanceSync)
+            {
+                if (currentSession == null ||
+                    !IsActiveMaintenanceGeneration(generation) ||
+                    snapshot == null ||
+                    snapshot.GpuDedicatedTotalBytes <= 0 ||
+                    snapshot.GpuDedicatedUsageBytes < currentSession.PeakGpuDedicatedUsageBytes ||
+                    snapshot.GpuDedicatedUsageBytes < snapshot.GpuDedicatedTotalBytes / 100L * 85L ||
+                    DateTime.UtcNow - lastVideoMemoryCaptureUtc < TimeSpan.FromMinutes(5))
                 {
                     return;
                 }
-                RecordSessionAction(
-                    L.T("ПАМЯТИ МОЖЕТ НЕ ХВАТИТЬ"),
-                    warning,
-                    BoostActionOutcome.Skipped);
+                lastVideoMemoryCaptureUtc = DateTime.UtcNow;
+                targetName = currentSession.TargetName ?? string.Empty;
+            }
+            List<BoostMemoryHog> hogs = VideoMemoryRanking.Capture(targetName);
+            lock (activeMaintenanceSync)
+            {
+                if (hogs.Count > 0 &&
+                    currentSession != null &&
+                    IsActiveMaintenanceGeneration(generation))
+                {
+                    currentSession.VideoMemoryHogs = hogs;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Started as a normal program, never from an elevated Boostix.
+        /// </summary>
+        private void ReopenClosedPrograms(BoostSessionReport report)
+        {
+            List<ClosedProgram> closed = closedForGame;
+            closedForGame = new List<ClosedProgram>();
+            if (!centerSettings.ReopenAfterGame || CrashLog.IsCurrentProcessElevated())
+            {
+                return;
+            }
+            foreach (ClosedProgram program in SessionCloseList.ToReopen(closed, IsProcessRunning, File.Exists))
+            {
                 try
                 {
-                    Dispatcher.BeginInvoke(new Action(delegate
-                    {
-                        if (centerSettings.GameSignals && trayIcon != null)
-                        {
-                            trayIcon.Notify(warning);
-                        }
-                    }));
+                    var startInfo = new ProcessStartInfo(program.ExecutablePath);
+                    startInfo.UseShellExecute = true;
+                    startInfo.WorkingDirectory = System.IO.Path.GetDirectoryName(program.ExecutablePath);
+                    using (Process.Start(startInfo)) { }
+                    report.AddAction(
+                        program.ProcessName.ToUpperInvariant(),
+                        L.T("Запущен снова после игры."),
+                        BoostActionOutcome.Changed);
                 }
-                catch (InvalidOperationException) { }
-                catch (TaskCanceledException) { }
-            });
+                catch (Exception ex)
+                {
+                    report.AddAction(
+                        program.ProcessName.ToUpperInvariant(),
+                        L.T("Не удалось запустить снова: ") + ex.Message,
+                        BoostActionOutcome.Skipped);
+                }
+            }
+        }
+
+        private static bool IsProcessRunning(string processName)
+        {
+            Process[] running = Process.GetProcessesByName(processName);
+            foreach (Process process in running)
+            {
+                process.Dispose();
+            }
+            return running.Length > 0;
         }
 
         private static long ReadWorkingSet(int processId)
@@ -4259,7 +4374,9 @@ namespace Boostix
                 FormatMemory(currentSession.AvailableMemoryStartBytes) +
                 L.T(" доступно; сюда уже входит освобождаемый кэш Windows."),
                 BoostActionOutcome.AlreadyOptimal);
-            WarnIfGameWillRunOutOfMemory(currentSession.AvailableMemoryStartBytes);
+            memoryPressureRecorded = false;
+            lastVideoMemoryCaptureUtc = DateTime.MinValue;
+            CheckComputerBeforeGame(currentSession.AvailableMemoryStartBytes);
             if (centerSettings.KeepDiscord)
             {
                 currentSession.AddAction(
@@ -4805,10 +4922,10 @@ namespace Boostix
                     string value = line.Substring(separator + 1).Trim();
                     if (IsIndexedResultKey(key, "Process"))
                     {
-                        string[] parts = value.Split('|');
-                        string processName = parts.Length > 0 ? parts[0] : value;
+                        ClosedProgram closed = SessionCloseList.ParseStopped(value);
+                        closedForGame.Add(closed);
                         report.AddAction(
-                            processName.ToUpperInvariant(),
+                            closed.ProcessName.ToUpperInvariant(),
                             L.T("Закрыт во время одноразовой подготовки."),
                             BoostActionOutcome.Changed);
                         stopped++;
@@ -4946,6 +5063,7 @@ namespace Boostix
                 L.T("; минимальный резерв памяти: ") +
                 FormatMemory(currentSession.MinimumCommitHeadroomBytes) + ".",
                 BoostActionOutcome.AlreadyOptimal);
+            ReopenClosedPrograms(currentSession);
             string ownLoad = DescribeOwnLoad(
                 ReadOwnProcessorTime() - sessionProcessorStart,
                 DateTime.UtcNow - currentSession.StartedUtc);
@@ -5767,9 +5885,8 @@ namespace Boostix
                 hotkeyRegistered = BoostHotkey.Register(windowHandle);
                 if (!hotkeyRegistered)
                 {
-                    CrashLog.Write(
-                        "The Boost hotkey " + BoostHotkey.DisplayText + " is used by another program.",
-                        null);
+                    AppendActiveBoostLog(
+                        "The Boost hotkey " + BoostHotkey.DisplayText + " is used by another program.");
                 }
             }
             else if (!centerSettings.GlobalHotkey && hotkeyRegistered)

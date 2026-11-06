@@ -692,8 +692,8 @@ namespace Boostix
             {
                 report.MemoryHogs = new List<BoostMemoryHog>
                 {
-                    new BoostMemoryHog { Name = "Firefox", Bytes = 3 * GiB + GiB / 8 },
-                    new BoostMemoryHog { Name = "Discord", Bytes = GiB * 2 / 3 }
+                    new BoostMemoryHog { Name = "Firefox", ProcessName = "firefox", Bytes = 3 * GiB + GiB / 8 },
+                    new BoostMemoryHog { Name = "Discord", ProcessName = "Discord", Bytes = GiB * 2 / 3 }
                 };
             }
             var random = new Random(seed);
@@ -746,7 +746,8 @@ namespace Boostix
                         CultureInfo.CurrentCulture,
                         L.T("Пик: {0} из {1}. Обычной памяти хватало."),
                         FormatGigabytes(report.PeakGpuDedicatedUsageBytes),
-                        FormatGigabytes(report.GpuDedicatedTotalBytes)),
+                        FormatGigabytes(report.GpuDedicatedTotalBytes)) +
+                        DescribeHogs(report.VideoMemoryHogs),
                     Tone = BoostixDesignTokens.Warning
                 });
             }
@@ -758,7 +759,7 @@ namespace Boostix
                     Detail = (minimum > 0
                         ? string.Format(CultureInfo.CurrentCulture, L.T("В худший момент свободно было {0}."), FormatGigabytes(minimum))
                         : L.T("Windows почти исчерпала память во время игры.")) +
-                        DescribeHogs(report),
+                        DescribeHogs(report.MemoryHogs),
                     Tone = BoostixDesignTokens.Warning
                 });
             }
@@ -770,7 +771,7 @@ namespace Boostix
                     Detail = (minimum > 0
                         ? string.Format(CultureInfo.CurrentCulture, L.T("Минимум свободной памяти: {0}."), FormatGigabytes(minimum))
                         : L.T("Иногда памяти было меньше, чем хотелось бы.")) +
-                        DescribeHogs(report),
+                        DescribeHogs(report.MemoryHogs),
                     Tone = BoostixDesignTokens.Warning
                 });
             }
@@ -836,16 +837,16 @@ namespace Boostix
             return !memoryRanOut && !commitRanOut;
         }
 
-        private static string DescribeHogs(BoostSessionReport report)
+        private static string DescribeHogs(List<BoostMemoryHog> hogs)
         {
-            if (report.MemoryHogs == null || report.MemoryHogs.Count == 0)
+            if (hogs == null || hogs.Count == 0)
             {
                 return string.Empty;
             }
             return " " + string.Format(
                 CultureInfo.CurrentCulture,
                 L.T("Больше всего занимали: {0}."),
-                string.Join(", ", report.MemoryHogs.Select(hog => hog.Name + " " + FormatGigabytes(hog.Bytes))));
+                string.Join(", ", hogs.Select(hog => hog.Name + " " + FormatGigabytes(hog.Bytes))));
         }
 
         /// <summary>
@@ -876,6 +877,30 @@ namespace Boostix
             bool tight = string.Equals(pressure, "Critical", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(pressure, "Elevated", StringComparison.OrdinalIgnoreCase);
             BoostMemoryHog biggest = BiggestClosable(report.MemoryHogs, report.TargetExecutablePath);
+            BoostMemoryHog suspicious = (report.VideoMemoryHogs ?? new List<BoostMemoryHog>())
+                .FirstOrDefault(hog => VideoMemoryRanking.IsSystemTool(hog.ProcessName));
+            if (suspicious != null)
+            {
+                return new SessionVerdict
+                {
+                    Title = L.T("Проверьте компьютер антивирусом"),
+                    Detail = DescribeSuspicious(suspicious),
+                    Tone = BoostixDesignTokens.Error
+                };
+            }
+            BoostMemoryHog biggestVideo = BiggestClosable(report.VideoMemoryHogs, report.TargetExecutablePath);
+            if (IsVideoMemoryFull(report) && biggestVideo != null)
+            {
+                return new SessionVerdict
+                {
+                    Title = string.Format(CultureInfo.CurrentCulture, L.T("Совет: закройте {0}"), biggestVideo.Name),
+                    Detail = string.Format(
+                        CultureInfo.CurrentCulture,
+                        L.T("Она держала {0} видеопамяти. Если подтормаживания останутся, снизьте текстуры на ступень."),
+                        FormatGigabytes(biggestVideo.Bytes)),
+                    Tone = BoostixDesignTokens.Data
+                };
+            }
             if (IsVideoMemoryFull(report))
             {
                 string detail = L.T("Видеопамять заполнялась почти до конца. Текстуры на ступень ниже уберут подтормаживания.");
@@ -923,6 +948,15 @@ namespace Boostix
             };
         }
 
+        internal static string DescribeSuspicious(BoostMemoryHog hog)
+        {
+            return string.Format(
+                CultureInfo.CurrentCulture,
+                L.T("{0} держал {1} видеопамяти, хотя такой программе видеокарта не нужна. Так часто выглядят скрытые майнеры."),
+                hog.Name,
+                FormatGigabytes(hog.Bytes));
+        }
+
         internal static string FormatGigabytes(long bytes)
         {
             double gigabytes = Math.Max(0, bytes) / 1073741824.0;
@@ -932,6 +966,61 @@ namespace Boostix
                 return "< " + 0.1.ToString("0.0", CultureInfo.CurrentCulture) + L.T(" ГБ");
             }
             return gigabytes.ToString(gigabytes >= 10 ? "0" : "0.0", CultureInfo.CurrentCulture) + L.T(" ГБ");
+        }
+    }
+
+    /// <summary>
+    /// Did closing programs help? Compares a session with the same game's
+    /// previous one.
+    /// </summary>
+    internal static class SessionComparison
+    {
+        private const long NoticeableBytes = 200L * 1024L * 1024L;
+
+        internal static string Describe(
+            BoostSessionReport report,
+            IEnumerable<BoostSessionReport> history)
+        {
+            if (report == null || report.MinimumAvailableMemoryBytes <= 0)
+            {
+                return string.Empty;
+            }
+            BoostSessionReport previous = (history ?? new List<BoostSessionReport>())
+                .Where(item => item.StartedUtc < report.StartedUtc &&
+                    item.MinimumAvailableMemoryBytes > 0 &&
+                    string.Equals(
+                        item.TargetExecutablePath,
+                        report.TargetExecutablePath,
+                        StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(item => item.StartedUtc)
+                .FirstOrDefault();
+            if (previous == null)
+            {
+                return string.Empty;
+            }
+
+            var changes = new List<string>();
+            if (Math.Abs(report.MinimumAvailableMemoryBytes - previous.MinimumAvailableMemoryBytes) >= NoticeableBytes)
+            {
+                changes.Add(string.Format(
+                    CultureInfo.CurrentCulture,
+                    L.T("минимум памяти {0} → {1}"),
+                    SessionVerdicts.FormatGigabytes(previous.MinimumAvailableMemoryBytes),
+                    SessionVerdicts.FormatGigabytes(report.MinimumAvailableMemoryBytes)));
+            }
+            if (report.PeakGpuDedicatedUsageBytes > 0 &&
+                previous.PeakGpuDedicatedUsageBytes > 0 &&
+                Math.Abs(report.PeakGpuDedicatedUsageBytes - previous.PeakGpuDedicatedUsageBytes) >= NoticeableBytes)
+            {
+                changes.Add(string.Format(
+                    CultureInfo.CurrentCulture,
+                    L.T("пик видеопамяти {0} → {1}"),
+                    SessionVerdicts.FormatGigabytes(previous.PeakGpuDedicatedUsageBytes),
+                    SessionVerdicts.FormatGigabytes(report.PeakGpuDedicatedUsageBytes)));
+            }
+            return changes.Count == 0
+                ? L.T("С прошлой игры почти ничего не изменилось.")
+                : L.T("С прошлой игры: ") + string.Join(", ", changes.ToArray()) + ".";
         }
     }
 

@@ -651,6 +651,16 @@ namespace Boostix
 
             body.Children.Add(BuildDebriefStats(report));
 
+            string comparison = SessionComparison.Describe(report, sessionHistory);
+            if (comparison.Length > 0)
+            {
+                var compared = MakeText(comparison, BoostixDesignTokens.BodyTextSize, SecondaryColor, regularFont, FontWeights.Normal);
+                compared.TextWrapping = TextWrapping.Wrap;
+                compared.Margin = new Thickness(0, 12, 0, 0);
+                AutomationProperties.SetAutomationId(compared, "Boostix.Center.Debrief.Comparison");
+                body.Children.Add(compared);
+            }
+
             var chart = new SessionChart(report.Timeline, report.PhysicalMemoryTotalBytes)
             {
                 Height = 150,
@@ -702,6 +712,11 @@ namespace Boostix
                 verdicts.Children.Add(row);
             }
             body.Children.Add(verdicts);
+            FrameworkElement closeForGame = BuildCloseForGameButton(report);
+            if (closeForGame != null)
+            {
+                body.Children.Add(closeForGame);
+            }
 
             BoostCrashInsight crashInsight = BoostCrashAssistant.Analyze(report);
             if (crashInsight.Category != BoostCrashCategory.None)
@@ -734,6 +749,44 @@ namespace Boostix
                 body.Children.Add(list);
             }
             return root;
+        }
+
+        /// <summary>
+        /// One click from "who held the memory" to closing it for every game.
+        /// </summary>
+        private FrameworkElement BuildCloseForGameButton(BoostSessionReport report)
+        {
+            List<string> chosen = settings.CloseForGame ?? new List<string>();
+            BoostMemoryHog hog = SessionVerdicts.BiggestClosable(
+                (report.VideoMemoryHogs ?? new List<BoostMemoryHog>())
+                    .Concat(report.MemoryHogs ?? new List<BoostMemoryHog>())
+                    .Where(item => !string.IsNullOrWhiteSpace(item.ProcessName) &&
+                        !VideoMemoryRanking.IsSystemTool(item.ProcessName) &&
+                        !chosen.Contains(item.ProcessName, StringComparer.OrdinalIgnoreCase)),
+                report.TargetExecutablePath);
+            if (hog == null)
+            {
+                return null;
+            }
+
+            Button button = MakeActionButton(
+                string.Format(CultureInfo.CurrentCulture, L.T("Закрывать {0} на время игры"), hog.Name),
+                BoostixButtonKind.Secondary,
+                BoostixIcons.Shield);
+            button.HorizontalAlignment = HorizontalAlignment.Left;
+            button.Margin = new Thickness(0, 14, 0, 0);
+            AutomationProperties.SetAutomationId(button, "Boostix.Center.Debrief.CloseForGame");
+            button.Click += delegate
+            {
+                if (settings.CloseForGame == null)
+                {
+                    settings.CloseForGame = new List<string>();
+                }
+                settings.CloseForGame.Add(hog.ProcessName);
+                button.IsEnabled = false;
+                Raise(SettingsChanged);
+            };
+            return button;
         }
 
         private FrameworkElement BuildDebriefStats(BoostSessionReport report)

@@ -335,6 +335,131 @@ if (Get-Forecast (4 * $gib) (5 * $gib)) {
     throw 'What the game already holds must not count against it.'
 }
 
+# Who held the video memory. On a real PC a hidden process showed up here as
+# cmd.exe with 2.7 GB: Windows tools have no use for the graphics card.
+function New-HogList {
+    param([object[]]$Hogs)
+    $list = [Activator]::CreateInstance([Collections.Generic.List``1].MakeGenericType($hogType))
+    foreach ($named in $Hogs) {
+        $item = [Activator]::CreateInstance($hogType, $true)
+        $hogType.GetField('Name').SetValue($item, [string]$named[0])
+        $hogType.GetField('Bytes').SetValue($item, [long]$named[1] * 1048576L)
+        $hogType.GetField('ProcessName').SetValue($item, [string]$named[2])
+        $list.Add($item)
+    }
+    return , $list
+}
+$videoPairs = New-Object 'System.Collections.Generic.List[System.Collections.Generic.KeyValuePair[string,long]]'
+foreach ($sample in @(
+    @('firefox', 700), @('firefox', 500), @('dwm', 1500), @('cs2', 5000),
+    @('wallpaper64', 350), @('cmd', 2700), @('tiny', 50))) {
+    $videoPairs.Add((New-Object $pairType.FullName ([string]$sample[0], ([long]$sample[1] * 1048576L))))
+}
+$videoRanking = $assembly.GetType('Boostix.VideoMemoryRanking', $true)
+$videoArguments = New-Object 'object[]' 2
+$videoArguments[0] = $videoPairs.PSObject.BaseObject
+$videoArguments[1] = 'cs2'
+$videoHogs = @($videoRanking.GetMethod('Rank', $flags).Invoke($null, $videoArguments))
+$videoNames = @($videoHogs | ForEach-Object { [string]$hogType.GetField('ProcessName').GetValue($_) })
+if (($videoNames -join ',') -cne 'cmd,firefox,wallpaper64') {
+    throw "Video memory ranking gave: $($videoNames -join ',')."
+}
+
+$minerReport = New-MemoryReport ([long](0.4 * $gib)) ([long](7.9 * $gib))
+$reportType.GetField('VideoMemoryHogs', $instance).SetValue($minerReport, (New-HogList @(,@('cmd.exe', 2700, 'cmd'))))
+$minerAdvice = (Get-Verdicts $minerReport)[2]
+if ((Get-VerdictText $minerAdvice 'Title') -cne (Convert-UiName '0J/RgNC+0LLQtdGA0YzRgtC1INC60L7QvNC/0YzRjtGC0LXRgCDQsNC90YLQuNCy0LjRgNGD0YHQvtC8')) {
+    throw "A Windows tool holding video memory gave the advice: $(Get-VerdictText $minerAdvice 'Title')"
+}
+if (-not (Get-VerdictText $minerAdvice 'Detail').Contains('cmd.exe')) {
+    throw 'The warning does not name the process.'
+}
+
+$videoReport = New-MemoryReport (6 * $gib) ([long](7.9 * $gib))
+$reportType.GetField('VideoMemoryHogs', $instance).SetValue($videoReport, (New-HogList @(,@('Firefox', 1200, 'firefox'))))
+$videoVerdicts = Get-Verdicts $videoReport
+if (-not (Get-VerdictText $videoVerdicts[0] 'Detail').Contains('Firefox')) {
+    throw 'The debrief does not say who held the video memory.'
+}
+if (-not (Get-VerdictText $videoVerdicts[2] 'Title').Contains('Firefox')) {
+    throw 'The advice does not name the program holding video memory.'
+}
+
+$savedVideo = [string]$assembly.GetType('Boostix.BoostSessionReportStore', $true).GetMethod('Serialize', $flags).Invoke($null, [object[]]@($videoReport))
+$videoReadArguments = New-Object 'object[]' 1
+$videoReadArguments[0] = [string[]]($savedVideo -split "`r?`n")
+$videoRead = $assembly.GetType('Boostix.BoostSessionReportStore', $true).GetMethod('Deserialize', $flags).Invoke($null, $videoReadArguments)
+$readVideoHogs = $reportType.GetField('VideoMemoryHogs', $instance).GetValue($videoRead)
+if (-not $readVideoHogs -or $readVideoHogs.Count -ne 1 -or
+    [string]$hogType.GetField('ProcessName').GetValue($readVideoHogs[0]) -cne 'firefox') {
+    throw 'The video memory list did not survive saving the report.'
+}
+
+# Discord Clips is Discord: one program, one line.
+$merged = @($assembly.GetType('Boostix.MemoryHogRanking', $true).GetMethod('MergeHelpers', $flags).Invoke(
+    $null,
+    [object[]]@(, (New-HogList @(@('Discord', 1300, 'Discord'), @('Discord Clips', 240, 'DiscordClips'), @('Firefox', 900, 'firefox'))))))
+$mergedNames = @($merged | ForEach-Object { [string]$hogType.GetField('Name').GetValue($_) })
+if (($mergedNames -join ',') -cne 'Discord,Firefox' -or
+    [long]$hogType.GetField('Bytes').GetValue($merged[0]) -ne 1540L * 1048576L) {
+    throw "Merged helpers gave: $($mergedNames -join ',')."
+}
+
+# Did closing programs help? The debrief compares with the game's last session.
+$compare = $assembly.GetType('Boostix.SessionComparison', $true).GetMethod('Describe', $flags)
+function New-ComparedReport {
+    param([string]$Id, [int]$DaysAgo, [double]$Lowest, [double]$GpuPeak)
+    $report = New-MemoryReport ([long]($Lowest * $gib)) ([long]($GpuPeak * $gib))
+    $reportType.GetField('SessionId', $instance).SetValue($report, $Id)
+    $reportType.GetField('TargetExecutablePath', $instance).SetValue($report, $steamGame)
+    $reportType.GetField('StartedUtc', $instance).SetValue($report, [DateTime]::UtcNow.AddDays(-$DaysAgo))
+    return $report
+}
+$earlier = New-ComparedReport 'aaaa0000000000000000000000000001' 2 0.1 7.6
+$later = New-ComparedReport 'aaaa0000000000000000000000000002' 1 3.0 6.0
+$comparedList = [Activator]::CreateInstance([Collections.Generic.List``1].MakeGenericType($reportType))
+$comparedList.Add($later)
+$comparedList.Add($earlier)
+$comparison = [string]$compare.Invoke($null, [object[]]@($later, $comparedList))
+if ($comparison -notmatch '0[.,]1' -or $comparison -notmatch '3[.,]0') {
+    throw "The comparison read: $comparison"
+}
+if ([string]$compare.Invoke($null, [object[]]@($earlier, $comparedList))) {
+    throw 'The first session of a game has nothing to compare with.'
+}
+
+# Programs closed for the game: names are checked, and only what can really be
+# started again comes back.
+$closeList = $assembly.GetType('Boostix.SessionCloseList', $true)
+$parsedNames = @($closeList.GetMethod('Parse', $flags).Invoke($null, [object[]]@('firefox;Spotify;bad|name;FIREFOX')))
+if (($parsedNames -join ',') -cne 'firefox,Spotify') {
+    throw "The close list read: $($parsedNames -join ',')."
+}
+$namesList = New-Object 'System.Collections.Generic.List[string]'
+foreach ($name in 'firefox', 'cs2', 'Spotify') { $namesList.Add($name) }
+$formatArguments = New-Object 'object[]' 2
+$formatArguments[0] = $namesList.PSObject.BaseObject
+$formatArguments[1] = 'CS2'
+if ([string]$closeList.GetMethod('Format', $flags).Invoke($null, $formatArguments) -cne 'firefox,Spotify') {
+    throw 'The game itself must never be on the list to close.'
+}
+$closedType = $assembly.GetType('Boostix.ClosedProgram', $true)
+$closedList = [Activator]::CreateInstance([Collections.Generic.List``1].MakeGenericType($closedType))
+foreach ($entry in 'firefox|11|C:\Apps\firefox.exe', 'firefox|12|C:\Apps\firefox.exe', 'steam|13|C:\Apps\steam.exe', 'gone|14|C:\Apps\gone.exe', 'nopath|15|') {
+    $closedList.Add($closeList.GetMethod('ParseStopped', $flags).Invoke($null, [object[]]@($entry)))
+}
+$isRunning = [Func[string, bool]] { param($name) $name -eq 'steam' }
+$fileExists = [Func[string, bool]] { param($path) $path -notlike '*gone*' }
+$reopenArguments = New-Object 'object[]' 3
+$reopenArguments[0] = $closedList
+$reopenArguments[1] = $isRunning
+$reopenArguments[2] = $fileExists
+$reopen = @($closeList.GetMethod('ToReopen', $flags).Invoke($null, $reopenArguments))
+$reopenNames = @($reopen | ForEach-Object { [string]$closedType.GetField('ProcessName').GetValue($_) })
+if (($reopenNames -join ',') -cne 'firefox') {
+    throw "After the game Boostix would reopen: $($reopenNames -join ',')."
+}
+
 # 12 MB free is not "0,0 GB": that reads like a broken number.
 $formatGb = $assembly.GetType('Boostix.SessionVerdicts', $true).GetMethod('FormatGigabytes', $flags)
 $tiny = [string]$formatGb.Invoke($null, [object[]]@([long](12 * 1048576L)))
@@ -371,6 +496,14 @@ if ([string]$ownLoad.Invoke($null, [object[]]@([TimeSpan]::FromSeconds(1), [Time
 $programSource = [IO.File]::ReadAllText((Join-Path $projectRoot 'Boostix\Program.cs'))
 if ($programSource.Contains((Convert-UiName '0JfQsNC60YDRi9C70Lgg0L/RgNC+0LPRgNCw0LzQvNGLLCDQvtGC0LzQtdGH0LXQvdC90YvQtQ=='))) {
     throw 'The session log claims closed programs without reading the result.'
+}
+
+# The log speaks plainly and says it once; a busy hotkey is not a crash.
+if ($programSource.Contains('SESSION GUARD')) {
+    throw 'The session log still shows an internal name.'
+}
+if ($programSource -match 'CrashLog\.Write\(\s*"The Boost hotkey') {
+    throw 'A hotkey held by another program must not go to the crash log.'
 }
 
 # One name for one switch: the hints say Auto, so the switch does too.
@@ -491,6 +624,11 @@ try {
     Invoke-Element $row
     if (-not (Find-Element $window 'Boostix.Center.Debrief.Headline')) {
         throw 'A journal row did not open its debrief.'
+    }
+    foreach ($id in 'Boostix.Center.Debrief.Comparison', 'Boostix.Center.Debrief.CloseForGame') {
+        if (-not (Find-Element $window $id)) {
+            throw "The debrief is missing $id."
+        }
     }
 }
 finally {

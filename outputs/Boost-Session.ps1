@@ -7,6 +7,7 @@ param(
     [switch]$CloseTeams,
     [switch]$CloseWallpaper,
     [switch]$CloseNvidiaOverlay,
+    [string]$CloseProcessNames,
     [string]$ReadySignalPath,
     [string]$ResultPath
 )
@@ -34,41 +35,57 @@ if ($CloseOneDrive) { $processesToStop += 'OneDrive' }
 if ($CloseTeams) { $processesToStop += @('ms-teams', 'Teams') }
 if ($CloseWallpaper) { $processesToStop += @('wallpaper32', 'wallpaper64') }
 if ($CloseNvidiaOverlay) { $processesToStop += @('NVIDIA Overlay', 'nvsphelper64') }
+if ($CloseProcessNames) {
+    foreach ($extraName in ($CloseProcessNames -split ',')) {
+        $trimmedName = $extraName.Trim()
+        if ($trimmedName -match '^[\w .\-]+$') { $processesToStop += $trimmedName }
+    }
+}
 $processesToStop = @($processesToStop | Select-Object -Unique)
 $stoppedProcesses = New-Object Collections.Generic.List[string]
 $warnings = New-Object Collections.Generic.List[string]
 
 function Stop-BoostBackgroundProcesses {
     foreach ($processName in $processesToStop) {
-        $processes = Get-Process -Name $processName -ErrorAction SilentlyContinue
-        foreach ($process in $processes) {
-            "Requesting $($process.Name) (PID $($process.Id)) to close." |
-                Add-Content -LiteralPath $logPath -Encoding UTF8
-            try {
-                $closed = $false
-                if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
-                    $closed = $process.CloseMainWindow()
-                    if ($closed) {
-                        $null = $process.WaitForExit(2500)
-                    }
-                }
-                if (-not $process.HasExited) {
-                    # Boostix 2.0 deliberately remains graceful-only here. A
-                    # process that ignores WM_CLOSE may contain unsaved user
-                    # data, so a normal Boost session must never kill it.
-                    "Graceful close did not finish for $($process.Name); leaving the process running." |
-                        Add-Content -LiteralPath $logPath -Encoding UTF8
-                    $warnings.Add(
-                        "Graceful close timed out for $($process.Name) (PID $($process.Id)); process was not forced to exit.")
-                    continue
-                }
-                $stoppedProcesses.Add("$($process.Name)|$($process.Id)")
+        $processes = @(Get-Process -Name $processName -ErrorAction SilentlyContinue)
+        if ($processes.Count -eq 0) {
+            continue
+        }
+        try {
+            # A program leaves as one: its helpers have no window and go with
+            # the main one, so the whole group gets one request and one wait.
+            $windowed = @($processes | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero })
+            $mainProcess = if ($windowed.Count -gt 0) { $windowed[0] } else { $processes[0] }
+            $executablePath = $mainProcess.Path
+            foreach ($process in $windowed) {
+                "Requesting $($process.Name) (PID $($process.Id)) to close." |
+                    Add-Content -LiteralPath $logPath -Encoding UTF8
+                $null = $process.CloseMainWindow()
             }
-            catch {
-                $message = "Could not stop $($process.Name) (PID $($process.Id)): $($_.Exception.Message)"
-                $warnings.Add($message)
-                $message | Add-Content -LiteralPath $logPath -Encoding UTF8
+            $deadline = [DateTime]::UtcNow.AddMilliseconds(2500)
+            foreach ($process in $processes) {
+                $remaining = [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds
+                if ($windowed.Count -gt 0 -and $remaining -gt 0) {
+                    $null = $process.WaitForExit($remaining)
+                }
             }
+            $left = @($processes | Where-Object { -not $_.HasExited })
+            if ($left.Count -gt 0) {
+                # Boostix 2.0 deliberately remains graceful-only here. A
+                # process that ignores WM_CLOSE may contain unsaved user
+                # data, so a normal Boost session must never kill it.
+                "Graceful close did not finish for $processName; leaving it running." |
+                    Add-Content -LiteralPath $logPath -Encoding UTF8
+                $warnings.Add(
+                    "Graceful close timed out for $processName ($($left.Count) of $($processes.Count) processes); it was not forced to exit.")
+                continue
+            }
+            $stoppedProcesses.Add("$processName|$($mainProcess.Id)|$executablePath")
+        }
+        catch {
+            $message = "Could not stop ${processName}: $($_.Exception.Message)"
+            $warnings.Add($message)
+            $message | Add-Content -LiteralPath $logPath -Encoding UTF8
         }
     }
 }

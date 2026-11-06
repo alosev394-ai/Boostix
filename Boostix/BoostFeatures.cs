@@ -77,6 +77,8 @@ namespace Boostix
         public bool MinimizeToTray;
         public bool GameSignals;
         public bool StartWithWindows;
+        public bool ReopenAfterGame;
+        public List<string> CloseForGame = new List<string>();
         public string Theme;
         public string Language;
 
@@ -97,6 +99,8 @@ namespace Boostix
                 MinimizeToTray = MinimizeToTray,
                 GameSignals = GameSignals,
                 StartWithWindows = StartWithWindows,
+                ReopenAfterGame = ReopenAfterGame,
+                CloseForGame = new List<string>(CloseForGame ?? new List<string>()),
                 Theme = Theme,
                 Language = Language
             };
@@ -131,6 +135,78 @@ namespace Boostix
         internal const int MaximumPerSession = 3;
         public string Name;
         public long Bytes;
+        public string ProcessName;
+    }
+
+    /// <summary>
+    /// A program Boostix closed for a game, and how to start it again.
+    /// </summary>
+    internal sealed class ClosedProgram
+    {
+        public string ProcessName;
+        public string ExecutablePath;
+    }
+
+    /// <summary>
+    /// The programs chosen to close for a game. Names go to the preparation
+    /// script, so only plain process names are accepted.
+    /// </summary>
+    internal static class SessionCloseList
+    {
+        private static bool IsValidName(string name)
+        {
+            return !string.IsNullOrWhiteSpace(name) &&
+                name.All(item => char.IsLetterOrDigit(item) || item == ' ' || item == '.' ||
+                    item == '-' || item == '_');
+        }
+
+        internal static List<string> Parse(string saved)
+        {
+            return (saved ?? string.Empty)
+                .Split(';')
+                .Select(item => item.Trim())
+                .Where(IsValidName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        /// <summary>
+        /// The argument for the script. The game itself is never closed.
+        /// </summary>
+        internal static string Format(IEnumerable<string> names, string gameProcessName)
+        {
+            return string.Join(",", (names ?? Enumerable.Empty<string>())
+                .Where(IsValidName)
+                .Where(item => !string.Equals(item, gameProcessName, StringComparison.OrdinalIgnoreCase))
+                .ToArray());
+        }
+
+        internal static ClosedProgram ParseStopped(string value)
+        {
+            string[] parts = (value ?? string.Empty).Split('|');
+            return new ClosedProgram
+            {
+                ProcessName = parts[0].Trim(),
+                ExecutablePath = parts.Length > 2 ? parts[2].Trim() : string.Empty
+            };
+        }
+
+        /// <summary>
+        /// Each program once, if its file is still there and nobody has
+        /// started it again during the game.
+        /// </summary>
+        internal static List<ClosedProgram> ToReopen(
+            IEnumerable<ClosedProgram> closed,
+            Func<string, bool> isRunning,
+            Func<string, bool> fileExists)
+        {
+            return (closed ?? Enumerable.Empty<ClosedProgram>())
+                .Where(item => !string.IsNullOrWhiteSpace(item.ExecutablePath))
+                .GroupBy(item => item.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .Where(item => fileExists(item.ExecutablePath) && !isRunning(item.ProcessName))
+                .ToList();
+        }
     }
 
     /// <summary>
@@ -166,12 +242,35 @@ namespace Boostix
                 .Select(group => new BoostMemoryHog
                 {
                     Name = group.First().Key,
+                    ProcessName = group.First().Key,
                     Bytes = group.Sum(item => Math.Max(0L, item.Value))
                 })
                 .Where(hog => hog.Bytes >= MinimumBytes)
                 .OrderByDescending(hog => hog.Bytes)
                 .Take(BoostMemoryHog.MaximumPerSession)
                 .ToList();
+        }
+
+        /// <summary>
+        /// "Discord Clips" is part of Discord: one program, one line.
+        /// </summary>
+        internal static List<BoostMemoryHog> MergeHelpers(List<BoostMemoryHog> hogs)
+        {
+            var merged = new List<BoostMemoryHog>();
+            foreach (BoostMemoryHog hog in hogs ?? new List<BoostMemoryHog>())
+            {
+                BoostMemoryHog owner = merged.FirstOrDefault(item =>
+                    (hog.Name ?? string.Empty).StartsWith(item.Name + " ", StringComparison.OrdinalIgnoreCase));
+                if (owner == null)
+                {
+                    merged.Add(hog);
+                }
+                else
+                {
+                    owner.Bytes += hog.Bytes;
+                }
+            }
+            return merged.OrderByDescending(hog => hog.Bytes).ToList();
         }
 
         /// <summary>
@@ -194,7 +293,7 @@ namespace Boostix
                 {
                     hog.Name = ReadableName(hog.Name, processes);
                 }
-                return hogs;
+                return MergeHelpers(hogs);
             }
             catch (Exception)
             {
@@ -209,7 +308,7 @@ namespace Boostix
             }
         }
 
-        private static string ReadableName(string processName, Process[] processes)
+        internal static string ReadableName(string processName, Process[] processes)
         {
             foreach (Process process in processes)
             {
@@ -231,6 +330,189 @@ namespace Boostix
                 }
             }
             return char.ToUpperInvariant(processName[0]) + processName.Substring(1);
+        }
+    }
+
+    /// <summary>
+    /// Names who held the video memory. Uses the Local Usage counter: Dedicated
+    /// Usage of the same category adds up to several times the size of the
+    /// card. Reads counters only and opens no process.
+    /// </summary>
+    internal static class VideoMemoryRanking
+    {
+        private const long MinimumBytes = 200L * 1024L * 1024L;
+        private const uint PdhFormatLarge = 0x00000400;
+        private const int PdhMoreData = unchecked((int)0x800007D2);
+
+        /// <summary>
+        /// Windows tools with no use for the graphics card. Malware hides in
+        /// exactly these, so unlike the memory list they are not left out.
+        /// </summary>
+        private static readonly HashSet<string> SystemTools =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "cmd", "powershell", "pwsh", "conhost", "rundll32", "regsvr32",
+                "wscript", "cscript", "mshta", "svchost", "dllhost", "taskhostw",
+                "notepad", "regasm", "regsvcs", "installutil", "msbuild", "vbc",
+                "aspnet_compiler", "wuauclt"
+            };
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct CounterValueItem
+        {
+            public IntPtr Name;
+            public uint Status;
+            public uint Padding;
+            public long Value;
+        }
+
+        [DllImport("pdh.dll", CharSet = CharSet.Unicode)]
+        private static extern int PdhOpenQueryW(string source, IntPtr userData, out IntPtr query);
+
+        [DllImport("pdh.dll", CharSet = CharSet.Unicode)]
+        private static extern int PdhAddEnglishCounterW(
+            IntPtr query,
+            string path,
+            IntPtr userData,
+            out IntPtr counter);
+
+        [DllImport("pdh.dll")]
+        private static extern int PdhCollectQueryData(IntPtr query);
+
+        [DllImport("pdh.dll", CharSet = CharSet.Unicode)]
+        private static extern int PdhGetFormattedCounterArrayW(
+            IntPtr counter,
+            uint format,
+            ref uint bufferSize,
+            out uint itemCount,
+            IntPtr buffer);
+
+        [DllImport("pdh.dll")]
+        private static extern int PdhCloseQuery(IntPtr query);
+
+        internal static bool IsSystemTool(string processName)
+        {
+            return SystemTools.Contains(processName ?? string.Empty);
+        }
+
+        internal static List<BoostMemoryHog> Rank(
+            IEnumerable<KeyValuePair<string, long>> processes,
+            string targetName)
+        {
+            return (processes ?? Enumerable.Empty<KeyValuePair<string, long>>())
+                .Where(item =>
+                    !string.IsNullOrWhiteSpace(item.Key) &&
+                    !string.Equals(item.Key, "dwm", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(item.Key, targetName, StringComparison.OrdinalIgnoreCase))
+                .GroupBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new BoostMemoryHog
+                {
+                    Name = group.First().Key,
+                    ProcessName = group.First().Key,
+                    Bytes = group.Sum(item => Math.Max(0L, item.Value))
+                })
+                .Where(hog => hog.Bytes >= MinimumBytes)
+                .OrderByDescending(hog => hog.Bytes)
+                .Take(BoostMemoryHog.MaximumPerSession)
+                .ToList();
+        }
+
+        internal static List<BoostMemoryHog> Capture(string targetName)
+        {
+            Process[] processes = new Process[0];
+            try
+            {
+                Dictionary<int, long> usage = ReadLocalUsage();
+                if (usage.Count == 0)
+                {
+                    return new List<BoostMemoryHog>();
+                }
+                processes = Process.GetProcesses();
+                List<BoostMemoryHog> hogs = Rank(
+                    processes
+                        .Where(process => usage.ContainsKey(process.Id))
+                        .Select(process => new KeyValuePair<string, long>(
+                            process.ProcessName,
+                            usage[process.Id])),
+                    targetName);
+                foreach (BoostMemoryHog hog in hogs)
+                {
+                    hog.Name = IsSystemTool(hog.ProcessName)
+                        ? hog.ProcessName + ".exe"
+                        : MemoryHogRanking.ReadableName(hog.ProcessName, processes);
+                }
+                return MemoryHogRanking.MergeHelpers(hogs);
+            }
+            catch (Exception)
+            {
+                return new List<BoostMemoryHog>();
+            }
+            finally
+            {
+                foreach (Process process in processes)
+                {
+                    process.Dispose();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Instances are named pid_1234_luid_..._phys_0, one per graphics card.
+        /// </summary>
+        private static Dictionary<int, long> ReadLocalUsage()
+        {
+            var usage = new Dictionary<int, long>();
+            IntPtr query;
+            if (PdhOpenQueryW(null, IntPtr.Zero, out query) != 0)
+            {
+                return usage;
+            }
+            IntPtr buffer = IntPtr.Zero;
+            try
+            {
+                IntPtr counter;
+                uint size = 0;
+                uint count;
+                if (PdhAddEnglishCounterW(
+                        query,
+                        @"\GPU Process Memory(*)\Local Usage",
+                        IntPtr.Zero,
+                        out counter) != 0 ||
+                    PdhCollectQueryData(query) != 0 ||
+                    PdhGetFormattedCounterArrayW(counter, PdhFormatLarge, ref size, out count, IntPtr.Zero) != PdhMoreData)
+                {
+                    return usage;
+                }
+                buffer = Marshal.AllocHGlobal((int)size);
+                if (PdhGetFormattedCounterArrayW(counter, PdhFormatLarge, ref size, out count, buffer) != 0)
+                {
+                    return usage;
+                }
+                int stride = Marshal.SizeOf(typeof(CounterValueItem));
+                for (int index = 0; index < count; index++)
+                {
+                    var item = (CounterValueItem)Marshal.PtrToStructure(
+                        IntPtr.Add(buffer, index * stride),
+                        typeof(CounterValueItem));
+                    string[] parts = (Marshal.PtrToStringUni(item.Name) ?? string.Empty).Split('_');
+                    int processId;
+                    if (parts.Length > 1 && int.TryParse(parts[1], out processId))
+                    {
+                        long known;
+                        usage.TryGetValue(processId, out known);
+                        usage[processId] = known + Math.Max(0L, item.Value);
+                    }
+                }
+                return usage;
+            }
+            finally
+            {
+                if (buffer != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+                PdhCloseQuery(query);
+            }
         }
     }
 
@@ -430,6 +712,7 @@ namespace Boostix
         public string StopReason;
         public List<BoostActionRecord> Actions;
         public List<BoostMemoryHog> MemoryHogs;
+        public List<BoostMemoryHog> VideoMemoryHogs;
         public BoostPerformanceResult Performance;
 
         public BoostSessionReport Clone()
@@ -438,6 +721,7 @@ namespace Boostix
             clone.Timeline = new List<SessionTimelinePoint>(
                 Timeline ?? new List<SessionTimelinePoint>());
             clone.MemoryHogs = MemoryHogs == null ? null : new List<BoostMemoryHog>(MemoryHogs);
+            clone.VideoMemoryHogs = VideoMemoryHogs == null ? null : new List<BoostMemoryHog>(VideoMemoryHogs);
             clone.Actions = new List<BoostActionRecord>();
             foreach (BoostActionRecord action in Actions ??
                 new List<BoostActionRecord>())
@@ -1764,10 +2048,46 @@ namespace Boostix
             }
             foreach (BoostMemoryHog hog in report.MemoryHogs ?? new List<BoostMemoryHog>())
             {
-                lines.Add("MemoryHog=" + Encode(
-                    hog.Bytes.ToString(CultureInfo.InvariantCulture) + "\t" + hog.Name));
+                lines.Add("MemoryHog=" + EncodeHog(hog));
+            }
+            foreach (BoostMemoryHog hog in report.VideoMemoryHogs ?? new List<BoostMemoryHog>())
+            {
+                lines.Add("VideoMemoryHog=" + EncodeHog(hog));
             }
             return string.Join(Environment.NewLine, lines.ToArray()) + Environment.NewLine;
+        }
+
+        private static string EncodeHog(BoostMemoryHog hog)
+        {
+            return Encode(
+                hog.Bytes.ToString(CultureInfo.InvariantCulture) + "\t" + hog.Name + "\t" + hog.ProcessName);
+        }
+
+        private static List<BoostMemoryHog> DecodeHogs(IEnumerable<string> encodedValues)
+        {
+            List<BoostMemoryHog> hogs = null;
+            foreach (string encoded in encodedValues.Take(BoostMemoryHog.MaximumPerSession))
+            {
+                string[] parts = Decode(encoded).Split(new[] { '\t' }, 3);
+                long bytes;
+                if (parts.Length < 2 ||
+                    string.IsNullOrWhiteSpace(parts[1]) ||
+                    !long.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out bytes))
+                {
+                    continue;
+                }
+                if (hogs == null)
+                {
+                    hogs = new List<BoostMemoryHog>();
+                }
+                hogs.Add(new BoostMemoryHog
+                {
+                    Name = parts[1],
+                    Bytes = bytes,
+                    ProcessName = parts.Length > 2 ? parts[2] : string.Empty
+                });
+            }
+            return hogs;
         }
 
         private static BoostSessionReport Deserialize(string[] lines)
@@ -1775,6 +2095,7 @@ namespace Boostix
             var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var actionValues = new List<string>();
             var hogValues = new List<string>();
+            var videoHogValues = new List<string>();
             foreach (string line in lines)
             {
                 int separator = line.IndexOf('=');
@@ -1791,6 +2112,10 @@ namespace Boostix
                 else if (string.Equals(key, "MemoryHog", StringComparison.OrdinalIgnoreCase))
                 {
                     hogValues.Add(value);
+                }
+                else if (string.Equals(key, "VideoMemoryHog", StringComparison.OrdinalIgnoreCase))
+                {
+                    videoHogValues.Add(value);
                 }
                 else
                 {
@@ -2015,22 +2340,8 @@ namespace Boostix
                     Detail = parts[3]
                 });
             }
-            foreach (string encoded in hogValues.Take(BoostMemoryHog.MaximumPerSession))
-            {
-                string[] parts = Decode(encoded).Split(new[] { '\t' }, 2);
-                long bytes;
-                if (parts.Length != 2 ||
-                    string.IsNullOrWhiteSpace(parts[1]) ||
-                    !long.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out bytes))
-                {
-                    continue;
-                }
-                if (report.MemoryHogs == null)
-                {
-                    report.MemoryHogs = new List<BoostMemoryHog>();
-                }
-                report.MemoryHogs.Add(new BoostMemoryHog { Name = parts[1], Bytes = bytes });
-            }
+            report.MemoryHogs = DecodeHogs(hogValues);
+            report.VideoMemoryHogs = DecodeHogs(videoHogValues);
             return report;
         }
 
