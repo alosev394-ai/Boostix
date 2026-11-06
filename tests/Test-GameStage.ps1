@@ -749,7 +749,16 @@ try {
     }
     (Find-Element $window 'Boostix.Center.Tab.Settings').GetCurrentPattern(
         [Windows.Automation.SelectionItemPattern]::Pattern).Select()
-    foreach ($id in 'Boostix.Center.Settings.BeforeGame', 'Boostix.Center.Settings.AfterGame', 'Boostix.Center.Settings.FpsAccess') {
+    $settingsIds = @('Boostix.Center.Settings.BeforeGame', 'Boostix.Center.Settings.AfterGame')
+    # An administrator, as on the CI runners, needs no permission to measure FPS.
+    $fpsGranted = [bool]$assembly.GetType('Boostix.FpsAccess', $true).GetMethod('IsGranted', $flags).Invoke($null, @())
+    if (-not $fpsGranted) {
+        $settingsIds += 'Boostix.Center.Settings.FpsAccess'
+    }
+    elseif (Find-Element $window 'Boostix.Center.Settings.FpsAccess' 1) {
+        throw 'With the rights in place the settings must not ask for them.'
+    }
+    foreach ($id in $settingsIds) {
         if (-not (Find-Element $window $id)) {
             throw "The settings page is missing $id."
         }
