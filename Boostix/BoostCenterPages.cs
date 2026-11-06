@@ -712,6 +712,11 @@ namespace Boostix
                 verdicts.Children.Add(row);
             }
             body.Children.Add(verdicts);
+            FrameworkElement knownProgram = BuildKnownProgramButton(report);
+            if (knownProgram != null)
+            {
+                body.Children.Add(knownProgram);
+            }
             FrameworkElement closeForGame = BuildCloseForGameButton(report);
             if (closeForGame != null)
             {
@@ -749,6 +754,39 @@ namespace Boostix
                 body.Children.Add(list);
             }
             return root;
+        }
+
+        /// <summary>
+        /// The player knows this program: no more warnings about it. It stays
+        /// in the list of who held the video memory.
+        /// </summary>
+        private FrameworkElement BuildKnownProgramButton(BoostSessionReport report)
+        {
+            BoostMemoryHog hog = (report.VideoMemoryHogs ?? new List<BoostMemoryHog>())
+                .FirstOrDefault(item => VideoMemoryRanking.IsSuspicious(item.ProcessName));
+            if (hog == null)
+            {
+                return null;
+            }
+
+            Button button = MakeActionButton(
+                L.T("Это моя программа"),
+                BoostixButtonKind.Secondary,
+                BoostixIcons.Shield);
+            button.HorizontalAlignment = HorizontalAlignment.Left;
+            button.Margin = new Thickness(0, 14, 0, 0);
+            AutomationProperties.SetAutomationId(button, "Boostix.Center.Debrief.KnownProgram");
+            button.Click += delegate
+            {
+                if (settings.KnownPrograms == null)
+                {
+                    settings.KnownPrograms = new List<string>();
+                }
+                settings.KnownPrograms.Add(hog.ProcessName);
+                button.IsEnabled = false;
+                Raise(SettingsChanged);
+            };
+            return button;
         }
 
         /// <summary>
@@ -805,6 +843,16 @@ namespace Boostix
                 row.Children.Add(BuildBigStat(
                     SessionVerdicts.FormatGigabytes(report.PeakGpuDedicatedUsageBytes),
                     L.T("пик видеопамяти")));
+            }
+            if (report.Performance != null && report.Performance.Available)
+            {
+                row.Children.Add(BuildBigStat(
+                    string.Format(
+                        CultureInfo.CurrentCulture,
+                        "{0:0} / {1:0}",
+                        report.Performance.AverageFps,
+                        report.Performance.OnePercentLowFps),
+                    L.T("FPS средний / 1% low")));
             }
             List<int> loads = (report.Timeline ?? new List<SessionTimelinePoint>())
                 .Where(point => point.CpuPercent >= 0)

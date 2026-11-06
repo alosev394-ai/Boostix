@@ -460,6 +460,109 @@ if (($reopenNames -join ',') -cne 'firefox') {
     throw "After the game Boostix would reopen: $($reopenNames -join ',')."
 }
 
+# A program the player knows stops being a warning but stays in the list.
+$setKnown = $videoRanking.GetMethod('SetKnownPrograms', $flags)
+$knownList = New-Object 'System.Collections.Generic.List[string]'
+$knownList.Add('CMD')
+$knownArguments = New-Object 'object[]' 1
+$knownArguments[0] = $knownList.PSObject.BaseObject
+[void]$setKnown.Invoke($null, $knownArguments)
+try {
+    $knownAdvice = (Get-Verdicts $minerReport)[2]
+    if ((Get-VerdictText $knownAdvice 'Title') -ceq (Get-VerdictText $minerAdvice 'Title')) {
+        throw 'A known program still gets the antivirus warning.'
+    }
+    if ([bool]$videoRanking.GetMethod('IsSuspicious', $flags).Invoke($null, [object[]]@('cmd'))) {
+        throw 'A known program is still suspicious.'
+    }
+    if (-not [bool]$videoRanking.GetMethod('IsSuspicious', $flags).Invoke($null, [object[]]@('rundll32'))) {
+        throw 'Another Windows tool must stay suspicious.'
+    }
+}
+finally {
+    $knownList.Clear()
+    [void]$setKnown.Invoke($null, $knownArguments)
+}
+
+# Who holds the graphics card right now, before the game starts.
+$loadPairs = New-Object 'System.Collections.Generic.List[System.Collections.Generic.KeyValuePair[string,double]]'
+$loadPairType = [Collections.Generic.KeyValuePair[string, double]]
+foreach ($sample in @(@('cmd', 80.0), @('cmd', 4.0), @('dwm', 30.0), @('firefox', 12.0), @('tiny', 3.0))) {
+    $loadPairs.Add((New-Object $loadPairType.FullName ([string]$sample[0], [double]$sample[1])))
+}
+$loadArguments = New-Object 'object[]' 1
+$loadArguments[0] = $loadPairs.PSObject.BaseObject
+$load = $videoRanking.GetMethod('RankGpuLoad', $flags).Invoke($null, $loadArguments)
+$loadType = $assembly.GetType('Boostix.BoostGpuLoad', $true)
+$loadText = @($load | ForEach-Object { '{0}:{1}' -f $loadType.GetField('Name').GetValue($_), $loadType.GetField('Percent').GetValue($_) }) -join ','
+if ($loadText -cne 'cmd:84,firefox:12') {
+    throw "The graphics card load read: $loadText"
+}
+$describeLoad = $assembly.GetType('Boostix.SessionVerdicts', $true).GetMethod('DescribeGpuLoad', $flags)
+$busyArguments = New-Object 'object[]' 1
+$busyArguments[0] = $load
+if (-not ([string]$describeLoad.Invoke($null, $busyArguments)).Contains('84')) {
+    throw 'The busy graphics card line does not show the load.'
+}
+
+# Commands for the game: nothing to run without a command, and administrator
+# rights only when the player asked for them.
+$gameCommand = $assembly.GetType('Boostix.GameCommand', $true).GetMethod('BuildStartInfo', $flags)
+if ($null -ne $gameCommand.Invoke($null, [object[]]@('   ', $false))) {
+    throw 'An empty command must not run.'
+}
+$plainCommand = $gameCommand.Invoke($null, [object[]]@('net stop thing', $false))
+if ($plainCommand.Verb -or -not $plainCommand.Arguments.EndsWith('net stop thing') -or
+    -not $plainCommand.FileName.EndsWith('cmd.exe')) {
+    throw "The command would run as: $($plainCommand.FileName) $($plainCommand.Arguments) [$($plainCommand.Verb)]"
+}
+if ($gameCommand.Invoke($null, [object[]]@('net stop thing', $true)).Verb -cne 'runas') {
+    throw 'The administrator option does not ask Windows for rights.'
+}
+
+# FPS: the first minute after loading, then every 15; the worst minute decides.
+$sessionFps = $assembly.GetType('Boostix.SessionFps', $true)
+$isDue = $sessionFps.GetMethod('IsDue', $flags)
+if ([bool]$isDue.Invoke($null, [object[]]@([TimeSpan]::FromMinutes(4), 0)) -or
+    -not [bool]$isDue.Invoke($null, [object[]]@([TimeSpan]::FromMinutes(5), 0)) -or
+    [bool]$isDue.Invoke($null, [object[]]@([TimeSpan]::FromMinutes(10), 1)) -or
+    -not [bool]$isDue.Invoke($null, [object[]]@([TimeSpan]::FromMinutes(20), 1))) {
+    throw 'The FPS schedule is wrong.'
+}
+$performanceType = $assembly.GetType('Boostix.BoostPerformanceResult', $true)
+function New-Performance {
+    param([double]$Average, [double]$Low)
+    $result = [Activator]::CreateInstance($performanceType, $true)
+    $performanceType.GetField('Available').SetValue($result, $true)
+    $performanceType.GetField('AverageFps').SetValue($result, $Average)
+    $performanceType.GetField('OnePercentLowFps').SetValue($result, $Low)
+    return $result
+}
+$better = New-Performance 200 120
+$worse = New-Performance 150 70
+$keep = $sessionFps.GetMethod('Keep', $flags)
+$kept = $keep.Invoke($null, [object[]]@($better, $worse))
+if ([double]$performanceType.GetField('OnePercentLowFps').GetValue($kept) -ne 70) {
+    throw 'The worst minute must decide.'
+}
+$reportType.GetField('Performance', $instance).SetValue($earlier, (New-Performance 120 60))
+$reportType.GetField('Performance', $instance).SetValue($later, (New-Performance 150 90))
+$fpsComparison = [string]$compare.Invoke($null, [object[]]@($later, $comparedList))
+if (-not $fpsComparison.Contains('120') -or -not $fpsComparison.Contains('150')) {
+    throw "The comparison does not show FPS: $fpsComparison"
+}
+
+# The one-time permission goes by well-known group and account ids, so it works
+# on any language of Windows, and nothing else can get into the command.
+$grant = $assembly.GetType('Boostix.FpsAccess', $true).GetMethod('GrantArguments', $flags)
+$grantText = [string]$grant.Invoke($null, [object[]]@('S-1-5-21-1-2-3-1001'))
+if (-not $grantText.Contains('S-1-5-32-559') -or -not $grantText.Contains('S-1-5-21-1-2-3-1001')) {
+    throw "The permission command read: $grantText"
+}
+if ($grant.Invoke($null, [object[]]@('S-1-5-21; Remove-Item'))) {
+    throw 'A malformed account id reached the command.'
+}
+
 # 12 MB free is not "0,0 GB": that reads like a broken number.
 $formatGb = $assembly.GetType('Boostix.SessionVerdicts', $true).GetMethod('FormatGigabytes', $flags)
 $tiny = [string]$formatGb.Invoke($null, [object[]]@([long](12 * 1048576L)))
@@ -628,6 +731,27 @@ try {
     foreach ($id in 'Boostix.Center.Debrief.Comparison', 'Boostix.Center.Debrief.CloseForGame') {
         if (-not (Find-Element $window $id)) {
             throw "The debrief is missing $id."
+        }
+    }
+    Invoke-Element (Find-Element $window 'Boostix.Center.Debrief.Back')
+    $flagged = Find-Element $window 'Boostix.Center.History.2'
+    if (-not $flagged) {
+        throw 'The journal lost its games after the debrief.'
+    }
+    Invoke-Element $flagged
+    if (-not (Find-Element $window 'Boostix.Center.Debrief.KnownProgram')) {
+        throw 'A flagged program offers no way to say it is known.'
+    }
+    (Find-Element $window 'Boostix.Center.Tab.Readiness').GetCurrentPattern(
+        [Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    if (-not (Find-Element $window 'Boostix.Center.GpuLoad')) {
+        throw 'The computer page does not say who holds the graphics card.'
+    }
+    (Find-Element $window 'Boostix.Center.Tab.Settings').GetCurrentPattern(
+        [Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    foreach ($id in 'Boostix.Center.Settings.BeforeGame', 'Boostix.Center.Settings.AfterGame', 'Boostix.Center.Settings.FpsAccess') {
+        if (-not (Find-Element $window $id)) {
+            throw "The settings page is missing $id."
         }
     }
 }

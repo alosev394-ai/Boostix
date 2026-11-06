@@ -79,6 +79,11 @@ namespace Boostix
         public bool StartWithWindows;
         public bool ReopenAfterGame;
         public List<string> CloseForGame = new List<string>();
+        public List<string> KnownPrograms = new List<string>();
+        public string BeforeGameCommand;
+        public string AfterGameCommand;
+        public bool GameCommandsElevated;
+        public bool MeasureFps;
         public string Theme;
         public string Language;
 
@@ -101,6 +106,11 @@ namespace Boostix
                 StartWithWindows = StartWithWindows,
                 ReopenAfterGame = ReopenAfterGame,
                 CloseForGame = new List<string>(CloseForGame ?? new List<string>()),
+                KnownPrograms = new List<string>(KnownPrograms ?? new List<string>()),
+                BeforeGameCommand = BeforeGameCommand,
+                AfterGameCommand = AfterGameCommand,
+                GameCommandsElevated = GameCommandsElevated,
+                MeasureFps = MeasureFps,
                 Theme = Theme,
                 Language = Language
             };
@@ -136,6 +146,117 @@ namespace Boostix
         public string Name;
         public long Bytes;
         public string ProcessName;
+    }
+
+    /// <summary>
+    /// One program and its share of the graphics card right now.
+    /// </summary>
+    internal sealed class BoostGpuLoad
+    {
+        public string Name;
+        public int Percent;
+    }
+
+    /// <summary>
+    /// A command the player runs at the start and the end of a game, for
+    /// example to pause their own heavy task. Administrator rights only on
+    /// request: Windows then asks for confirmation.
+    /// </summary>
+    internal static class GameCommand
+    {
+        internal static ProcessStartInfo BuildStartInfo(string command, bool elevated)
+        {
+            if (string.IsNullOrWhiteSpace(command))
+            {
+                return null;
+            }
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+                Arguments = "/d /c " + command.Trim(),
+                WindowStyle = ProcessWindowStyle.Hidden,
+                CreateNoWindow = !elevated,
+                UseShellExecute = elevated
+            };
+            if (elevated)
+            {
+                startInfo.Verb = "runas";
+            }
+            return startInfo;
+        }
+    }
+
+    /// <summary>
+    /// When to measure FPS during a game. A measurement takes a minute, so
+    /// the first one waits for the game to load.
+    /// </summary>
+    internal static class SessionFps
+    {
+        private const int FirstMinute = 5;
+        private const int IntervalMinutes = 15;
+
+        internal static bool IsDue(TimeSpan played, int capturesDone)
+        {
+            return played >= TimeSpan.FromMinutes(FirstMinute + IntervalMinutes * capturesDone);
+        }
+
+        /// <summary>
+        /// The worst minute of the game decides.
+        /// </summary>
+        internal static BoostPerformanceResult Keep(
+            BoostPerformanceResult current,
+            BoostPerformanceResult candidate)
+        {
+            if (candidate == null || !candidate.Available)
+            {
+                return current;
+            }
+            return current == null ||
+                !current.Available ||
+                candidate.OnePercentLowFps < current.OnePercentLowFps
+                    ? candidate
+                    : current;
+        }
+    }
+
+    /// <summary>
+    /// PresentMon reads frame events of Windows, which only administrators and
+    /// the Performance Log Users group may do. Joining that group once, on the
+    /// player's request, lets every game be measured without a prompt.
+    /// </summary>
+    internal static class FpsAccess
+    {
+        private const string PerformanceLogUsers = "S-1-5-32-559";
+
+        internal static bool IsGranted()
+        {
+            try
+            {
+                using (var identity = System.Security.Principal.WindowsIdentity.GetCurrent())
+                {
+                    var principal = new System.Security.Principal.WindowsPrincipal(identity);
+                    return principal.IsInRole(
+                            new System.Security.Principal.SecurityIdentifier(PerformanceLogUsers)) ||
+                        principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+                }
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        internal static string GrantArguments(string userSid)
+        {
+            string sid = userSid ?? string.Empty;
+            if (!sid.StartsWith("S-1-5-", StringComparison.Ordinal) ||
+                !sid.All(item => char.IsDigit(item) || item == 'S' || item == '-'))
+            {
+                return null;
+            }
+            return "-NoProfile -NonInteractive -WindowStyle Hidden -Command " +
+                "\"Add-LocalGroupMember -SID " + PerformanceLogUsers + " -Member " + sid + "\"";
+        }
     }
 
     /// <summary>
@@ -341,7 +462,10 @@ namespace Boostix
     internal static class VideoMemoryRanking
     {
         private const long MinimumBytes = 200L * 1024L * 1024L;
+        private const int MinimumGpuPercent = 10;
         private const uint PdhFormatLarge = 0x00000400;
+        private const uint PdhFormatDouble = 0x00000200;
+        private const uint PdhFormatNoCap100 = 0x00008000;
         private const int PdhMoreData = unchecked((int)0x800007D2);
 
         /// <summary>
@@ -390,9 +514,84 @@ namespace Boostix
         [DllImport("pdh.dll")]
         private static extern int PdhCloseQuery(IntPtr query);
 
+        private static HashSet<string> knownPrograms =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         internal static bool IsSystemTool(string processName)
         {
             return SystemTools.Contains(processName ?? string.Empty);
+        }
+
+        /// <summary>
+        /// Programs the player said are their own.
+        /// </summary>
+        internal static void SetKnownPrograms(IEnumerable<string> names)
+        {
+            knownPrograms = new HashSet<string>(
+                names ?? Enumerable.Empty<string>(),
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+        internal static bool IsSuspicious(string processName)
+        {
+            return IsSystemTool(processName) && !knownPrograms.Contains(processName ?? string.Empty);
+        }
+
+        internal static List<BoostGpuLoad> RankGpuLoad(IEnumerable<KeyValuePair<string, double>> processes)
+        {
+            return (processes ?? Enumerable.Empty<KeyValuePair<string, double>>())
+                .Where(item =>
+                    !string.IsNullOrWhiteSpace(item.Key) &&
+                    !string.Equals(item.Key, "dwm", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new BoostGpuLoad
+                {
+                    Name = group.First().Key,
+                    Percent = (int)Math.Min(100.0, Math.Round(group.Sum(item => Math.Max(0.0, item.Value))))
+                })
+                .Where(load => load.Percent >= MinimumGpuPercent)
+                .OrderByDescending(load => load.Percent)
+                .Take(BoostMemoryHog.MaximumPerSession)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Takes a second: the load is the difference between two readings.
+        /// </summary>
+        internal static List<BoostGpuLoad> CaptureGpuLoad()
+        {
+            Process[] processes = new Process[0];
+            try
+            {
+                Dictionary<int, long> usage = ReadCounter(
+                    @"\GPU Engine(*engtype_3D)\Utilization Percentage",
+                    PdhFormatDouble | PdhFormatNoCap100,
+                    true);
+                processes = Process.GetProcesses();
+                List<BoostGpuLoad> load = RankGpuLoad(processes
+                    .Where(process => usage.ContainsKey(process.Id))
+                    .Select(process => new KeyValuePair<string, double>(
+                        process.ProcessName,
+                        BitConverter.Int64BitsToDouble(usage[process.Id]))));
+                foreach (BoostGpuLoad item in load)
+                {
+                    item.Name = IsSystemTool(item.Name)
+                        ? item.Name + ".exe"
+                        : MemoryHogRanking.ReadableName(item.Name, processes);
+                }
+                return load;
+            }
+            catch (Exception)
+            {
+                return new List<BoostGpuLoad>();
+            }
+            finally
+            {
+                foreach (Process process in processes)
+                {
+                    process.Dispose();
+                }
+            }
         }
 
         internal static List<BoostMemoryHog> Rank(
@@ -422,7 +621,10 @@ namespace Boostix
             Process[] processes = new Process[0];
             try
             {
-                Dictionary<int, long> usage = ReadLocalUsage();
+                Dictionary<int, long> usage = ReadCounter(
+                    @"\GPU Process Memory(*)\Local Usage",
+                    PdhFormatLarge,
+                    false);
                 if (usage.Count == 0)
                 {
                     return new List<BoostMemoryHog>();
@@ -457,9 +659,11 @@ namespace Boostix
         }
 
         /// <summary>
-        /// Instances are named pid_1234_luid_..._phys_0, one per graphics card.
+        /// Instances start with pid_1234_. One process has several, so bytes
+        /// add up; a percentage comes back as the bits of a double, added up
+        /// the same way as doubles.
         /// </summary>
-        private static Dictionary<int, long> ReadLocalUsage()
+        private static Dictionary<int, long> ReadCounter(string path, uint format, bool twoReadings)
         {
             var usage = new Dictionary<int, long>();
             IntPtr query;
@@ -473,18 +677,25 @@ namespace Boostix
                 IntPtr counter;
                 uint size = 0;
                 uint count;
-                if (PdhAddEnglishCounterW(
-                        query,
-                        @"\GPU Process Memory(*)\Local Usage",
-                        IntPtr.Zero,
-                        out counter) != 0 ||
-                    PdhCollectQueryData(query) != 0 ||
-                    PdhGetFormattedCounterArrayW(counter, PdhFormatLarge, ref size, out count, IntPtr.Zero) != PdhMoreData)
+                if (PdhAddEnglishCounterW(query, path, IntPtr.Zero, out counter) != 0 ||
+                    PdhCollectQueryData(query) != 0)
+                {
+                    return usage;
+                }
+                if (twoReadings)
+                {
+                    System.Threading.Thread.Sleep(1000);
+                    if (PdhCollectQueryData(query) != 0)
+                    {
+                        return usage;
+                    }
+                }
+                if (PdhGetFormattedCounterArrayW(counter, format, ref size, out count, IntPtr.Zero) != PdhMoreData)
                 {
                     return usage;
                 }
                 buffer = Marshal.AllocHGlobal((int)size);
-                if (PdhGetFormattedCounterArrayW(counter, PdhFormatLarge, ref size, out count, buffer) != 0)
+                if (PdhGetFormattedCounterArrayW(counter, format, ref size, out count, buffer) != 0)
                 {
                     return usage;
                 }
@@ -500,7 +711,10 @@ namespace Boostix
                     {
                         long known;
                         usage.TryGetValue(processId, out known);
-                        usage[processId] = known + Math.Max(0L, item.Value);
+                        usage[processId] = (format & PdhFormatDouble) != 0
+                            ? BitConverter.DoubleToInt64Bits(
+                                BitConverter.Int64BitsToDouble(known) + BitConverter.Int64BitsToDouble(item.Value))
+                            : known + Math.Max(0L, item.Value);
                     }
                 }
                 return usage;

@@ -533,6 +533,7 @@ namespace Boostix
             new TranslateTransform();
 
         private CenterPage currentPage = CenterPage.Games;
+        private IList<BoostGpuLoad> gpuLoad;
         private CenterPage renderedPage = CenterPage.Games;
         private readonly Border topBar;
         private readonly GameStage gameStage;
@@ -832,6 +833,8 @@ namespace Boostix
         public event EventHandler OpenPagefileSettingsRequested;
         public event EventHandler ExportDiagnosticsRequested;
         public event EventHandler SettingsChanged;
+        public event EventHandler GpuLoadRequested;
+        public event EventHandler FpsAccessRequested;
         public event EventHandler LanguageChangeRequested;
         public event EventHandler<BoostBenchmarkRequestEventArgs> BenchmarkRequested;
         public event EventHandler ProofCancelRequested;
@@ -947,6 +950,15 @@ namespace Boostix
         {
             settings = value == null ? new BoostCenterSettings() : value.Clone();
             if (IsOpen && currentPage == CenterPage.Settings)
+            {
+                RenderCurrentPage();
+            }
+        }
+
+        public void SetGpuLoad(IList<BoostGpuLoad> load)
+        {
+            gpuLoad = load;
+            if (IsOpen && currentPage == CenterPage.Readiness)
             {
                 RenderCurrentPage();
             }
@@ -2483,6 +2495,22 @@ namespace Boostix
                 }
             }
 
+            if (gpuLoad != null)
+            {
+                var load = MakeText(
+                    SessionVerdicts.DescribeGpuLoad(gpuLoad),
+                    BoostixDesignTokens.BodyTextSize,
+                    SecondaryColor,
+                    regularFont,
+                    FontWeights.Normal);
+                load.TextWrapping = TextWrapping.Wrap;
+                load.HorizontalAlignment = HorizontalAlignment.Center;
+                load.Margin = new Thickness(0, 0, 0, 6);
+                AutomationProperties.SetAutomationId(load, "Boostix.Center.GpuLoad");
+                pageContent.Children.Add(load);
+            }
+            Raise(GpuLoadRequested);
+
             var refresh = MakeActionButton(
                 L.T("Проверить снова"),
                 BoostixButtonKind.Secondary,
@@ -3852,6 +3880,92 @@ namespace Boostix
                     delegate(bool value) { settings.ReopenAfterGame = value; }));
                 pageContent.Children.Add(close);
 
+                if (settings.KnownPrograms != null && settings.KnownPrograms.Count > 0)
+                {
+                    pageContent.Children.Add(MakeSectionHeading(L.T("Мои программы"), null));
+                    var known = MakeListCard();
+                    foreach (string processName in settings.KnownPrograms.ToList())
+                    {
+                        string chosen = processName;
+                        AddListRow(known, BuildSettingToggle(
+                            settingIndex++,
+                            chosen,
+                            L.T("Boostix не предупреждает об этой программе."),
+                            true,
+                            delegate(bool value)
+                            {
+                                settings.KnownPrograms.RemoveAll(item =>
+                                    string.Equals(item, chosen, StringComparison.OrdinalIgnoreCase));
+                                if (value)
+                                {
+                                    settings.KnownPrograms.Add(chosen);
+                                }
+                            }));
+                    }
+                    pageContent.Children.Add(known);
+                }
+
+                pageContent.Children.Add(MakeSectionHeading(L.T("Команды на время игры"), null));
+                var commandsHint = MakeText(
+                    L.T("Например, чтобы приостановить свою тяжёлую задачу. Команды запускаются в начале и в конце игры от вашего имени."),
+                    BoostixDesignTokens.MetadataTextSize,
+                    MutedColor,
+                    regularFont,
+                    FontWeights.Normal);
+                commandsHint.TextWrapping = TextWrapping.Wrap;
+                commandsHint.TextTrimming = TextTrimming.None;
+                commandsHint.Margin = new Thickness(2, -4, 0, 10);
+                pageContent.Children.Add(commandsHint);
+                pageContent.Children.Add(BuildCommandField(
+                    L.T("Перед игрой"),
+                    "Boostix.Center.Settings.BeforeGame",
+                    settings.BeforeGameCommand,
+                    delegate(string value) { settings.BeforeGameCommand = value; }));
+                pageContent.Children.Add(BuildCommandField(
+                    L.T("После игры"),
+                    "Boostix.Center.Settings.AfterGame",
+                    settings.AfterGameCommand,
+                    delegate(string value) { settings.AfterGameCommand = value; }));
+                var commandRights = MakeListCard();
+                AddListRow(commandRights, BuildSettingToggle(
+                    settingIndex++,
+                    L.T("С правами администратора"),
+                    L.T("Windows будет спрашивать подтверждение при каждом запуске."),
+                    settings.GameCommandsElevated,
+                    delegate(bool value) { settings.GameCommandsElevated = value; }));
+                pageContent.Children.Add(commandRights);
+
+                pageContent.Children.Add(MakeSectionHeading(L.T("Замер FPS"), null));
+                var fps = MakeListCard();
+                AddListRow(fps, BuildSettingToggle(
+                    settingIndex++,
+                    L.T("Замерять FPS в каждой игре"),
+                    L.T("Минуту на пятой минуте игры и потом каждые 15 минут. Boostix читает события Windows и не трогает игру."),
+                    settings.MeasureFps,
+                    delegate(bool value) { settings.MeasureFps = value; }));
+                pageContent.Children.Add(fps);
+                if (!FpsAccess.IsGranted())
+                {
+                    var fpsHint = MakeText(
+                        L.T("Нужно разрешение Windows. Подтвердите его один раз, потом выйдите из Windows и войдите снова."),
+                        BoostixDesignTokens.MetadataTextSize,
+                        MutedColor,
+                        regularFont,
+                        FontWeights.Normal);
+                    fpsHint.TextWrapping = TextWrapping.Wrap;
+                    fpsHint.TextTrimming = TextTrimming.None;
+                    fpsHint.Margin = new Thickness(2, 8, 0, 8);
+                    pageContent.Children.Add(fpsHint);
+                    Button grant = MakeActionButton(
+                        L.T("Разрешить замер FPS"),
+                        BoostixButtonKind.Secondary,
+                        BoostixIcons.Shield);
+                    grant.HorizontalAlignment = HorizontalAlignment.Left;
+                    grant.Click += delegate { Raise(FpsAccessRequested); };
+                    AutomationProperties.SetAutomationId(grant, "Boostix.Center.Settings.FpsAccess");
+                    pageContent.Children.Add(grant);
+                }
+
                 pageContent.Children.Add(MakeSectionHeading(L.T("Оформление"), null));
                 pageContent.Children.Add(BuildThemePicker());
 
@@ -3948,6 +4062,59 @@ namespace Boostix
             Grid.SetColumn(collect, 1);
             row.Children.Add(collect);
             return row;
+        }
+
+        private FrameworkElement BuildCommandField(
+            string label,
+            string automationId,
+            string value,
+            Action<string> apply)
+        {
+            var field = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+            var title = MakeText(label, BoostixDesignTokens.BodyTextSize, SecondaryColor, regularFont, FontWeights.Normal);
+            title.Margin = new Thickness(2, 0, 0, 4);
+            field.Children.Add(title);
+            var box = new TextBox
+            {
+                Text = value ?? string.Empty,
+                Padding = new Thickness(10, 7, 10, 7),
+                BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent,
+                FontFamily = regularFont,
+                FontSize = BoostixDesignTokens.BodyTextSize
+            };
+            box.SetResourceReference(Control.ForegroundProperty, BoostixDesignTokens.TextBrushKey);
+            box.SetResourceReference(System.Windows.Controls.Primitives.TextBoxBase.CaretBrushProperty, BoostixDesignTokens.TextBrushKey);
+            var frame = new Border
+            {
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(BoostixDesignTokens.RadiusSmall),
+                Child = box
+            };
+            frame.SetResourceReference(Border.BackgroundProperty, BoostixDesignTokens.SurfaceRaisedBrushKey);
+            frame.SetResourceReference(Border.BorderBrushProperty, BoostixDesignTokens.BorderBrushKey);
+            box.GotKeyboardFocus += delegate
+            {
+                frame.SetResourceReference(Border.BorderBrushProperty, BoostixDesignTokens.AccentTextBrushKey);
+            };
+            box.LostKeyboardFocus += delegate
+            {
+                frame.SetResourceReference(Border.BorderBrushProperty, BoostixDesignTokens.BorderBrushKey);
+            };
+            AutomationProperties.SetAutomationId(box, automationId);
+            AutomationProperties.SetName(box, label);
+            box.LostFocus += delegate
+            {
+                string text = box.Text.Trim();
+                if (!string.Equals(text, value ?? string.Empty, StringComparison.Ordinal))
+                {
+                    value = text;
+                    apply(text);
+                    Raise(SettingsChanged);
+                }
+            };
+            field.Children.Add(frame);
+            return field;
         }
 
         private FrameworkElement BuildSettingToggle(

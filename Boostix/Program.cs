@@ -473,6 +473,12 @@ namespace Boostix
         private List<ClosedProgram> closedForGame = new List<ClosedProgram>();
         private bool memoryPressureRecorded;
         private DateTime lastVideoMemoryCaptureUtc;
+        private DateTime lastGpuLoadUtc = DateTime.MinValue;
+        private bool gpuLoadRefreshing;
+        private int fpsCapturesDone;
+        private bool fpsCaptureRunning;
+        private bool fpsCaptureDenied;
+        private CancellationTokenSource fpsCaptureCancellation;
         private Process boostProcess;
         private string readinessSignalPath;
         private DateTime readinessDeadline;
@@ -776,6 +782,8 @@ namespace Boostix
             boostCenterOverlay.SetHomeContent(home);
             boostCenterOverlay.RefreshRequested += delegate { QueuePreflight(preflightForBoost, true); };
             boostCenterOverlay.PageOpening += delegate { PublishBoostCenterData(); };
+            boostCenterOverlay.GpuLoadRequested += delegate { RefreshGpuLoad(); };
+            boostCenterOverlay.FpsAccessRequested += delegate { RequestFpsAccess(); };
             boostCenterOverlay.CloseRequested += delegate
             {
                 HandleBoostCenterReturnedHome(true);
@@ -2130,6 +2138,12 @@ namespace Boostix
             centerSettings.ReopenAfterGame = !values.ContainsKey("ReopenAfterGame") ||
                 GetPreference(values, "ReopenAfterGame");
             centerSettings.CloseForGame = SessionCloseList.Parse(ReadTextPreference("CloseForGame"));
+            centerSettings.KnownPrograms = SessionCloseList.Parse(ReadTextPreference("KnownPrograms"));
+            VideoMemoryRanking.SetKnownPrograms(centerSettings.KnownPrograms);
+            centerSettings.BeforeGameCommand = ReadTextPreference("BeforeGameCommand");
+            centerSettings.AfterGameCommand = ReadTextPreference("AfterGameCommand");
+            centerSettings.GameCommandsElevated = GetPreference(values, "GameCommandsElevated");
+            centerSettings.MeasureFps = GetPreference(values, "MeasureFps");
             // Windows' own Run key decides start-up; test launches never touch it.
             centerSettings.StartWithWindows = !demoMode && AutostartRegistration.IsEnabled();
             // The theme itself was applied at start-up, before any colour was read.
@@ -2161,6 +2175,7 @@ namespace Boostix
 
         private void SaveBoostPreferences()
         {
+            VideoMemoryRanking.SetKnownPrograms(centerSettings.KnownPrograms);
             try
             {
                 string path = GetPreferencesPath();
@@ -2181,6 +2196,11 @@ namespace Boostix
                         "GameSignals=" + centerSettings.GameSignals,
                         "ReopenAfterGame=" + centerSettings.ReopenAfterGame,
                         "CloseForGame=" + string.Join(";", (centerSettings.CloseForGame ?? new List<string>()).ToArray()),
+                        "KnownPrograms=" + string.Join(";", (centerSettings.KnownPrograms ?? new List<string>()).ToArray()),
+                        "BeforeGameCommand=" + (centerSettings.BeforeGameCommand ?? string.Empty),
+                        "AfterGameCommand=" + (centerSettings.AfterGameCommand ?? string.Empty),
+                        "GameCommandsElevated=" + centerSettings.GameCommandsElevated,
+                        "MeasureFps=" + centerSettings.MeasureFps,
                         "Theme=" + BoostixDesignTokens.PaletteId,
                         "Language=" + (centerSettings.Language ?? L.Language)
                     }) + Environment.NewLine;
@@ -2771,6 +2791,11 @@ namespace Boostix
             if (activeBoostTimer != null)
             {
                 activeBoostTimer.Stop();
+            }
+            CancellationTokenSource fpsCancellation = fpsCaptureCancellation;
+            if (fpsCancellation != null)
+            {
+                fpsCancellation.Cancel();
             }
             lock (activeMaintenanceSync)
             {
@@ -3654,6 +3679,7 @@ namespace Boostix
                 }
                 string actualName = exactTarget.ProcessName;
                 RememberTargetName(actualName);
+                CaptureFpsIfDue(exactTarget, generation);
                 ProcessPriorityClass originalPriority = target.PriorityClass;
                 bool alreadyTracked;
                 lock (activeMaintenanceSync)
@@ -4038,7 +4064,7 @@ namespace Boostix
                     }
                 }
                 BoostMemoryHog suspicious = videoHogs.FirstOrDefault(
-                    hog => VideoMemoryRanking.IsSystemTool(hog.ProcessName));
+                    hog => VideoMemoryRanking.IsSuspicious(hog.ProcessName));
                 if (suspicious != null)
                 {
                     WarnBeforeGame(L.T("ПРОВЕРЬТЕ КОМПЬЮТЕР"), SessionVerdicts.DescribeSuspicious(suspicious));
@@ -4054,6 +4080,206 @@ namespace Boostix
                             target.ProcessName,
                             MemoryHogRanking.Capture(target.ProcessName),
                             target.ExecutablePath));
+                }
+            });
+        }
+
+        /// <summary>
+        /// Runs in the background. A command that needs longer is left to
+        /// finish on its own. An elevated Boostix runs nothing without the
+        /// player's explicit choice of administrator rights.
+        /// </summary>
+        private void RunGameCommand(string title, string command)
+        {
+            bool elevated = centerSettings.GameCommandsElevated;
+            ProcessStartInfo startInfo = GameCommand.BuildStartInfo(command, elevated);
+            if (demoMode || startInfo == null ||
+                (!elevated && CrashLog.IsCurrentProcessElevated()))
+            {
+                return;
+            }
+            Task.Run(delegate
+            {
+                string detail;
+                try
+                {
+                    using (Process process = Process.Start(startInfo))
+                    {
+                        detail = !process.WaitForExit(30000)
+                            ? L.T("Команда ещё работает, Boostix её не ждёт.")
+                            : process.ExitCode == 0
+                                ? L.T("Команда выполнена.")
+                                : L.T("Команда вернула код ") + process.ExitCode + ".";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    detail = L.T("Не удалось выполнить: ") + ex.Message;
+                }
+                AppendActiveBoostLog(title + ": " + detail);
+                RecordSessionAction(title, detail, BoostActionOutcome.Changed);
+            });
+        }
+
+        private void RefreshGpuLoad()
+        {
+            if (gpuLoadRefreshing ||
+                boostActive ||
+                DateTime.UtcNow - lastGpuLoadUtc < TimeSpan.FromSeconds(30))
+            {
+                return;
+            }
+            gpuLoadRefreshing = true;
+            Task.Run(delegate
+            {
+                List<BoostGpuLoad> load = demoMode
+                    ? DemoShelf.GpuLoad()
+                    : VideoMemoryRanking.CaptureGpuLoad();
+                try
+                {
+                    Dispatcher.BeginInvoke(new Action(delegate
+                    {
+                        gpuLoadRefreshing = false;
+                        lastGpuLoadUtc = DateTime.UtcNow;
+                        if (boostCenterOverlay != null)
+                        {
+                            boostCenterOverlay.SetGpuLoad(load);
+                        }
+                    }));
+                }
+                catch (InvalidOperationException) { }
+                catch (TaskCanceledException) { }
+            });
+        }
+
+        /// <summary>
+        /// Only on the player's click: Windows asks for confirmation, and the
+        /// group counts from the next sign-in.
+        /// </summary>
+        private void RequestFpsAccess()
+        {
+            if (demoMode)
+            {
+                return;
+            }
+            string arguments;
+            using (var identity = System.Security.Principal.WindowsIdentity.GetCurrent())
+            {
+                arguments = FpsAccess.GrantArguments(identity.User == null ? null : identity.User.Value);
+            }
+            if (arguments == null)
+            {
+                return;
+            }
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = System.IO.Path.Combine(
+                    Environment.SystemDirectory,
+                    "WindowsPowerShell\\v1.0\\powershell.exe"),
+                Arguments = arguments,
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+            Task.Run(delegate
+            {
+                string message;
+                try
+                {
+                    using (Process process = Process.Start(startInfo))
+                    {
+                        process.WaitForExit(30000);
+                        message = process.HasExited && process.ExitCode == 0
+                            ? L.T("Готово. Выйдите из Windows и войдите снова, и замер заработает.")
+                            : L.T("Windows не дала разрешение на замер FPS.");
+                    }
+                }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                    message = L.T("Разрешение отменено.");
+                }
+                try
+                {
+                    Dispatcher.BeginInvoke(new Action(delegate { Notify(message); }));
+                }
+                catch (InvalidOperationException) { }
+                catch (TaskCanceledException) { }
+            });
+        }
+
+        /// <summary>
+        /// On a schedule and only while the game is in front. Without the
+        /// permission one line in the report is enough for the whole game.
+        /// </summary>
+        private void CaptureFpsIfDue(GameTargetIdentity target, int generation)
+        {
+            if (!centerSettings.MeasureFps || demoMode)
+            {
+                return;
+            }
+            CancellationTokenSource cancellation;
+            lock (activeMaintenanceSync)
+            {
+                if (currentSession == null ||
+                    fpsCaptureRunning ||
+                    fpsCaptureDenied ||
+                    !SessionFps.IsDue(DateTime.UtcNow - currentSession.StartedUtc, fpsCapturesDone))
+                {
+                    return;
+                }
+                fpsCaptureRunning = true;
+                fpsCapturesDone++;
+                cancellation = new CancellationTokenSource();
+                fpsCaptureCancellation = cancellation;
+            }
+            var measured = new PerformanceTargetProcess
+            {
+                ProcessId = target.ProcessId,
+                ProcessName = target.ProcessName,
+                StartTimeUtc = target.ProcessStartTimeUtc,
+                ExecutablePath = target.ExecutablePath
+            };
+            Task.Run(async delegate
+            {
+                bool denied = false;
+                try
+                {
+                    PerformanceCaptureAttemptResult result =
+                        await PerformanceCaptureService.CaptureTargetAsync(
+                            measured,
+                            null,
+                            cancellation.Token).ConfigureAwait(false);
+                    denied = result.Status == PerformanceCaptureStatus.AccessDenied;
+                    lock (activeMaintenanceSync)
+                    {
+                        if (currentSession != null && IsActiveMaintenanceGeneration(generation))
+                        {
+                            currentSession.Performance = SessionFps.Keep(
+                                currentSession.Performance,
+                                result.Performance);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendActiveBoostLog("FPS measurement failed: " + ex.Message);
+                }
+                finally
+                {
+                    lock (activeMaintenanceSync)
+                    {
+                        fpsCaptureRunning = false;
+                        fpsCaptureDenied = fpsCaptureDenied || denied;
+                        fpsCaptureCancellation = null;
+                    }
+                    cancellation.Dispose();
+                }
+                if (denied)
+                {
+                    RecordSessionAction(
+                        L.T("ЗАМЕР FPS"),
+                        L.T("Нет разрешения Windows. Его можно дать в настройках."),
+                        BoostActionOutcome.Skipped);
                 }
             });
         }
@@ -4376,6 +4602,9 @@ namespace Boostix
                 BoostActionOutcome.AlreadyOptimal);
             memoryPressureRecorded = false;
             lastVideoMemoryCaptureUtc = DateTime.MinValue;
+            fpsCapturesDone = 0;
+            fpsCaptureDenied = false;
+            RunGameCommand(L.T("КОМАНДА ПЕРЕД ИГРОЙ"), centerSettings.BeforeGameCommand);
             CheckComputerBeforeGame(currentSession.AvailableMemoryStartBytes);
             if (centerSettings.KeepDiscord)
             {
@@ -5064,6 +5293,7 @@ namespace Boostix
                 FormatMemory(currentSession.MinimumCommitHeadroomBytes) + ".",
                 BoostActionOutcome.AlreadyOptimal);
             ReopenClosedPrograms(currentSession);
+            RunGameCommand(L.T("КОМАНДА ПОСЛЕ ИГРЫ"), centerSettings.AfterGameCommand);
             string ownLoad = DescribeOwnLoad(
                 ReadOwnProcessorTime() - sessionProcessorStart,
                 DateTime.UtcNow - currentSession.StartedUtc);

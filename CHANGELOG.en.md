@@ -3,6 +3,20 @@
 The English interface arrived in 3.2.0. Earlier versions are described in
 [`CHANGELOG.md`](CHANGELOG.md), in Russian.
 
+## 5.4.0 — 2026-11-07
+
+### New
+
+- This is my program: a button in the debrief stops the warning about a program
+  you know. The list can be changed in Settings.
+- Commands for the game: Settings can hold a command for the start and the end of
+  a game, for example to pause a heavy task of yours.
+- Graphics card check: the Computer page shows who is using the graphics card
+  right now, before the game starts.
+- FPS in the debrief: Boostix can measure average FPS and the worst 1% in every
+  game and compare them with the last one. Turn it on in Settings; it asks for a
+  Windows permission once.
+
 ## 5.3.0 — 2026-11-07
 
 ### New

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "version": "5.3.0",
-  "installerUrl": "https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/dist/MajesticBoost-Setup-5.3.0.exe",
-  "sha256": "F03908F4D4243E904431D7E33C6E2204B42F406EF2FFC487B831A12FAD457978",
-  "size": 5056512,
-  "boostixInstallerUrl": "https://raw.githubusercontent.com/alosev394-ai/Boostix/main/dist/Boostix-Setup-5.3.0.exe",
-  "boostixSha256": "F379BC731E7CC6ABB9E5E27422AEB0C385E169207FA8447D3B6A487403AD864C",
-  "boostixSize": 2528256
+  "version": "5.4.0",
+  "installerUrl": "https://raw.githubusercontent.com/alosev394-ai/MajesticBoost/main/dist/MajesticBoost-Setup-5.4.0.exe",
+  "sha256": "7B0D711B9EE38B236236B9D87D1C41825CAE99DDD9836CBD725665FA018B21F7",
+  "size": 5109248,
+  "boostixInstallerUrl": "https://raw.githubusercontent.com/alosev394-ai/Boostix/main/dist/Boostix-Setup-5.4.0.exe",
+  "boostixSha256": "DA18E5439566E6FA46C20EB72446E9D8923B185E7CA3601DDF759B8DB7F9E0FD",
+  "boostixSize": 2554368
 }

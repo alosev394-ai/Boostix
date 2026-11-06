@@ -649,6 +649,11 @@ namespace Boostix
             };
         }
 
+        internal static List<BoostGpuLoad> GpuLoad()
+        {
+            return new List<BoostGpuLoad> { new BoostGpuLoad { Name = "Firefox", Percent = 14 } };
+        }
+
         internal static List<BoostSessionReport> Sessions()
         {
             DateTime now = DateTime.UtcNow;
@@ -694,6 +699,13 @@ namespace Boostix
                 {
                     new BoostMemoryHog { Name = "Firefox", ProcessName = "firefox", Bytes = 3 * GiB + GiB / 8 },
                     new BoostMemoryHog { Name = "Discord", ProcessName = "Discord", Bytes = GiB * 2 / 3 }
+                };
+            }
+            if (pressure == "Elevated")
+            {
+                report.VideoMemoryHogs = new List<BoostMemoryHog>
+                {
+                    new BoostMemoryHog { Name = "cmd.exe", ProcessName = "cmd", Bytes = GiB * 5 / 2 }
                 };
             }
             var random = new Random(seed);
@@ -878,7 +890,7 @@ namespace Boostix
                 string.Equals(pressure, "Elevated", StringComparison.OrdinalIgnoreCase);
             BoostMemoryHog biggest = BiggestClosable(report.MemoryHogs, report.TargetExecutablePath);
             BoostMemoryHog suspicious = (report.VideoMemoryHogs ?? new List<BoostMemoryHog>())
-                .FirstOrDefault(hog => VideoMemoryRanking.IsSystemTool(hog.ProcessName));
+                .FirstOrDefault(hog => VideoMemoryRanking.IsSuspicious(hog.ProcessName));
             if (suspicious != null)
             {
                 return new SessionVerdict
@@ -948,6 +960,17 @@ namespace Boostix
             };
         }
 
+        internal static string DescribeGpuLoad(IEnumerable<BoostGpuLoad> load)
+        {
+            List<BoostGpuLoad> busy = (load ?? new List<BoostGpuLoad>()).ToList();
+            return busy.Count == 0
+                ? L.T("Видеокарта свободна, игре ничего не мешает.")
+                : string.Format(
+                    CultureInfo.CurrentCulture,
+                    L.T("Видеокарту сейчас занимают: {0}. Игре достанется меньше."),
+                    string.Join(", ", busy.Select(item => item.Name + " " + item.Percent + "%")));
+        }
+
         internal static string DescribeSuspicious(BoostMemoryHog hog)
         {
             return string.Format(
@@ -976,6 +999,7 @@ namespace Boostix
     internal static class SessionComparison
     {
         private const long NoticeableBytes = 200L * 1024L * 1024L;
+        private const double NoticeableFpsShare = 0.03;
 
         internal static string Describe(
             BoostSessionReport report,
@@ -1017,6 +1041,19 @@ namespace Boostix
                     L.T("пик видеопамяти {0} → {1}"),
                     SessionVerdicts.FormatGigabytes(previous.PeakGpuDedicatedUsageBytes),
                     SessionVerdicts.FormatGigabytes(report.PeakGpuDedicatedUsageBytes)));
+            }
+            if (report.Performance != null &&
+                report.Performance.Available &&
+                previous.Performance != null &&
+                previous.Performance.Available &&
+                Math.Abs(report.Performance.AverageFps - previous.Performance.AverageFps) >=
+                    previous.Performance.AverageFps * NoticeableFpsShare)
+            {
+                changes.Add(string.Format(
+                    CultureInfo.CurrentCulture,
+                    L.T("средний FPS {0:0} → {1:0}"),
+                    previous.Performance.AverageFps,
+                    report.Performance.AverageFps));
             }
             return changes.Count == 0
                 ? L.T("С прошлой игры почти ничего не изменилось.")
