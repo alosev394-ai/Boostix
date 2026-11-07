@@ -126,7 +126,7 @@ $allStatic = [Reflection.BindingFlags]::Public -bor
     [Reflection.BindingFlags]::NonPublic -bor
     [Reflection.BindingFlags]::Static
 $windowType = $assembly.GetType('Boostix.BoostWindow', $true)
-$indexedKey = $windowType.GetMethod('IsIndexedResultKey', $allStatic)
+$indexedKey = $assembly.GetType('Boostix.BoostScriptResult', $true).GetMethod('IsIndexedKey', $allStatic)
 if (-not $indexedKey) {
     throw 'The structured result key parser was not compiled.'
 }
@@ -147,7 +147,9 @@ foreach ($case in @(
     @{ Key = 'Warning1'; Prefix = 'Warning'; Expected = $true },
     @{ Key = 'WarningCount'; Prefix = 'Warning'; Expected = $false },
     @{ Key = 'Warning0'; Prefix = 'Warning'; Expected = $false },
-    @{ Key = 'WarningX'; Prefix = 'Warning'; Expected = $false }
+    @{ Key = 'WarningX'; Prefix = 'Warning'; Expected = $false },
+    @{ Key = 'Left1'; Prefix = 'Left'; Expected = $true },
+    @{ Key = 'LeftCount'; Prefix = 'Left'; Expected = $false }
 )) {
     $actual = Test-IndexedKey `
         -Key ([string]$case.Key) `
