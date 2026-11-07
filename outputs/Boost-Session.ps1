@@ -43,6 +43,7 @@ if ($CloseProcessNames) {
 }
 $processesToStop = @($processesToStop | Select-Object -Unique)
 $stoppedProcesses = New-Object Collections.Generic.List[string]
+$stillRunning = New-Object Collections.Generic.List[string]
 $warnings = New-Object Collections.Generic.List[string]
 
 function Stop-BoostBackgroundProcesses {
@@ -76,8 +77,7 @@ function Stop-BoostBackgroundProcesses {
                 # data, so a normal Boost session must never kill it.
                 "Graceful close did not finish for $processName; leaving it running." |
                     Add-Content -LiteralPath $logPath -Encoding UTF8
-                $warnings.Add(
-                    "Graceful close timed out for $processName ($($left.Count) of $($processes.Count) processes); it was not forced to exit.")
+                $stillRunning.Add($processName)
                 continue
             }
             $stoppedProcesses.Add("$processName|$($mainProcess.Id)|$executablePath")
@@ -110,6 +110,11 @@ try {
     $resultLines.Add('[StoppedProcesses]')
     for ($index = 0; $index -lt $stoppedProcesses.Count; $index++) {
         $resultLines.Add("Process$($index + 1)=$($stoppedProcesses[$index])")
+    }
+    $resultLines.Add('')
+    $resultLines.Add('[StillRunning]')
+    for ($index = 0; $index -lt $stillRunning.Count; $index++) {
+        $resultLines.Add("Left$($index + 1)=$($stillRunning[$index])")
     }
     $resultLines.Add('')
     $resultLines.Add('[Warnings]')

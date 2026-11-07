@@ -3,6 +3,20 @@
 The English interface arrived in 3.2.0. Earlier versions are described in
 [`CHANGELOG.md`](CHANGELOG.md), in Russian.
 
+## 5.4.1 — 2026-11-07
+
+### Fixes
+
+- If Boostix falls during a game, closed programs no longer stay closed and the
+  command after the game is not lost. They run the next time Boostix starts, once
+  the game is over.
+- The automatic FPS measurement does not run next to the FACEIT, Riot Vanguard,
+  Easy Anti-Cheat and BattlEye anti-cheats: it has not been tried with them. The
+  debrief gives the reason.
+- Programs that did not close for the game are now named in the debrief right
+  below the main numbers. It used to be a technical English line at the bottom of
+  the list.
+
 ## 5.4.0 — 2026-11-07
 
 ### New

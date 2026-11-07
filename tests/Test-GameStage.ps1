@@ -460,6 +460,125 @@ if (($reopenNames -join ',') -cne 'firefox') {
     throw "After the game Boostix would reopen: $($reopenNames -join ',')."
 }
 
+# What is left after a game outlives Boostix: the file names only what can really
+# be started, and it waits for the game to end.
+$pendingType = $assembly.GetType('Boostix.PendingAfterGame', $true)
+$parsePending = $pendingType.GetMethod('Parse', $flags)
+$pending = [Activator]::CreateInstance($pendingType, $true)
+$pendingType.GetField('GameProcessName').SetValue($pending, 'cs2')
+$pendingType.GetField('RunCommand').SetValue($pending, $true)
+$pendingType.GetField('Closed').SetValue($pending, $closedList)
+$pendingText = [string]$pendingType.GetMethod('Format', $instance).Invoke($pending, @())
+$restored = $parsePending.Invoke($null, [object[]]@($pendingText))
+function Get-PendingClosed {
+    param($Pending)
+    return @($pendingType.GetField('Closed').GetValue($Pending) |
+        ForEach-Object { [string]$closedType.GetField('ProcessName').GetValue($_) }) -join ','
+}
+if ([string]$pendingType.GetField('GameProcessName').GetValue($restored) -cne 'cs2' -or
+    -not [bool]$pendingType.GetField('RunCommand').GetValue($restored) -or
+    (Get-PendingClosed $restored) -cne 'firefox,firefox,steam,gone') {
+    throw "The work after the game did not survive saving: $pendingText"
+}
+$tampered = $parsePending.Invoke($null, [object[]]@(
+    "Game=bad|name`nRunCommand=0`nClosed=x||notes.txt`nClosed=y||relative\y.exe`nClosed=bad;name||C:\y.exe`nClosed=ok||C:\Apps\ok.exe`n"))
+if ([string]$pendingType.GetField('GameProcessName').GetValue($tampered) -or
+    (Get-PendingClosed $tampered) -cne 'ok') {
+    throw 'Only a program with a full path to an exe may come back.'
+}
+$isEmpty = $pendingType.GetProperty('IsEmpty', $instance)
+if (-not [bool]$isEmpty.GetValue($parsePending.Invoke($null, [object[]]@('')), $null) -or
+    [bool]$isEmpty.GetValue($restored, $null)) {
+    throw 'An empty file means there is nothing left to do, and only then.'
+}
+$pendingDue = $pendingType.GetMethod('IsDue', $instance)
+$gameRuns = [Func[string, bool]] { param($name) $name -eq 'cs2' }
+$gameGone = [Func[string, bool]] { param($name) $false }
+if ([bool]$pendingDue.Invoke($restored, [object[]]@($gameRuns)) -or
+    -not [bool]$pendingDue.Invoke($restored, [object[]]@($gameGone)) -or
+    -not [bool]$pendingDue.Invoke($tampered, [object[]]@($gameRuns))) {
+    throw 'The work after the game must wait for the game, and only for it.'
+}
+
+# What the preparation script reports. A program that stayed open is said plainly
+# and never counts as nothing to close.
+$scriptResult = $assembly.GetType('Boostix.BoostScriptResult', $true).GetMethod('Import', $flags)
+function Import-ScriptResult {
+    param([string[]]$Lines, $Report, $Closed)
+    $arguments = New-Object 'object[]' 3
+    $arguments[0] = $Lines
+    $arguments[1] = $Report
+    $arguments[2] = $Closed
+    [void]$scriptResult.Invoke($null, $arguments)
+}
+$actionType = $assembly.GetType('Boostix.BoostActionRecord', $true)
+$importClosed = [Activator]::CreateInstance([Collections.Generic.List``1].MakeGenericType($closedType))
+$importReport = New-Report 30 '' 'Normal'
+$reportType.GetField('Actions', $instance).SetValue($importReport, [Activator]::CreateInstance([Collections.Generic.List``1].MakeGenericType($actionType)))
+Import-ScriptResult @('[BoostSession]', 'StoppedProcessCount=1', '[StoppedProcesses]', 'Process1=firefox|11|C:\Apps\firefox.exe',
+    '[StillRunning]', 'Left1=Discord', '[Warnings]', 'Warning1=Could not stop x') $importReport $importClosed
+if ($importClosed.Count -ne 1 -or [string]$closedType.GetField('ExecutablePath').GetValue($importClosed[0]) -cne 'C:\Apps\firefox.exe') {
+    throw 'The closed program did not reach the list to reopen.'
+}
+$stillRunning = $reportType.GetField('StillRunningPrograms', $instance).GetValue($importReport)
+if (-not $stillRunning -or ($stillRunning -join ',') -cne 'Discord') {
+    throw 'The program that stayed open did not reach the report.'
+}
+$importActions = @($reportType.GetField('Actions', $instance).GetValue($importReport))
+$leftAction = @($importActions | Where-Object { [string]$actionType.GetField('Title').GetValue($_) -ceq 'DISCORD' })
+if ($leftAction.Count -ne 1 -or [string]$actionType.GetField('Outcome').GetValue($leftAction[0]) -cne 'Skipped') {
+    throw 'The program that stayed open has no row among the actions.'
+}
+$onlyLeft = New-Report 30 '' 'Normal'
+$reportType.GetField('Actions', $instance).SetValue($onlyLeft, [Activator]::CreateInstance([Collections.Generic.List``1].MakeGenericType($actionType)))
+Import-ScriptResult @('[StillRunning]', 'Left1=Discord') $onlyLeft $importClosed
+if (@($reportType.GetField('Actions', $instance).GetValue($onlyLeft)).Count -ne 1) {
+    throw 'With a program left open Boostix must not say there was nothing to close.'
+}
+$nothing = New-Report 30 '' 'Normal'
+$reportType.GetField('Actions', $instance).SetValue($nothing, [Activator]::CreateInstance([Collections.Generic.List``1].MakeGenericType($actionType)))
+Import-ScriptResult @('[BoostSession]') $nothing $importClosed
+if (@($reportType.GetField('Actions', $instance).GetValue($nothing)).Count -ne 1) {
+    throw 'With nothing to close the report says so once.'
+}
+$describeLeft = $assembly.GetType('Boostix.SessionVerdicts', $true).GetMethod('DescribeStillRunning', $flags)
+if (-not ([string]$describeLeft.Invoke($null, [object[]]@($importReport))).Contains('Discord')) {
+    throw 'The debrief line does not name the program.'
+}
+if ([string]$describeLeft.Invoke($null, [object[]]@($nothing))) {
+    throw 'With nothing left open there is no line.'
+}
+$reportStore = $assembly.GetType('Boostix.BoostSessionReportStore', $true)
+$reportType.GetField('SessionId', $instance).SetValue($importReport, 'd3a0ff0000000000000000000000000a')
+$savedLeft = [string]$reportStore.GetMethod('Serialize', $flags).Invoke($null, [object[]]@($importReport))
+$leftReadArguments = New-Object 'object[]' 1
+$leftReadArguments[0] = [string[]]($savedLeft -split "`r?`n")
+$leftRead = $reportStore.GetMethod('Deserialize', $flags).Invoke($null, $leftReadArguments)
+if (-not $leftRead -or
+    ($reportType.GetField('StillRunningPrograms', $instance).GetValue($leftRead) -join ',') -cne 'Discord') {
+    throw 'The programs left open did not survive saving the report.'
+}
+
+# Next to an anti-cheat the automatic FPS measurement stays away. The FACEIT app
+# alone is not its anti-cheat.
+$findAntiCheat = $assembly.GetType('Boostix.AntiCheatGuard', $true).GetMethod('Find', $flags)
+function Find-AntiCheat {
+    param([string[]]$Names)
+    $arguments = New-Object 'object[]' 1
+    $arguments[0] = $Names
+    return $findAntiCheat.Invoke($null, $arguments)
+}
+foreach ($case in @(@('faceitclient', 'FACEIT'), @('FACEITSERVICE', 'FACEIT'), @('vgc', 'Riot Vanguard'),
+        @('EasyAntiCheat_EOS', 'Easy Anti-Cheat'), @('BEService', 'BattlEye'))) {
+    $found = Find-AntiCheat @('cs2', $case[0], 'firefox')
+    if ($found -cne $case[1]) {
+        throw "$($case[0]) read as: $found"
+    }
+}
+if ($null -ne (Find-AntiCheat @('cs2', 'firefox', 'FACEIT'))) {
+    throw 'A game without an anti-cheat must be measured.'
+}
+
 # A program the player knows stops being a warning but stays in the list.
 $setKnown = $videoRanking.GetMethod('SetKnownPrograms', $flags)
 $knownList = New-Object 'System.Collections.Generic.List[string]'
@@ -728,7 +847,7 @@ try {
     if (-not (Find-Element $window 'Boostix.Center.Debrief.Headline')) {
         throw 'A journal row did not open its debrief.'
     }
-    foreach ($id in 'Boostix.Center.Debrief.Comparison', 'Boostix.Center.Debrief.CloseForGame') {
+    foreach ($id in 'Boostix.Center.Debrief.Comparison', 'Boostix.Center.Debrief.CloseForGame', 'Boostix.Center.Debrief.StillRunning') {
         if (-not (Find-Element $window $id)) {
             throw "The debrief is missing $id."
         }

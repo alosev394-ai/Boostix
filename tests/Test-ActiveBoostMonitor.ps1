@@ -260,8 +260,11 @@ try {
     if ($groupResult.Contains('Process2=')) {
         throw 'A program with helpers was reported more than once.'
     }
-    if (-not $groupResult.Contains('WarningCount=1') -or -not $groupResult.Contains('stubborn')) {
-        throw 'A program that stayed open was not reported.'
+    if (-not $groupResult.Contains('Left1=stubborn') -or $groupResult.Contains('Left2=')) {
+        throw "A program that stayed open was not reported: $groupResult"
+    }
+    if (-not $groupResult.Contains('WarningCount=0')) {
+        throw 'A program that stayed open is not a warning: it has its own line in the debrief.'
     }
 
     'Active Boost one-shot preparation regression test passed.'

@@ -3940,7 +3940,7 @@ namespace Boostix
                 AddListRow(fps, BuildSettingToggle(
                     settingIndex++,
                     L.T("Замерять FPS в каждой игре"),
-                    L.T("Минуту на пятой минуте игры и потом каждые 15 минут. Boostix читает события Windows и не трогает игру."),
+                    L.T("Минуту на пятой минуте игры и потом каждые 15 минут. Boostix читает события Windows и не трогает игру. Рядом с античитом замер не запускается."),
                     settings.MeasureFps,
                     delegate(bool value) { settings.MeasureFps = value; }));
                 pageContent.Children.Add(fps);

@@ -274,7 +274,7 @@ namespace Boostix
     /// </summary>
     internal static class SessionCloseList
     {
-        private static bool IsValidName(string name)
+        internal static bool IsValidName(string name)
         {
             return !string.IsNullOrWhiteSpace(name) &&
                 name.All(item => char.IsLetterOrDigit(item) || item == ' ' || item == '.' ||
@@ -327,6 +327,138 @@ namespace Boostix
                 .Select(group => group.First())
                 .Where(item => fileExists(item.ExecutablePath) && !isRunning(item.ProcessName))
                 .ToList();
+        }
+    }
+
+    /// <summary>
+    /// What is left to do after a game, kept on disk while it runs: if Boostix
+    /// falls with the game, the next start finishes the work. The command
+    /// stays in the settings, the file only says it is owed.
+    /// </summary>
+    internal sealed class PendingAfterGame
+    {
+        public string GameProcessName = string.Empty;
+        public bool RunCommand;
+        public List<ClosedProgram> Closed = new List<ClosedProgram>();
+
+        internal bool IsEmpty
+        {
+            get { return !RunCommand && Closed.Count == 0; }
+        }
+
+        internal string Format()
+        {
+            var lines = new List<string>
+            {
+                "Game=" + GameProcessName,
+                "RunCommand=" + (RunCommand ? "1" : "0")
+            };
+            lines.AddRange(Closed.Select(item => "Closed=" + item.ProcessName + "||" + item.ExecutablePath));
+            return string.Join("\n", lines.ToArray()) + "\n";
+        }
+
+        /// <summary>
+        /// Boostix starts what this file names, so only a full path to an exe
+        /// gets through.
+        /// </summary>
+        internal static PendingAfterGame Parse(string saved)
+        {
+            var pending = new PendingAfterGame();
+            foreach (string line in (saved ?? string.Empty).Split('\n'))
+            {
+                string text = line.Trim();
+                if (text.StartsWith("Game=", StringComparison.Ordinal))
+                {
+                    string name = text.Substring("Game=".Length);
+                    pending.GameProcessName = SessionCloseList.IsValidName(name) ? name : string.Empty;
+                }
+                else if (text == "RunCommand=1")
+                {
+                    pending.RunCommand = true;
+                }
+                else if (text.StartsWith("Closed=", StringComparison.Ordinal))
+                {
+                    ClosedProgram program = SessionCloseList.ParseStopped(text.Substring("Closed=".Length));
+                    if (SessionCloseList.IsValidName(program.ProcessName) && IsFullExePath(program.ExecutablePath))
+                    {
+                        pending.Closed.Add(program);
+                    }
+                }
+            }
+            return pending;
+        }
+
+        private static bool IsFullExePath(string path)
+        {
+            return path.Length > 7 && path[1] == ':' && path[2] == '\\' &&
+                path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Boostix can fall while the game goes on: programs must not come
+        /// back in the middle of a match.
+        /// </summary>
+        internal bool IsDue(Func<string, bool> isRunning)
+        {
+            return GameProcessName.Length == 0 || !isRunning(GameProcessName);
+        }
+    }
+
+    /// <summary>
+    /// Anti-cheats the automatic FPS measurement was never tried with, so it
+    /// stays away from them. The FACEIT app alone is not on the list: its
+    /// anti-cheat has processes of its own.
+    /// </summary>
+    internal static class AntiCheatGuard
+    {
+        private static readonly Dictionary<string, string> Known =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "faceitclient", "FACEIT" },
+                { "faceitservice", "FACEIT" },
+                { "vgc", "Riot Vanguard" },
+                { "vgtray", "Riot Vanguard" },
+                { "EasyAntiCheat", "Easy Anti-Cheat" },
+                { "EasyAntiCheat_EOS", "Easy Anti-Cheat" },
+                { "BEService", "BattlEye" },
+                { "BEService_x64", "BattlEye" }
+            };
+
+        internal static string Find(IEnumerable<string> processNames)
+        {
+            foreach (string name in processNames ?? Enumerable.Empty<string>())
+            {
+                string antiCheat;
+                if (name != null && Known.TryGetValue(name, out antiCheat))
+                {
+                    return antiCheat;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// One system snapshot, no process is opened.
+        /// </summary>
+        internal static string FindRunning()
+        {
+            Process[] processes = new Process[0];
+            try
+            {
+                processes = Process.GetProcesses();
+                return Find(processes.Select(process => process.ProcessName));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+            finally
+            {
+                foreach (Process process in processes)
+                {
+                    process.Dispose();
+                }
+            }
         }
     }
 
@@ -927,6 +1059,7 @@ namespace Boostix
         public List<BoostActionRecord> Actions;
         public List<BoostMemoryHog> MemoryHogs;
         public List<BoostMemoryHog> VideoMemoryHogs;
+        public List<string> StillRunningPrograms;
         public BoostPerformanceResult Performance;
 
         public BoostSessionReport Clone()
@@ -936,6 +1069,7 @@ namespace Boostix
                 Timeline ?? new List<SessionTimelinePoint>());
             clone.MemoryHogs = MemoryHogs == null ? null : new List<BoostMemoryHog>(MemoryHogs);
             clone.VideoMemoryHogs = VideoMemoryHogs == null ? null : new List<BoostMemoryHog>(VideoMemoryHogs);
+            clone.StillRunningPrograms = StillRunningPrograms == null ? null : new List<string>(StillRunningPrograms);
             clone.Actions = new List<BoostActionRecord>();
             foreach (BoostActionRecord action in Actions ??
                 new List<BoostActionRecord>())
@@ -2268,6 +2402,10 @@ namespace Boostix
             {
                 lines.Add("VideoMemoryHog=" + EncodeHog(hog));
             }
+            foreach (string program in report.StillRunningPrograms ?? new List<string>())
+            {
+                lines.Add("StillRunning=" + Encode(program));
+            }
             return string.Join(Environment.NewLine, lines.ToArray()) + Environment.NewLine;
         }
 
@@ -2310,6 +2448,7 @@ namespace Boostix
             var actionValues = new List<string>();
             var hogValues = new List<string>();
             var videoHogValues = new List<string>();
+            var stillRunningValues = new List<string>();
             foreach (string line in lines)
             {
                 int separator = line.IndexOf('=');
@@ -2330,6 +2469,10 @@ namespace Boostix
                 else if (string.Equals(key, "VideoMemoryHog", StringComparison.OrdinalIgnoreCase))
                 {
                     videoHogValues.Add(value);
+                }
+                else if (string.Equals(key, "StillRunning", StringComparison.OrdinalIgnoreCase))
+                {
+                    stillRunningValues.Add(value);
                 }
                 else
                 {
@@ -2556,6 +2699,13 @@ namespace Boostix
             }
             report.MemoryHogs = DecodeHogs(hogValues);
             report.VideoMemoryHogs = DecodeHogs(videoHogValues);
+            if (stillRunningValues.Count > 0)
+            {
+                report.StillRunningPrograms = stillRunningValues
+                    .Take(BoostMemoryHog.MaximumPerSession)
+                    .Select(value => Decode(value))
+                    .ToList();
+            }
             return report;
         }
 

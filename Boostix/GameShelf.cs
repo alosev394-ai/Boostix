@@ -700,6 +700,7 @@ namespace Boostix
                     new BoostMemoryHog { Name = "Firefox", ProcessName = "firefox", Bytes = 3 * GiB + GiB / 8 },
                     new BoostMemoryHog { Name = "Discord", ProcessName = "Discord", Bytes = GiB * 2 / 3 }
                 };
+                report.StillRunningPrograms = new List<string> { "Discord" };
             }
             if (pressure == "Elevated")
             {
@@ -734,6 +735,89 @@ namespace Boostix
         public string Title;
         public string Detail;
         public Color Tone;
+    }
+
+    /// <summary>
+    /// What the preparation script left after a Boost: closed programs come
+    /// back after the game, the ones that stayed open go to the debrief.
+    /// </summary>
+    internal static class BoostScriptResult
+    {
+        internal static void Import(
+            IEnumerable<string> lines,
+            BoostSessionReport report,
+            List<ClosedProgram> closedForGame)
+        {
+            int handled = 0;
+            foreach (string line in lines)
+            {
+                int separator = line.IndexOf('=');
+                if (separator <= 0)
+                {
+                    continue;
+                }
+                string key = line.Substring(0, separator).Trim();
+                string value = line.Substring(separator + 1).Trim();
+                if (IsIndexedKey(key, "Process"))
+                {
+                    ClosedProgram closed = SessionCloseList.ParseStopped(value);
+                    closedForGame.Add(closed);
+                    report.AddAction(
+                        closed.ProcessName.ToUpperInvariant(),
+                        L.T("Закрыт во время одноразовой подготовки."),
+                        BoostActionOutcome.Changed);
+                    handled++;
+                }
+                else if (IsIndexedKey(key, "Left"))
+                {
+                    if (report.StillRunningPrograms == null)
+                    {
+                        report.StillRunningPrograms = new List<string>();
+                    }
+                    report.StillRunningPrograms.Add(value);
+                    report.AddAction(
+                        value.ToUpperInvariant(),
+                        L.T("Не закрылся. Boostix не завершает программы силой."),
+                        BoostActionOutcome.Skipped);
+                    handled++;
+                }
+                else if (IsIndexedKey(key, "Warning"))
+                {
+                    report.AddAction(
+                        L.T("ПРЕДУПРЕЖДЕНИЕ ПОДГОТОВКИ"),
+                        value,
+                        BoostActionOutcome.Failed);
+                }
+            }
+            if (handled == 0)
+            {
+                report.AddAction(
+                    L.T("ФОНОВЫЕ ПРОЦЕССЫ"),
+                    L.T("Закрывать было нечего."),
+                    BoostActionOutcome.AlreadyOptimal);
+            }
+        }
+
+        private static bool IsIndexedKey(string key, string prefix)
+        {
+            if (string.IsNullOrEmpty(key) ||
+                string.IsNullOrEmpty(prefix) ||
+                key.Length <= prefix.Length ||
+                !key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            for (int index = prefix.Length; index < key.Length; index++)
+            {
+                if (key[index] < '0' || key[index] > '9')
+                {
+                    return false;
+                }
+            }
+
+            return key[prefix.Length] != '0';
+        }
     }
 
     internal static class SessionVerdicts
@@ -958,6 +1042,17 @@ namespace Boostix
                 Detail = L.T("Компьютер справился. Boost можно оставить как есть."),
                 Tone = BoostixDesignTokens.Data
             };
+        }
+
+        internal static string DescribeStillRunning(BoostSessionReport report)
+        {
+            List<string> left = report == null ? null : report.StillRunningPrograms;
+            return left == null || left.Count == 0
+                ? string.Empty
+                : string.Format(
+                    CultureInfo.CurrentCulture,
+                    L.T("Не закрылись: {0}. Обычно такие программы прячутся у часов: закройте их там перед игрой."),
+                    string.Join(", ", left));
         }
 
         internal static string DescribeGpuLoad(IEnumerable<BoostGpuLoad> load)

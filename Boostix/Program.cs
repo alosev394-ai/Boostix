@@ -471,6 +471,8 @@ namespace Boostix
         private DispatcherTimer autoBoostDiscoveryTimer;
         private TimeSpan sessionProcessorStart;
         private List<ClosedProgram> closedForGame = new List<ClosedProgram>();
+        private PendingAfterGame pendingAfterGame;
+        private DispatcherTimer pendingAfterGameTimer;
         private bool memoryPressureRecorded;
         private DateTime lastVideoMemoryCaptureUtc;
         private DateTime lastGpuLoadUtc = DateTime.MinValue;
@@ -478,6 +480,7 @@ namespace Boostix
         private int fpsCapturesDone;
         private bool fpsCaptureRunning;
         private bool fpsCaptureDenied;
+        private bool fpsAntiCheatNoted;
         private CancellationTokenSource fpsCaptureCancellation;
         private Process boostProcess;
         private string readinessSignalPath;
@@ -2641,6 +2644,7 @@ namespace Boostix
                 currentSession.Status = "Active";
                 ImportBoostScriptResult(currentSession);
                 SaveCurrentSession();
+                SavePendingAfterGame();
             }
             caption.Text = L.T("Boost включён");
             caption.SetResourceReference(
@@ -4232,6 +4236,30 @@ namespace Boostix
                 cancellation = new CancellationTokenSource();
                 fpsCaptureCancellation = cancellation;
             }
+            string antiCheat = AntiCheatGuard.FindRunning();
+            if (antiCheat != null)
+            {
+                bool alreadyNoted;
+                lock (activeMaintenanceSync)
+                {
+                    fpsCaptureRunning = false;
+                    fpsCaptureCancellation = null;
+                    alreadyNoted = fpsAntiCheatNoted;
+                    fpsAntiCheatNoted = true;
+                }
+                cancellation.Dispose();
+                if (!alreadyNoted)
+                {
+                    RecordSessionAction(
+                        L.T("ЗАМЕР FPS"),
+                        string.Format(
+                            CultureInfo.CurrentCulture,
+                            L.T("Пропущен: рядом работает {0}. С античитами замер ещё не проверялся."),
+                            antiCheat),
+                        BoostActionOutcome.Skipped);
+                }
+                return;
+            }
             var measured = new PerformanceTargetProcess
             {
                 ProcessId = target.ProcessId,
@@ -4370,6 +4398,139 @@ namespace Boostix
                         L.T("Не удалось запустить снова: ") + ex.Message,
                         BoostActionOutcome.Skipped);
                 }
+            }
+        }
+
+        private static string PendingAfterGamePath
+        {
+            get { return System.IO.Path.Combine(BoostSessionReportStore.StateDirectory, "after-game.pending"); }
+        }
+
+        private void SavePendingAfterGame()
+        {
+            if (demoMode || BoostSessionReportStore.PersistenceDisabled)
+            {
+                return;
+            }
+            var pending = new PendingAfterGame
+            {
+                GameProcessName = selectedTarget == null ? string.Empty : selectedTarget.ProcessName,
+                RunCommand = !string.IsNullOrWhiteSpace(centerSettings.AfterGameCommand),
+                Closed = closedForGame
+            };
+            try
+            {
+                if (pending.IsEmpty)
+                {
+                    File.Delete(PendingAfterGamePath);
+                }
+                else
+                {
+                    BoostSessionReportStore.WriteAllTextAtomic(PendingAfterGamePath, pending.Format());
+                }
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not remember the work after the game.", ex);
+            }
+        }
+
+        private void ClearPendingAfterGame()
+        {
+            if (demoMode)
+            {
+                return;
+            }
+            try
+            {
+                File.Delete(PendingAfterGamePath);
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not clear the work after the game.", ex);
+            }
+        }
+
+        private void LoadPendingAfterGame()
+        {
+            if (demoMode || safeMode || !File.Exists(PendingAfterGamePath))
+            {
+                return;
+            }
+            try
+            {
+                pendingAfterGame = PendingAfterGame.Parse(File.ReadAllText(PendingAfterGamePath, Encoding.UTF8));
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not read the work after the game.", ex);
+                return;
+            }
+            FinishPendingAfterGame();
+        }
+
+        /// <summary>
+        /// Boostix fell during a game. Programs come back and the command runs
+        /// once that game is over, and the report of the cut-off game says so.
+        /// </summary>
+        private void FinishPendingAfterGame()
+        {
+            PendingAfterGame pending = pendingAfterGame;
+            if (pending == null)
+            {
+                return;
+            }
+            if (!pending.IsDue(IsProcessRunning))
+            {
+                if (pendingAfterGameTimer == null)
+                {
+                    pendingAfterGameTimer = new DispatcherTimer
+                    {
+                        Interval = TimeSpan.FromSeconds(15)
+                    };
+                    pendingAfterGameTimer.Tick += delegate { FinishPendingAfterGame(); };
+                }
+                pendingAfterGameTimer.Start();
+                return;
+            }
+            StopPendingAfterGameTimer();
+            pendingAfterGame = null;
+            closedForGame = pending.Closed;
+            BoostSessionReport report = lastSession ?? BoostSessionReport.Start("AfterGame");
+            ReopenClosedPrograms(report);
+            if (pending.RunCommand && !string.IsNullOrWhiteSpace(centerSettings.AfterGameCommand))
+            {
+                report.AddAction(
+                    L.T("КОМАНДА ПОСЛЕ ИГРЫ"),
+                    L.T("Запущена при следующем старте Boostix."),
+                    BoostActionOutcome.Changed);
+                RunGameCommand(L.T("КОМАНДА ПОСЛЕ ИГРЫ"), centerSettings.AfterGameCommand);
+            }
+            ClearPendingAfterGame();
+            if (lastSession == null)
+            {
+                return;
+            }
+            try
+            {
+                BoostSessionReportStore.Save(lastSession);
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not save the report after finishing the game.", ex);
+            }
+            RefreshSessionHistory();
+            if (boostCenterOverlay != null)
+            {
+                boostCenterOverlay.SetSessionReport(lastSession);
+            }
+        }
+
+        private void StopPendingAfterGameTimer()
+        {
+            if (pendingAfterGameTimer != null)
+            {
+                pendingAfterGameTimer.Stop();
             }
         }
 
@@ -4604,7 +4765,17 @@ namespace Boostix
             lastVideoMemoryCaptureUtc = DateTime.MinValue;
             fpsCapturesDone = 0;
             fpsCaptureDenied = false;
+            fpsAntiCheatNoted = false;
+            if (pendingAfterGame != null)
+            {
+                // The game that outlived Boostix was picked up again: the end
+                // of this session finishes the work of both.
+                closedForGame.AddRange(pendingAfterGame.Closed);
+                pendingAfterGame = null;
+                StopPendingAfterGameTimer();
+            }
             RunGameCommand(L.T("КОМАНДА ПЕРЕД ИГРОЙ"), centerSettings.BeforeGameCommand);
+            SavePendingAfterGame();
             CheckComputerBeforeGame(currentSession.AvailableMemoryStartBytes);
             if (centerSettings.KeepDiscord)
             {
@@ -5139,41 +5310,7 @@ namespace Boostix
                 {
                     return;
                 }
-                int stopped = 0;
-                foreach (string line in File.ReadAllLines(path, Encoding.UTF8))
-                {
-                    int separator = line.IndexOf('=');
-                    if (separator <= 0)
-                    {
-                        continue;
-                    }
-                    string key = line.Substring(0, separator).Trim();
-                    string value = line.Substring(separator + 1).Trim();
-                    if (IsIndexedResultKey(key, "Process"))
-                    {
-                        ClosedProgram closed = SessionCloseList.ParseStopped(value);
-                        closedForGame.Add(closed);
-                        report.AddAction(
-                            closed.ProcessName.ToUpperInvariant(),
-                            L.T("Закрыт во время одноразовой подготовки."),
-                            BoostActionOutcome.Changed);
-                        stopped++;
-                    }
-                    else if (IsIndexedResultKey(key, "Warning"))
-                    {
-                        report.AddAction(
-                            L.T("ПРЕДУПРЕЖДЕНИЕ ПОДГОТОВКИ"),
-                            value,
-                            BoostActionOutcome.Failed);
-                    }
-                }
-                if (stopped == 0)
-                {
-                    report.AddAction(
-                        L.T("ФОНОВЫЕ ПРОЦЕССЫ"),
-                        L.T("Закрывать было нечего."),
-                        BoostActionOutcome.AlreadyOptimal);
-                }
+                BoostScriptResult.Import(File.ReadAllLines(path, Encoding.UTF8), report, closedForGame);
             }
             catch (Exception ex)
             {
@@ -5187,27 +5324,6 @@ namespace Boostix
                 try { if (File.Exists(path)) File.Delete(path); }
                 catch { }
             }
-        }
-
-        private static bool IsIndexedResultKey(string key, string prefix)
-        {
-            if (string.IsNullOrEmpty(key) ||
-                string.IsNullOrEmpty(prefix) ||
-                key.Length <= prefix.Length ||
-                !key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            for (int index = prefix.Length; index < key.Length; index++)
-            {
-                if (key[index] < '0' || key[index] > '9')
-                {
-                    return false;
-                }
-            }
-
-            return key[prefix.Length] != '0';
         }
 
         private void SaveCurrentSession()
@@ -5294,6 +5410,7 @@ namespace Boostix
                 BoostActionOutcome.AlreadyOptimal);
             ReopenClosedPrograms(currentSession);
             RunGameCommand(L.T("КОМАНДА ПОСЛЕ ИГРЫ"), centerSettings.AfterGameCommand);
+            ClearPendingAfterGame();
             string ownLoad = DescribeOwnLoad(
                 ReadOwnProcessorTime() - sessionProcessorStart,
                 DateTime.UtcNow - currentSession.StartedUtc);
@@ -7183,6 +7300,7 @@ namespace Boostix
                         ex);
                 }
             }
+            LoadPendingAfterGame();
             RefreshSessionHistory();
             PerformanceProofCoordinator restoredProof;
             string proofLoadError;
@@ -7504,6 +7622,7 @@ namespace Boostix
             {
                 readinessTimer.Stop();
             }
+            StopPendingAfterGameTimer();
             StopActiveBoostMaintenance();
             ImportBoostScriptResult(currentSession);
             CompleteCurrentSession(

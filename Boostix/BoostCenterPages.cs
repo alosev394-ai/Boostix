@@ -661,6 +661,16 @@ namespace Boostix
                 body.Children.Add(compared);
             }
 
+            string stillRunning = SessionVerdicts.DescribeStillRunning(report);
+            if (stillRunning.Length > 0)
+            {
+                var left = MakeText(stillRunning, BoostixDesignTokens.BodyTextSize, SecondaryColor, regularFont, FontWeights.Normal);
+                left.TextWrapping = TextWrapping.Wrap;
+                left.Margin = new Thickness(0, comparison.Length > 0 ? 4 : 12, 0, 0);
+                AutomationProperties.SetAutomationId(left, "Boostix.Center.Debrief.StillRunning");
+                body.Children.Add(left);
+            }
+
             var chart = new SessionChart(report.Timeline, report.PhysicalMemoryTotalBytes)
             {
                 Height = 150,
