@@ -649,13 +649,13 @@ namespace Boostix
                 Assert(byName * 2 <= everything + 1,
                     "The named capture is not cheaper than inspecting everything.");
 
-                double fullCapture = MeasureProcessor(40, delegate
+                double fullCapture = MeasureProcessor(400, delegate
                 {
                     GameProcessSnapshot ignored;
                     string ignoredError;
                     catalog.TryCapture(ownId, out ignored, out ignoredError);
                 });
-                double cheapCapture = MeasureProcessor(40, delegate
+                double cheapCapture = MeasureProcessor(400, delegate
                 {
                     GameProcessSnapshot ignored;
                     string ignoredError;
