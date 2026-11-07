@@ -28,8 +28,7 @@ foreach ($required in @(
     }
 }
 
-$framework = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
-$compiler = Join-Path $framework 'csc.exe'
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 $testRoot = Join-Path $env:TEMP (
     'Boostix-BackgroundImpact-Test-' + [Guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $testRoot)

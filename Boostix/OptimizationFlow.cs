@@ -728,7 +728,7 @@ namespace Boostix
             {
                 // What Windows refused or skipped, so it is not only in the log.
                 var notesStack = new StackPanel();
-                foreach (string note in notes)
+                foreach (string note in notes!)
                 {
                     var noteText = MakeText(note, 10.5, TextColor, regularFont, FontWeights.Normal);
                     if (notesStack.Children.Count > 0)

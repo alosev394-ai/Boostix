@@ -28,8 +28,7 @@ $legacyExecutable = Join-Path $projectRoot (
     '.exe')
 $source = [IO.File]::ReadAllText($installerSource)
 $normalizedSource = [regex]::Replace($source, '\s+', ' ')
-$frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
-$compiler = Join-Path $frameworkRoot 'csc.exe'
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) (
     'Boostix-CorruptRepair-' + [Guid]::NewGuid().ToString('N'))
 $harnessPath = Join-Path $temporaryRoot 'CorruptRepairHarness.dll'
@@ -72,9 +71,6 @@ function Assert-SourceContains {
 
 try {
     [IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
-    if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
-        throw "C# compiler was not found: $compiler"
-    }
     foreach ($requiredExecutable in @($boostixExecutable, $legacyExecutable)) {
         if (-not (Test-Path -LiteralPath $requiredExecutable -PathType Leaf)) {
             throw "Required built executable was not found: $requiredExecutable"

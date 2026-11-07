@@ -1104,11 +1104,11 @@ namespace Boostix
                 Game = liveGame,
                 Name = liveGame.Name,
                 StartedUtc = boostSessionStartedUtc.Value,
-                AvailableBytes = memoryKnown ? sessionGuardSample.AvailablePhysicalBytes : 0,
-                TotalBytes = memoryKnown ? sessionGuardSample.TotalPhysicalBytes : 0,
+                AvailableBytes = memoryKnown ? sessionGuardSample!.AvailablePhysicalBytes : 0,
+                TotalBytes = memoryKnown ? sessionGuardSample!.TotalPhysicalBytes : 0,
                 CpuPercent = liveCpuPercent,
-                GpuUsedBytes = gpuKnown ? diagnosticSnapshot.GpuDedicatedUsageBytes : 0,
-                GpuTotalBytes = gpuKnown ? diagnosticSnapshot.GpuDedicatedTotalBytes : 0,
+                GpuUsedBytes = gpuKnown ? diagnosticSnapshot!.GpuDedicatedUsageBytes : 0,
+                GpuTotalBytes = gpuKnown ? diagnosticSnapshot!.GpuDedicatedTotalBytes : 0,
                 LowMemory = sessionGuardPressureState != null && sessionGuardPressureState.CriticalAlertActive,
                 Timeline = liveTimeline
             });
@@ -3165,7 +3165,7 @@ namespace Boostix
                 snapshot.FinalResult != null;
             Color edge = failed
                 ? ErrorColor
-                : (completed && snapshot.FinalResult.Conclusive
+                : (completed && snapshot.FinalResult!.Conclusive
                     ? (snapshot.FinalResult.Verdict == PerformanceProofVerdict.Negative
                         ? ErrorColor
                         : SuccessColor)
@@ -3174,7 +3174,7 @@ namespace Boostix
             string detail;
             if (completed)
             {
-                PerformanceProofResult result = snapshot.FinalResult;
+                PerformanceProofResult result = snapshot.FinalResult!;
                 title = result.Verdict == PerformanceProofVerdict.Positive
                     ? L.T("FPS вырос")
                     : (result.Verdict == PerformanceProofVerdict.Negative
@@ -3864,7 +3864,7 @@ namespace Boostix
                         true,
                         delegate(bool value)
                         {
-                            settings.CloseForGame.RemoveAll(item =>
+                            settings.CloseForGame!.RemoveAll(item =>
                                 string.Equals(item, chosen, StringComparison.OrdinalIgnoreCase));
                             if (value)
                             {

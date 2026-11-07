@@ -26,11 +26,7 @@ if ($features.Contains('process.StandardOutput.ReadToEnd();')) {
     throw 'Power-plan diagnostics still perform an unbounded synchronous output read.'
 }
 
-$frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
-$compiler = Join-Path $frameworkRoot 'csc.exe'
-if (-not (Test-Path -LiteralPath $compiler)) {
-    throw ".NET Framework C# compiler not found: $compiler"
-}
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 
 $testRoot = Join-Path $env:TEMP (
     'Boostix-PowerPlanTimeout-' + [Guid]::NewGuid().ToString('N'))

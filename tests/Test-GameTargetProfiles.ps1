@@ -6,14 +6,10 @@ Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $sourcePath = Join-Path $projectRoot 'Boostix\GameTargetProfiles.cs'
-$frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
-$compiler = Join-Path $frameworkRoot 'csc.exe'
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 
 if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
     throw "Game target source was not found: $sourcePath"
-}
-if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
-    throw "C# compiler was not found: $compiler"
 }
 
 $source = [IO.File]::ReadAllText($sourcePath)

@@ -24,7 +24,7 @@ Set-StrictMode -Version Latest
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $wpfRoot = Join-Path $frameworkRoot 'WPF'
-$compiler = Join-Path $frameworkRoot 'csc.exe'
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 $workDirectory = Join-Path $projectRoot 'work'
 $distDirectory = Join-Path $projectRoot 'dist'
 $brandSourcePath = Join-Path $projectRoot 'ProductBrand.cs'
@@ -150,9 +150,6 @@ function Complete-BoostixStage {
 $systemPowerShell = Join-Path ([Environment]::SystemDirectory) `
     'WindowsPowerShell\v1.0\powershell.exe'
 
-if (-not (Test-Path -LiteralPath $compiler)) {
-    throw ".NET Framework C# compiler not found: $compiler"
-}
 if (-not (Test-Path -LiteralPath $systemPowerShell -PathType Leaf)) {
     throw "System Windows PowerShell not found: $systemPowerShell"
 }
@@ -210,6 +207,9 @@ $appArguments = @(
     '/target:winexe',
     '/platform:anycpu',
     '/optimize+',
+    '/langversion:12.0',
+    '/nullable:warnings',
+    '/warnaserror:nullable',
     "/win32icon:$projectRoot\Boostix\Boostix.ico",
     "/win32manifest:$projectRoot\Boostix\app.manifest",
     '/reference:System.dll',
@@ -284,6 +284,9 @@ $setupArguments = @(
     '/target:winexe',
     '/platform:anycpu',
     '/optimize+',
+    '/langversion:12.0',
+    '/nullable:warnings',
+    '/warnaserror:nullable',
     "/win32icon:$projectRoot\Boostix\Boostix.ico",
     "/win32manifest:$projectRoot\BoostixInstaller\app.manifest",
     '/reference:System.dll',

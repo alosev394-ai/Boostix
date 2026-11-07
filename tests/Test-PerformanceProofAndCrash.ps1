@@ -18,17 +18,7 @@ foreach ($sourcePath in @($proofSource, $crashSource)) {
     }
 }
 
-$frameworkFolders = @(
-    (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'),
-    (Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319')
-)
-$compiler = $frameworkFolders |
-    ForEach-Object { Join-Path $_ 'csc.exe' } |
-    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
-    Select-Object -First 1
-if ([string]::IsNullOrWhiteSpace($compiler)) {
-    throw '.NET Framework C# compiler was not found.'
-}
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) (
     'Boostix-ProofCrash-' + [Guid]::NewGuid().ToString('N'))

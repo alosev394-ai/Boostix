@@ -53,7 +53,7 @@ namespace Boostix
             var green = new double[HueBins];
             var blue = new double[HueBins];
             double total = 0;
-            for (int index = 0; index + 3 < bgra.Length; index += 4)
+            for (int index = 0; index + 3 < bgra!.Length; index += 4)
             {
                 double b = bgra[index] / 255.0;
                 double g = bgra[index + 1] / 255.0;

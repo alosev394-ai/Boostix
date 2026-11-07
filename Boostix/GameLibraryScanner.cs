@@ -192,7 +192,7 @@ namespace Boostix
                         }
                         if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(executable))
                         {
-                            yield return new InstalledGame { Name = name.Trim(), ExecutablePath = executable, Source = "GOG" };
+                            yield return new InstalledGame { Name = name!.Trim(), ExecutablePath = executable, Source = "GOG" };
                         }
                     }
                 }

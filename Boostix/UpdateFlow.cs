@@ -1704,14 +1704,14 @@ namespace Boostix
             long selectedSize = size;
             if (boostixInstallerValue != null)
             {
-                if (!IsSha256(boostixShaValue.Text))
+                if (!IsSha256(boostixShaValue!.Text))
                 {
                     throw new InvalidDataException(
                         "Invalid Boostix installer SHA-256.");
                 }
                 long boostixSize;
                 if (!TryParseStrictLong(
-                        boostixSizeValue.Text,
+                        boostixSizeValue!.Text,
                         out boostixSize) ||
                     boostixSize <= 0 ||
                     boostixSize > InstallerMaximumBytes)

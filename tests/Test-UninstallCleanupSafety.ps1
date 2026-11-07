@@ -10,8 +10,7 @@ $brandSource = Join-Path $projectRoot 'ProductBrand.cs'
 $localizationSources = @(
     (Join-Path $projectRoot 'Boostix\Localization.cs'),
     (Join-Path $projectRoot 'Boostix\LocalizationEnglish.cs'))
-$frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
-$compiler = Join-Path $frameworkRoot 'csc.exe'
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) (
     'Boostix-UninstallCleanup-' + [Guid]::NewGuid().ToString('N'))
 $harnessPath = Join-Path $temporaryRoot 'UninstallCleanupHarness.dll'
@@ -112,9 +111,6 @@ function Try-NewTestFileSymlink {
 
 try {
     [IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
-    if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
-        throw "C# compiler was not found: $compiler"
-    }
 
     $compilerOutput = & $compiler `
         /nologo `

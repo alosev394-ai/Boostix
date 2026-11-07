@@ -27,7 +27,7 @@ if (-not $assemblyVersionMatch.Success) {
 }
 $expectedVersion = $assemblyVersionMatch.Groups['version'].Value
 $frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
-$compiler = Join-Path $frameworkRoot 'csc.exe'
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 $wpfRoot = Join-Path $frameworkRoot 'WPF'
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) (
     'Boostix-UpdateRollback-' + [Guid]::NewGuid().ToString('N'))
@@ -97,9 +97,6 @@ function Write-TestFile {
 
 try {
     [IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
-    if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
-        throw "C# compiler was not found: $compiler"
-    }
 
     $installerCompilerOutput = & $compiler `
         /nologo `

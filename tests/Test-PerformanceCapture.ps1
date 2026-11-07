@@ -5,8 +5,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
-$compiler = Join-Path $frameworkRoot 'csc.exe'
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 $fixture = Join-Path $PSScriptRoot 'fixtures\presentmon-v2.csv'
 $captureSource = [IO.File]::ReadAllText(
     (Join-Path $projectRoot 'Boostix\PerformanceCapture.cs'))

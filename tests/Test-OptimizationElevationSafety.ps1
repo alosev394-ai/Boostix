@@ -40,10 +40,7 @@ foreach ($forbidden in @(
 
 $frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $wpfRoot = Join-Path $frameworkRoot 'WPF'
-$compiler = Join-Path $frameworkRoot 'csc.exe'
-if (-not (Test-Path -LiteralPath $compiler)) {
-    throw ".NET Framework C# compiler not found: $compiler"
-}
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 
 $hashContracts = @{
     'ApplyScriptSha256' = $applyPath

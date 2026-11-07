@@ -622,7 +622,7 @@ namespace Boostix
             writer.Write(count);
             for (int index = 0; index < count; index++)
             {
-                writer.Write(run.FrameTimesMs[index]);
+                writer.Write(run.FrameTimesMs![index]);
             }
         }
 

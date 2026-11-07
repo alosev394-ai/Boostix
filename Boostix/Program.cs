@@ -3144,7 +3144,7 @@ namespace Boostix
                     latestPagefileAssessment = assessment;
                     if (changedRecommendation)
                     {
-                        lastPagefileRecommendation = assessment.Recommendation;
+                        lastPagefileRecommendation = assessment!.Recommendation;
                     }
                     else if (assessment != null &&
                         !assessment.RequiresAttention)
@@ -3156,7 +3156,7 @@ namespace Boostix
                 {
                     AppendActiveBoostLog(
                         "Pagefile Guard: " +
-                        assessment.Summary + " " +
+                        assessment!.Summary + " " +
                         assessment.RecommendedAction);
                     RecordSessionAction(
                         L.T("ФАЙЛ ПОДКАЧКИ"),
@@ -3971,7 +3971,7 @@ namespace Boostix
                 correlation.Status == CrashCorrelationStatus.Correlated;
             if (correlated)
             {
-                report.TargetCrashUtc = correlation.EventUtc;
+                report.TargetCrashUtc = correlation!.EventUtc;
                 report.Status = "TargetCrashed";
                 report.TargetCrashCode = correlation.ExceptionCode;
                 report.TargetCrashModule = correlation.FaultingModule;
@@ -5742,7 +5742,7 @@ namespace Boostix
                         frozenContextKey,
                         StringComparison.Ordinal))
                 {
-                    PerformanceProofTransition cancelled = proofCoordinator.Cancel(
+                    PerformanceProofTransition cancelled = proofCoordinator!.Cancel(
                         L.T("Игра, монитор или настройки изменились. Начните новый замер FPS."));
                     string ignoredSaveError;
                     proofCheckpointStore.TrySave(
@@ -5816,7 +5816,7 @@ namespace Boostix
                         : actualContext.BuildContextKey();
                     result.Performance.ComparisonContextKey = actualContextKey;
 
-                    string beforeCheckpoint = proofCoordinator.CreateCheckpoint();
+                    string beforeCheckpoint = proofCoordinator!.CreateCheckpoint();
                     var proofRun = new PerformanceProofRun
                     {
                         RunId = Guid.NewGuid().ToString("N"),
@@ -6600,7 +6600,7 @@ namespace Boostix
             visuals.GlyphBrush.BeginAnimation(
                 SolidColorBrush.ColorProperty,
                 null);
-            var translation = button.RenderTransform as TranslateTransform;
+            var translation = button!.RenderTransform as TranslateTransform;
             if (translation != null)
             {
                 translation.BeginAnimation(TranslateTransform.YProperty, null);
@@ -6666,7 +6666,8 @@ namespace Boostix
                 return;
             }
 
-            if (e.Key == Key.OemComma &&
+            if (boostCenterOverlay != null &&
+                e.Key == Key.OemComma &&
                 (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
             {
                 preflightForBoost = false;

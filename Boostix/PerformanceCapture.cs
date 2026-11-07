@@ -1291,7 +1291,7 @@ namespace Boostix
             string commonDataPrefix = commonDataDirectory.TrimEnd(
                 Path.DirectorySeparatorChar,
                 Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            string productPrefix = productDirectory.TrimEnd(
+            string productPrefix = productDirectory!.TrimEnd(
                 Path.DirectorySeparatorChar,
                 Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             if (!productDirectory.StartsWith(

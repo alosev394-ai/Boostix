@@ -1124,7 +1124,7 @@ namespace Boostix
 
             string arguments = getActive
                 ? "/getactivescheme"
-                : "/setactive " + schemeGuid.Value.ToString("D");
+                : "/setactive " + schemeGuid!.Value.ToString("D");
             var startInfo = new ProcessStartInfo
             {
                 FileName = executable,

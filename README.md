@@ -72,7 +72,8 @@ Windows 10 окно сплошное.
 
 ## Для разработчиков
 
-Требования к сборке: Windows PowerShell 5.1, .NET Framework 4.8 Developer Pack,
+Требования к сборке: Windows PowerShell 5.1, Visual Studio или Build Tools с MSBuild
+(оттуда берётся компилятор C#), .NET Framework 4.8 Developer Pack,
 Visual C++ runtime для поставляемого PresentMon.
 
 ```powershell

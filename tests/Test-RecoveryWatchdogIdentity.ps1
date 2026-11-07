@@ -14,11 +14,7 @@ $brandSource = Join-Path $projectRoot 'ProductBrand.cs'
 $localizationSources = @(
     (Join-Path $projectRoot 'Boostix\Localization.cs'),
     (Join-Path $projectRoot 'Boostix\LocalizationEnglish.cs'))
-$frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
-$compiler = Join-Path $frameworkRoot 'csc.exe'
-if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
-    throw "C# compiler was not found: $compiler"
-}
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 
 $source = [IO.File]::ReadAllText($installerSource)
 foreach ($required in @(

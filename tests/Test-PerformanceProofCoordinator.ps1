@@ -53,17 +53,7 @@ if (-not $buildText.Contains('Boostix\PerformanceProofCoordinator.cs') -or
     throw 'Proof Mode is not part of the production build and mandatory suite.'
 }
 
-$frameworkFolders = @(
-    (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'),
-    (Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319')
-)
-$compiler = $frameworkFolders |
-    ForEach-Object { Join-Path $_ 'csc.exe' } |
-    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
-    Select-Object -First 1
-if ([string]::IsNullOrWhiteSpace($compiler)) {
-    throw '.NET Framework C# compiler was not found.'
-}
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) (
     'Boostix-ProofCoordinator-' + [Guid]::NewGuid().ToString('N'))

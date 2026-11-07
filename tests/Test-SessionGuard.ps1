@@ -6,13 +6,9 @@ Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $sourcePath = Join-Path $projectRoot 'Boostix\SessionGuard.cs'
-$frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
-$compiler = Join-Path $frameworkRoot 'csc.exe'
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
     throw "Session Guard source was not found: $sourcePath"
-}
-if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
-    throw "The .NET Framework compiler was not found: $compiler"
 }
 
 $source = [IO.File]::ReadAllText($sourcePath)

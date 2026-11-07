@@ -116,7 +116,7 @@ $tokensSource = Join-Path $projectRoot 'Boostix\DesignTokens.cs'
 $updateSource = Join-Path $projectRoot 'Boostix\UpdateFlow.cs'
 $installerSource = Join-Path $projectRoot 'BoostixInstaller\Program.cs'
 $frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
-$compiler = Join-Path $frameworkRoot 'csc.exe'
+$compiler = & (Join-Path $projectRoot 'tools\Get-BoostixCompiler.ps1')
 $wpfRoot = Join-Path $frameworkRoot 'WPF'
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) (
     'Boostix-UpdateTransport-' + [Guid]::NewGuid().ToString('N'))
@@ -216,9 +216,6 @@ function Assert-ValidationRejects {
 
 try {
     [IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
-    if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
-        throw "C# compiler was not found: $compiler"
-    }
 
     $updateCompilerOutput = & $compiler `
         /nologo `

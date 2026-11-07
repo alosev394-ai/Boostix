@@ -4725,7 +4725,7 @@ namespace BoostixSetup
                     if (command != null &&
                         command.IndexOf("Boostix.exe", StringComparison.OrdinalIgnoreCase) >= 0)
                     {
-                        run.DeleteValue(ProductBrand.ProductName, false);
+                        run!.DeleteValue(ProductBrand.ProductName, false);
                     }
                 }
             }

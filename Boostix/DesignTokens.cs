@@ -1074,7 +1074,7 @@ namespace Boostix
         private static void UpdateButtonState(Button button, bool hovered, bool animate)
         {
             var visuals = button == null ? null : button.Tag as ButtonVisuals;
-            if (visuals == null || (hovered && !button.IsEnabled))
+            if (visuals == null || (hovered && !button!.IsEnabled))
             {
                 return;
             }
