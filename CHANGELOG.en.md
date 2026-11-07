@@ -3,6 +3,23 @@
 The English interface arrived in 3.2.0. Earlier versions are described in
 [`CHANGELOG.md`](CHANGELOG.md), in Russian.
 
+## 5.5.0 — 2026-11-08
+
+### New
+
+- Game history: the History button on a game's card and in the debrief shows
+  what repeats from game to game. How often memory ran short, how much stayed
+  free in each game and which programs held it most often. A program from the
+  list can be closed for the game with one button.
+
+### Fixes
+
+- Boostix no longer offers to close FACEIT for the game: a FACEIT match does not
+  start without it. If FACEIT is already on the list of programs to close,
+  Boostix skips it. The same goes for Riot Vanguard, Easy Anti-Cheat and
+  BattlEye.
+- A long debrief no longer scrolls under the window tabs.
+
 ## 5.4.1 — 2026-11-07
 
 ### Fixes

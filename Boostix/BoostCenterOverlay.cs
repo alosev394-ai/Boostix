@@ -538,6 +538,7 @@ namespace Boostix
         private readonly Border topBar;
         private readonly GameStage gameStage;
         private readonly Grid debriefLayer;
+        private readonly Grid gameHistoryLayer;
         private readonly Image ambientArt;
         private readonly Border ambientVeil;
         private Button statusPill;
@@ -678,6 +679,10 @@ namespace Boostix
             {
                 OpenDebrief(e.Report, e.Game);
             };
+            gameStage.HistoryRequested += delegate(object sender, SessionReportEventArgs e)
+            {
+                OpenGameHistory(e.Game);
+            };
             Grid.SetRowSpan(gameStage, 2);
             Children.Add(gameStage);
 
@@ -686,6 +691,13 @@ namespace Boostix
             Grid.SetRow(topBar, 0);
             Panel.SetZIndex(topBar, 5);
             Children.Add(topBar);
+
+            // Same level as the debrief and added first: a debrief opened from
+            // the history covers it.
+            gameHistoryLayer = new Grid { Visibility = Visibility.Collapsed };
+            Grid.SetRowSpan(gameHistoryLayer, 2);
+            Panel.SetZIndex(gameHistoryLayer, 3);
+            Children.Add(gameHistoryLayer);
 
             debriefLayer = new Grid { Visibility = Visibility.Collapsed };
             Grid.SetRowSpan(debriefLayer, 2);
@@ -1326,6 +1338,12 @@ namespace Boostix
                 e.Handled = true;
                 return;
             }
+            if (e.Key == Key.Escape && GameHistoryOpen)
+            {
+                CloseGameHistory();
+                e.Handled = true;
+                return;
+            }
             if (e.Key == Key.Escape && currentPage == CenterPage.Home)
             {
                 SwitchPage(CenterPage.Games, false);
@@ -1863,6 +1881,7 @@ namespace Boostix
             bool boostDecision)
         {
             CloseDebrief();
+            CloseGameHistory();
             if (currentPage == page)
             {
                 if (preserveTabFocus)

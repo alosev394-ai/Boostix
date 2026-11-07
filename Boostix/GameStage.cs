@@ -317,6 +317,7 @@ namespace Boostix
         public event EventHandler<ShelfGameEventArgs> RemoveRequested;
         public event EventHandler<ShelfGameEventArgs> PictureRequested;
         public event EventHandler<SessionReportEventArgs> DebriefRequested;
+        public event EventHandler<SessionReportEventArgs> HistoryRequested;
         public event EventHandler<StageArtEventArgs> ArtChanged;
         public event EventHandler OtherGameRequested;
         public event EventHandler StopRequested;
@@ -1533,7 +1534,38 @@ namespace Boostix
                 stack.Children.Add(chart);
             }
 
-            var open = new Button
+            var links = new WrapPanel { Orientation = Orientation.Horizontal };
+            links.Children.Add(BuildCardLink(
+                L.T("Открыть разбор"),
+                "Boostix.Games.OpenDebrief",
+                L.T("Открыть разбор последней игры"),
+                delegate { Raise(DebriefRequested, last, game); }));
+            if (GameStats.For(game.Sessions).Sessions >= 2)
+            {
+                Button history = BuildCardLink(
+                    L.T("История"),
+                    "Boostix.Games.OpenHistory",
+                    L.T("История игры"),
+                    delegate { Raise(HistoryRequested, last, game); });
+                history.Margin = new Thickness(18, 0, 0, 0);
+                links.Children.Add(history);
+            }
+            stack.Children.Add(links);
+            panel.Child = stack;
+            return panel;
+        }
+
+        private void Raise(EventHandler<SessionReportEventArgs> handler, BoostSessionReport report, ShelfGame game)
+        {
+            if (handler != null)
+            {
+                handler(this, new SessionReportEventArgs(report, game));
+            }
+        }
+
+        private Button BuildCardLink(string text, string automationId, string automationName, RoutedEventHandler click)
+        {
+            var link = new Button
             {
                 Padding = new Thickness(0, 6, 0, 2),
                 Background = Brushes.Transparent,
@@ -1543,25 +1575,16 @@ namespace Boostix
                 FocusVisualStyle = BoostixUi.FocusVisual(6),
                 HorizontalAlignment = HorizontalAlignment.Left
             };
-            var openLine = new StackPanel { Orientation = Orientation.Horizontal };
-            openLine.Children.Add(Label(L.T("Открыть разбор"), BoostixDesignTokens.BodyTextSize, StageText, displayFont, FontWeights.SemiBold));
+            var line = new StackPanel { Orientation = Orientation.Horizontal };
+            line.Children.Add(Label(text, BoostixDesignTokens.BodyTextSize, StageText, displayFont, FontWeights.SemiBold));
             FrameworkElement chevron = BoostixIcons.Create(BoostixIcons.ChevronRight, 14, StageText);
             chevron.Margin = new Thickness(4, 1, 0, 0);
-            openLine.Children.Add(chevron);
-            open.Content = openLine;
-            open.Click += delegate
-            {
-                EventHandler<SessionReportEventArgs> handler = DebriefRequested;
-                if (handler != null)
-                {
-                    handler(this, new SessionReportEventArgs(last, game));
-                }
-            };
-            AutomationProperties.SetAutomationId(open, "Boostix.Games.OpenDebrief");
-            AutomationProperties.SetName(open, L.T("Открыть разбор последней игры"));
-            stack.Children.Add(open);
-            panel.Child = stack;
-            return panel;
+            line.Children.Add(chevron);
+            link.Content = line;
+            link.Click += click;
+            AutomationProperties.SetAutomationId(link, automationId);
+            AutomationProperties.SetName(link, automationName);
+            return link;
         }
 
         private void AnimateInfoIn()

@@ -657,12 +657,32 @@ namespace Boostix
         internal static List<BoostSessionReport> Sessions()
         {
             DateTime now = DateTime.UtcNow;
+            const string Cs2 = @"C:\Games\Counter-Strike 2\cs2.exe";
+            const long MiB = 1024L * 1024L;
+            // Older games of the first title give its history something to show.
+            BoostSessionReport fourDays = Session("cs2", Cs2, now.AddDays(-4), 88, "Critical", 5, 0x5E, "");
+            fourDays.MemoryHogs = new List<BoostMemoryHog>
+            {
+                new BoostMemoryHog { Name = "Discord", ProcessName = "Discord", Bytes = 1640 * MiB },
+                new BoostMemoryHog { Name = "FACEIT", ProcessName = "FACEIT", Bytes = 1310 * MiB },
+                new BoostMemoryHog { Name = "Steam Client WebHelper", ProcessName = "steamwebhelper", Bytes = 1230 * MiB }
+            };
+            BoostSessionReport sixDays = Session("cs2", Cs2, now.AddDays(-6), 71, "Critical", 6, 0x6F, "");
+            sixDays.MemoryHogs = new List<BoostMemoryHog>
+            {
+                new BoostMemoryHog { Name = "FACEIT", ProcessName = "FACEIT", Bytes = 2040 * MiB },
+                new BoostMemoryHog { Name = "Discord", ProcessName = "Discord", Bytes = 1520 * MiB },
+                new BoostMemoryHog { Name = "Firefox", ProcessName = "firefox", Bytes = 1130 * MiB }
+            };
             return new List<BoostSessionReport>
             {
-                Session("cs2", @"C:\Games\Counter-Strike 2\cs2.exe", now.AddHours(-3), 62, "Critical", 1, 0x1A, ""),
-                Session("cs2", @"C:\Games\Counter-Strike 2\cs2.exe", now.AddDays(-1).AddHours(-2), 41, "Normal", 2, 0x2B, ""),
+                Session("cs2", Cs2, now.AddHours(-3), 62, "Critical", 1, 0x1A, ""),
+                Session("cs2", Cs2, now.AddDays(-1).AddHours(-2), 41, "Normal", 2, 0x2B, ""),
                 Session("dota2", @"C:\Games\Dota 2\dota2.exe", now.AddDays(-1).AddHours(-6), 55, "Elevated", 3, 0x3C, ""),
-                Session("Cyberpunk2077", @"C:\Games\Cyberpunk 2077\Cyberpunk2077.exe", now.AddDays(-3), 96, "Normal", 4, 0x4D, "0xc0000005")
+                Session("Cyberpunk2077", @"C:\Games\Cyberpunk 2077\Cyberpunk2077.exe", now.AddDays(-3), 96, "Normal", 4, 0x4D, "0xc0000005"),
+                fourDays,
+                sixDays,
+                Session("cs2", Cs2, now.AddDays(-9), 120, "Normal", 7, 0x70, "")
             };
         }
 
@@ -946,14 +966,17 @@ namespace Boostix
         }
 
         /// <summary>
-        /// A launcher cannot be closed while its game runs, so it stays in the
-        /// list of who held the memory but is never the advice.
+        /// A launcher or an anti-cheat cannot be closed while its game runs,
+        /// so it stays in the list of who held the memory but is never the
+        /// advice.
         /// </summary>
-        private static bool GameNeeds(string gamePath, BoostMemoryHog hog)
+        internal static bool GameNeeds(string gamePath, BoostMemoryHog hog)
         {
             string path = gamePath ?? string.Empty;
             string name = hog.Name ?? string.Empty;
-            return (path.IndexOf(@"\steamapps\", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            return AntiCheatGuard.IsPartOf(hog.ProcessName) ||
+                AntiCheatGuard.IsPartOf(name) ||
+                (path.IndexOf(@"\steamapps\", StringComparison.OrdinalIgnoreCase) >= 0 &&
                     name.StartsWith("Steam", StringComparison.OrdinalIgnoreCase)) ||
                 (path.IndexOf(@"\Epic Games\", StringComparison.OrdinalIgnoreCase) >= 0 &&
                     name.StartsWith("Epic", StringComparison.OrdinalIgnoreCase));

@@ -296,9 +296,11 @@ namespace Boostix
         /// </summary>
         internal static string Format(IEnumerable<string> names, string gameProcessName)
         {
+            // A list saved before 5.5 could hold FACEIT: closing it ends the match.
             return string.Join(",", (names ?? Enumerable.Empty<string>())
                 .Where(IsValidName)
                 .Where(item => !string.Equals(item, gameProcessName, StringComparison.OrdinalIgnoreCase))
+                .Where(item => !AntiCheatGuard.IsPartOf(item))
                 .ToArray());
         }
 
@@ -423,6 +425,17 @@ namespace Boostix
                 { "BEService", "BattlEye" },
                 { "BEService_x64", "BattlEye" }
             };
+
+        /// <summary>
+        /// An anti-cheat process, or the FACEIT app: a FACEIT match does not
+        /// start without it, so Boostix never closes it for a game.
+        /// </summary>
+        internal static bool IsPartOf(string processName)
+        {
+            return !string.IsNullOrWhiteSpace(processName) &&
+                (Known.ContainsKey(processName) ||
+                 string.Equals(processName, "FACEIT", StringComparison.OrdinalIgnoreCase));
+        }
 
         internal static string Find(IEnumerable<string> processNames)
         {

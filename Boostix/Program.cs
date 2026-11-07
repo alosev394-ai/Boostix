@@ -7359,6 +7359,11 @@ namespace Boostix
                 RememberBoostCenterFocusReturn(centerButton);
                 boostCenterOverlay.OpenHistory();
             }
+            else if (HasLaunchArgument(launchArguments, "--demo-game-history") &&
+                     boostCenterOverlay != null)
+            {
+                boostCenterOverlay.ShowDemoGameHistory();
+            }
             else if (HasLaunchArgument(launchArguments, "--demo-live") &&
                      boostCenterOverlay != null)
             {
