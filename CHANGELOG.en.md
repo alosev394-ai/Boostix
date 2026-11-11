@@ -3,6 +3,24 @@
 The English interface arrived in 3.2.0. Earlier versions are described in
 [`CHANGELOG.md`](CHANGELOG.md), in Russian.
 
+## 6.0.0 — 2026-11-12
+
+### New
+
+- Before the game: when earlier games show that memory will run short, Play
+  first shows how much the game needs, how much is free and who holds the
+  rest. You can close what you do not need right there and watch the memory
+  bar fill. Programs the game cannot start without, such as Steam and FACEIT,
+  are never offered for closing. When there is enough memory, the game starts
+  at once.
+- Wallpaper Engine is stopped for the game with its own command and plays
+  again after it. Boostix used to try closing it, which did not work.
+
+### Fixes
+
+- The game history no longer offers to close a program that did not close
+  last time.
+
 ## 5.5.1 — 2026-11-12
 
 ### Fixes

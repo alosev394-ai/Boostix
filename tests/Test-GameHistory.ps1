@@ -156,6 +156,21 @@ if ($needed['Discord'] -or -not $needed[$helper] -or -not $needed['FACEIT']) {
     throw 'Steam and FACEIT must stay open for a FACEIT game on Steam; Discord can close.'
 }
 
+# The real reports said "discord_clips" did not close; the memory list calls
+# it "Discord Clips". It must not be offered again.
+$stuck = New-Session 1 0.5 @(@('Discord Clips', 'Discord Clips', 240), @('Discord', 'Discord', 1500))
+$still = New-Object 'System.Collections.Generic.List[string]'
+$still.Add('discord_clips')
+$reportType.GetField('StillRunningPrograms', $instance).SetValue($stuck, [Collections.Generic.List[string]]$still)
+$stuckSummary = Get-Summary (New-Sessions @($stuck, (New-Session 2 0.6 @(, @('Discord', 'Discord', 1400)))))
+$wouldNot = @{}
+foreach ($program in @(Get-Field $stuckSummary 'Programs')) {
+    $wouldNot[[string](Get-Field $program 'Name')] = [bool](Get-Field $program 'WouldNotClose')
+}
+if (-not $wouldNot['Discord Clips'] -or $wouldNot['Discord']) {
+    throw 'A program that stayed open must not be offered again; one that closed still is.'
+}
+
 $headline = Get-Field $summary 'Headline'
 $title = [string](Get-Field $headline 'Title')
 $detail = [string](Get-Field $headline 'Detail')

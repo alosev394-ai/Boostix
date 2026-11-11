@@ -169,7 +169,11 @@ try {
         $until = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
         do {
             foreach ($text in (Get-FreshRoot $window).FindAll([Windows.Automation.TreeScope]::Descendants, $condition)) {
-                if ($text.Current.Name.Contains($Fragment) -and -not $text.Current.IsOffscreen) { return $text }
+                # A card can be replaced while it is read: that text is simply gone.
+                try {
+                    if ($text.Current.Name.Contains($Fragment) -and -not $text.Current.IsOffscreen) { return $text }
+                }
+                catch [Windows.Automation.ElementNotAvailableException] { }
             }
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $until)

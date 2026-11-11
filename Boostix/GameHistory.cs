@@ -21,6 +21,9 @@ namespace Boostix
         // A launcher or an anti-cheat: the game needs it, so it is never
         // offered for closing.
         public bool GameNeedsIt;
+        // Boost asked it to close before and it stayed: offering it again
+        // only repeats the failure.
+        public bool WouldNotClose;
     }
 
     /// <summary>
@@ -109,6 +112,17 @@ namespace Boostix
                     program.TotalBytes += hog.Bytes;
                 }
             }
+            var stayed = new HashSet<string>(
+                summary.Sessions
+                    .Where(report => report.StillRunningPrograms != null)
+                    .SelectMany(report => report.StillRunningPrograms)
+                    .Select(Simplify),
+                StringComparer.Ordinal);
+            foreach (GameHistoryProgram program in programs.Values)
+            {
+                program.WouldNotClose = stayed.Contains(Simplify(program.ProcessName)) ||
+                    stayed.Contains(Simplify(program.Name));
+            }
             summary.Programs = programs.Values
                 .OrderByDescending(program => program.Sessions)
                 .ThenByDescending(program => program.TotalBytes)
@@ -116,6 +130,23 @@ namespace Boostix
                 .ToList();
             summary.Headline = Describe(summary);
             return summary;
+        }
+
+        /// <summary>
+        /// The script reports "discord_clips", the memory list "Discord Clips":
+        /// one program.
+        /// </summary>
+        private static string Simplify(string name)
+        {
+            string text = (name ?? string.Empty).Trim();
+            if (text.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                text = text.Substring(0, text.Length - 4);
+            }
+            return new string(text
+                .Where(character => character != ' ' && character != '_' && character != '-')
+                .Select(char.ToLowerInvariant)
+                .ToArray());
         }
 
         private static SessionVerdict Describe(GameHistorySummary summary)

@@ -260,6 +260,8 @@ $appArguments = @(
     "$projectRoot\Boostix\GameLibraryScanner.cs",
     "$projectRoot\Boostix\GameShelf.cs",
     "$projectRoot\Boostix\GameHistory.cs",
+    "$projectRoot\Boostix\PreGame.cs",
+    "$projectRoot\Boostix\BoostCenterPreGame.cs",
     "$projectRoot\Boostix\GameArt.cs",
     "$projectRoot\Boostix\GameStage.cs",
     "$projectRoot\Boostix\Localization.cs",

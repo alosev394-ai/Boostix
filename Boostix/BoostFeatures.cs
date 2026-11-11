@@ -342,10 +342,12 @@ namespace Boostix
         public string GameProcessName = string.Empty;
         public bool RunCommand;
         public List<ClosedProgram> Closed = new List<ClosedProgram>();
+        // Wallpaper Engine stopped for the game, to be played again after it.
+        public string WallpaperPath = string.Empty;
 
         internal bool IsEmpty
         {
-            get { return !RunCommand && Closed.Count == 0; }
+            get { return !RunCommand && Closed.Count == 0 && WallpaperPath.Length == 0; }
         }
 
         internal string Format()
@@ -356,6 +358,10 @@ namespace Boostix
                 "RunCommand=" + (RunCommand ? "1" : "0")
             };
             lines.AddRange(Closed.Select(item => "Closed=" + item.ProcessName + "||" + item.ExecutablePath));
+            if (WallpaperPath.Length > 0)
+            {
+                lines.Add("Wallpaper=" + WallpaperPath);
+            }
             return string.Join("\n", lines.ToArray()) + "\n";
         }
 
@@ -386,6 +392,11 @@ namespace Boostix
                         pending.Closed.Add(program);
                     }
                 }
+                else if (text.StartsWith("Wallpaper=", StringComparison.Ordinal))
+                {
+                    string path = text.Substring("Wallpaper=".Length);
+                    pending.WallpaperPath = WallpaperEngine.IsWallpaperEngine(path) ? path : string.Empty;
+                }
             }
             return pending;
         }
@@ -403,6 +414,48 @@ namespace Boostix
         internal bool IsDue(Func<string, bool> isRunning)
         {
             return GameProcessName.Length == 0 || !isRunning(GameProcessName);
+        }
+    }
+
+    /// <summary>
+    /// Wallpaper Engine sits at the clock without a window to close, so a
+    /// polite close never worked. Its own command line stops the wallpapers
+    /// for the game and plays them again after it.
+    /// </summary>
+    internal static class WallpaperEngine
+    {
+        internal const string Stop = "stop";
+        internal const string Play = "play";
+        internal static readonly string[] ProcessNames = { "wallpaper64", "wallpaper32" };
+
+        internal static bool IsWallpaperEngine(string executablePath)
+        {
+            if (string.IsNullOrEmpty(executablePath) ||
+                executablePath.Length < 8 ||
+                executablePath[1] != ':' ||
+                executablePath[2] != '\\')
+            {
+                return false;
+            }
+            string name = Path.GetFileName(executablePath);
+            return string.Equals(name, "wallpaper64.exe", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "wallpaper32.exe", StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static ProcessStartInfo BuildControl(string executablePath, string command)
+        {
+            if (!IsWallpaperEngine(executablePath) ||
+                !(string.Equals(command, Stop, StringComparison.Ordinal) ||
+                  string.Equals(command, Play, StringComparison.Ordinal)))
+            {
+                return null;
+            }
+            return new ProcessStartInfo(executablePath, "-control " + command)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = Path.GetDirectoryName(executablePath)
+            };
         }
     }
 
@@ -499,6 +552,14 @@ namespace Boostix
             IEnumerable<KeyValuePair<string, long>> processes,
             string targetName)
         {
+            return Rank(processes, targetName, BoostMemoryHog.MaximumPerSession);
+        }
+
+        internal static List<BoostMemoryHog> Rank(
+            IEnumerable<KeyValuePair<string, long>> processes,
+            string targetName,
+            int maximum)
+        {
             return (processes ?? Enumerable.Empty<KeyValuePair<string, long>>())
                 .Where(item =>
                     !string.IsNullOrWhiteSpace(item.Key) &&
@@ -513,7 +574,7 @@ namespace Boostix
                 })
                 .Where(hog => hog.Bytes >= MinimumBytes)
                 .OrderByDescending(hog => hog.Bytes)
-                .Take(BoostMemoryHog.MaximumPerSession)
+                .Take(maximum)
                 .ToList();
         }
 

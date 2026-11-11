@@ -815,6 +815,10 @@ namespace Boostix
                 {
                     action = MakeText(L.T("Нужен игре"), BoostixDesignTokens.MetadataTextSize + 0.5, MutedColor, regularFont, FontWeights.Normal);
                 }
+                else if (program.WouldNotClose)
+                {
+                    action = MakeText(L.T("Не закрылся в прошлый раз"), BoostixDesignTokens.MetadataTextSize + 0.5, MutedColor, regularFont, FontWeights.Normal);
+                }
                 else if (chosen.Contains(program.ProcessName, StringComparer.OrdinalIgnoreCase))
                 {
                     action = MakeText(L.T("Закрывается на время игры"), BoostixDesignTokens.MetadataTextSize + 0.5, MutedColor, regularFont, FontWeights.Normal);

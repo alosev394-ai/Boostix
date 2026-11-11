@@ -638,8 +638,10 @@ namespace Boostix
 
                 string ownName = self.ProcessName;
                 int ownId = self.Id;
-                double everything = MeasureProcessor(5, delegate { catalog.CaptureAll(); });
-                double byName = MeasureProcessor(5, delegate { catalog.CaptureNamed(new[] { ownName }); });
+                // Windows counts processor time in 15.6 ms steps: five rounds
+                // were too few on a fast runner.
+                double everything = MeasureProcessor(20, delegate { catalog.CaptureAll(); });
+                double byName = MeasureProcessor(20, delegate { catalog.CaptureNamed(new[] { ownName }); });
                 Console.WriteLine(
                     "Process capture: all {0:N1} ms, by name {1:N1} ms.", everything, byName);
                 Assert(byName * 2 <= everything + 1,

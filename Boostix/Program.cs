@@ -473,6 +473,8 @@ namespace Boostix
         private List<ClosedProgram> closedForGame = new List<ClosedProgram>();
         private PendingAfterGame pendingAfterGame;
         private DispatcherTimer pendingAfterGameTimer;
+        // Wallpaper Engine stopped for the running game, played again after it.
+        private string wallpaperStoppedPath;
         private bool memoryPressureRecorded;
         private DateTime lastVideoMemoryCaptureUtc;
         private DateTime lastGpuLoadUtc = DateTime.MinValue;
@@ -912,6 +914,10 @@ namespace Boostix
                 BoostCenterInstalledGameAddRequested;
             boostCenterOverlay.GameLaunchRequested +=
                 BoostCenterGameLaunchRequested;
+            boostCenterOverlay.PreGamePlayRequested += delegate(object sender, ShelfGameEventArgs e)
+            {
+                LaunchShelfGame(e.Game);
+            };
             boostCenterOverlay.StopBoostRequested += delegate
             {
                 if (boostActive)
@@ -2540,7 +2546,7 @@ namespace Boostix
                 }
                 if (!centerSettings.KeepWallpaper)
                 {
-                    scriptArguments.Append(" -CloseWallpaper");
+                    StopWallpaperForGame();
                 }
                 if (!centerSettings.KeepNvidiaOverlay)
                 {
@@ -4370,8 +4376,114 @@ namespace Boostix
         /// <summary>
         /// Started as a normal program, never from an elevated Boostix.
         /// </summary>
+        private void StopWallpaperForGame()
+        {
+            if (demoMode || !string.IsNullOrEmpty(wallpaperStoppedPath))
+            {
+                return;
+            }
+            string path = FindRunningWallpaperEngine();
+            if (path == null)
+            {
+                return;
+            }
+            string error;
+            if (RunWallpaperControl(path, WallpaperEngine.Stop, out error))
+            {
+                wallpaperStoppedPath = path;
+                RecordSessionAction(
+                    "WALLPAPER ENGINE",
+                    L.T("Обои остановлены на время игры."),
+                    BoostActionOutcome.Changed);
+            }
+            else
+            {
+                RecordSessionAction(
+                    "WALLPAPER ENGINE",
+                    L.T("Не удалось остановить обои: ") + error,
+                    BoostActionOutcome.Skipped);
+            }
+        }
+
+        private void ResumeWallpaper(BoostSessionReport report)
+        {
+            string path = wallpaperStoppedPath;
+            wallpaperStoppedPath = null;
+            if (string.IsNullOrEmpty(path))
+            {
+                return;
+            }
+            string error;
+            bool played = RunWallpaperControl(path, WallpaperEngine.Play, out error);
+            report.AddAction(
+                "WALLPAPER ENGINE",
+                played ? L.T("Обои снова идут.") : L.T("Не удалось снова включить обои: ") + error,
+                played ? BoostActionOutcome.Changed : BoostActionOutcome.Skipped);
+        }
+
+        private static string FindRunningWallpaperEngine()
+        {
+            foreach (string name in WallpaperEngine.ProcessNames)
+            {
+                Process[] found = new Process[0];
+                try
+                {
+                    found = Process.GetProcessesByName(name);
+                    foreach (Process process in found)
+                    {
+                        string path = GameExecutablePath.GetProcessImagePath(process);
+                        if (WallpaperEngine.IsWallpaperEngine(path))
+                        {
+                            return path;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    CrashLog.Write("Could not find Wallpaper Engine.", ex);
+                }
+                finally
+                {
+                    foreach (Process process in found)
+                    {
+                        process.Dispose();
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static bool RunWallpaperControl(string path, string command, out string error)
+        {
+            error = string.Empty;
+            ProcessStartInfo startInfo = WallpaperEngine.BuildControl(path, command);
+            if (startInfo == null)
+            {
+                error = L.T("неизвестная программа.");
+                return false;
+            }
+            try
+            {
+                using (Process process = Process.Start(startInfo))
+                {
+                    if (process != null && !process.WaitForExit(5000))
+                    {
+                        error = L.T("Wallpaper Engine не ответил.");
+                        return false;
+                    }
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+
         private void ReopenClosedPrograms(BoostSessionReport report)
         {
+            ResumeWallpaper(report);
             List<ClosedProgram> closed = closedForGame;
             closedForGame = new List<ClosedProgram>();
             if (!centerSettings.ReopenAfterGame || CrashLog.IsCurrentProcessElevated())
@@ -4416,7 +4528,8 @@ namespace Boostix
             {
                 GameProcessName = selectedTarget == null ? string.Empty : selectedTarget.ProcessName,
                 RunCommand = !string.IsNullOrWhiteSpace(centerSettings.AfterGameCommand),
-                Closed = closedForGame
+                Closed = closedForGame,
+                WallpaperPath = wallpaperStoppedPath ?? string.Empty
             };
             try
             {
@@ -4496,6 +4609,10 @@ namespace Boostix
             StopPendingAfterGameTimer();
             pendingAfterGame = null;
             closedForGame = pending.Closed;
+            if (pending.WallpaperPath.Length > 0)
+            {
+                wallpaperStoppedPath = pending.WallpaperPath;
+            }
             BoostSessionReport report = lastSession ?? BoostSessionReport.Start("AfterGame");
             ReopenClosedPrograms(report);
             if (pending.RunCommand && !string.IsNullOrWhiteSpace(centerSettings.AfterGameCommand))
@@ -7364,6 +7481,11 @@ namespace Boostix
             {
                 boostCenterOverlay.ShowDemoGameHistory();
             }
+            else if (HasLaunchArgument(launchArguments, "--demo-pregame") &&
+                     boostCenterOverlay != null)
+            {
+                boostCenterOverlay.ShowDemoPreGame();
+            }
             else if (HasLaunchArgument(launchArguments, "--demo-live") &&
                      boostCenterOverlay != null)
             {
@@ -7398,6 +7520,36 @@ namespace Boostix
                 boostCenterOverlay.SetGameMessage(
                     L.T("В демо-режиме игры не запускаются."),
                     false);
+                return;
+            }
+            // A game played before tells how much memory it takes. When that
+            // is more than is free, Play first shows who holds the rest.
+            long typical = MemoryForecast.TypicalGameBytes(sessionHistory, game.ExecutablePath);
+            if (typical > 0)
+            {
+                var chosen = new List<string>(centerSettings.CloseForGame ?? new List<string>());
+                if (!centerSettings.KeepWallpaper)
+                {
+                    chosen.AddRange(WallpaperEngine.ProcessNames);
+                }
+                Func<PreGamePlan> capture = delegate
+                {
+                    return PreGameCheck.Capture(game.Name, game.ExecutablePath, typical, chosen);
+                };
+                PreGamePlan plan = capture();
+                if (plan.IsShort)
+                {
+                    boostCenterOverlay.OpenPreGame(game, plan, capture);
+                    return;
+                }
+            }
+            LaunchShelfGame(game);
+        }
+
+        private void LaunchShelfGame(ShelfGame game)
+        {
+            if (game == null || boostCenterOverlay == null)
+            {
                 return;
             }
             try

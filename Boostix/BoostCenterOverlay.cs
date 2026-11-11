@@ -1332,6 +1332,12 @@ namespace Boostix
                 e.Handled = true;
                 return;
             }
+            if (e.Key == Key.Escape && PreGameOpen)
+            {
+                ClosePreGame();
+                e.Handled = true;
+                return;
+            }
             if (e.Key == Key.Escape && DebriefOpen)
             {
                 CloseDebrief();
@@ -1882,6 +1888,7 @@ namespace Boostix
         {
             CloseDebrief();
             CloseGameHistory();
+            ClosePreGame();
             if (currentPage == page)
             {
                 if (preserveTabFocus)
