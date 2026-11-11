@@ -7,6 +7,21 @@ param(
 # offers the same action, and both are user settings that persist.
 
 $ErrorActionPreference = 'Stop'
+
+# A window taken the moment it appears can stay empty for UI Automation:
+# WPF has not published its content yet, and the element keeps that answer.
+# Each look takes the window again from its handle.
+function Get-FreshRoot {
+    param($Root)
+    try {
+        $handle = $Root.Current.NativeWindowHandle
+        if ($handle -ne 0) {
+            return [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$handle)
+        }
+    }
+    catch { }
+    return $Root
+}
 Set-StrictMode -Version Latest
 if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) {
     throw 'This UI regression test must run under Windows PowerShell 5.1.'
@@ -90,7 +105,7 @@ function Wait-ForBoostName {
         [Windows.Automation.AutomationElement]::AutomationIdProperty, 'Boostix.Activate')
     $until = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
-        $button = $Window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
+        $button = (Get-FreshRoot $Window).FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
         if ($button -and $button.Current.IsEnabled -and
             $button.Current.Name.StartsWith($Prefix, [StringComparison]::CurrentCultureIgnoreCase)) {
             return $true
@@ -144,14 +159,14 @@ try {
     # The two new settings sit after the existing ones.
     $tabCondition = New-Object Windows.Automation.PropertyCondition(
         [Windows.Automation.AutomationElement]::AutomationIdProperty, 'Boostix.Center.Tab.Settings')
-    $tab = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $tabCondition)
+    $tab = (Get-FreshRoot $window).FindFirst([Windows.Automation.TreeScope]::Descendants, $tabCondition)
     $tab.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
     $settingCondition = New-Object Windows.Automation.PropertyCondition(
         [Windows.Automation.AutomationElement]::AutomationIdProperty, 'Boostix.Center.Setting.2')
     $until = [DateTime]::UtcNow.AddSeconds(5)
     $hotkeySetting = $null
     while (-not $hotkeySetting -and [DateTime]::UtcNow -lt $until) {
-        $hotkeySetting = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $settingCondition)
+        $hotkeySetting = (Get-FreshRoot $window).FindFirst([Windows.Automation.TreeScope]::Descendants, $settingCondition)
         if (-not $hotkeySetting) { Start-Sleep -Milliseconds 100 }
     }
     if (-not $hotkeySetting -or -not $hotkeySetting.Current.Name.Contains('Ctrl+Alt+B')) {

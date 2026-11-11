@@ -7,6 +7,21 @@ param(
 # is fixed before any text is read, and an English launch shows no Russian.
 
 $ErrorActionPreference = 'Stop'
+
+# A window taken the moment it appears can stay empty for UI Automation:
+# WPF has not published its content yet, and the element keeps that answer.
+# Each look takes the window again from its handle.
+function Get-FreshRoot {
+    param($Root)
+    try {
+        $handle = $Root.Current.NativeWindowHandle
+        if ($handle -ne 0) {
+            return [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$handle)
+        }
+    }
+    catch { }
+    return $Root
+}
 Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -234,7 +249,7 @@ function Wait-ForElement {
         $AutomationId)
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     while ([DateTime]::UtcNow -lt $deadline) {
-        foreach ($element in $Root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)) {
+        foreach ($element in (Get-FreshRoot $Root).FindAll([Windows.Automation.TreeScope]::Descendants, $condition)) {
             if ($element.Current.ProcessId -eq $ProcessId -and -not $element.Current.IsOffscreen) {
                 return $element
             }
@@ -247,7 +262,7 @@ function Wait-ForElement {
 function Get-RussianNames {
     param([Windows.Automation.AutomationElement]$Window)
     $found = New-Object 'System.Collections.Generic.List[string]'
-    $all = $Window.FindAll(
+    $all = (Get-FreshRoot $Window).FindAll(
         [Windows.Automation.TreeScope]::Descendants,
         [Windows.Automation.Condition]::TrueCondition)
     foreach ($element in $all) {

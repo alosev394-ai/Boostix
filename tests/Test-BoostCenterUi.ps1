@@ -4,6 +4,21 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# A window taken the moment it appears can stay empty for UI Automation:
+# WPF has not published its content yet, and the element keeps that answer.
+# Each look takes the window again from its handle.
+function Get-FreshRoot {
+    param($Root)
+    try {
+        $handle = $Root.Current.NativeWindowHandle
+        if ($handle -ne 0) {
+            return [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$handle)
+        }
+    }
+    catch { }
+    return $Root
+}
 Set-StrictMode -Version Latest
 if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) {
     throw 'This UI regression test must run under Windows PowerShell 5.1.'
@@ -154,7 +169,7 @@ function Wait-ForElementById {
         $AutomationId)
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     while ([DateTime]::UtcNow -lt $deadline) {
-        $element = $Root.FindFirst(
+        $element = (Get-FreshRoot $Root).FindFirst(
             [Windows.Automation.TreeScope]::Descendants,
             $condition)
         if ($element -and

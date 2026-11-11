@@ -10,6 +10,21 @@ param(
 # failed apply must explain itself instead of silently closing Boostix.
 
 $ErrorActionPreference = 'Stop'
+
+# A window taken the moment it appears can stay empty for UI Automation:
+# WPF has not published its content yet, and the element keeps that answer.
+# Each look takes the window again from its handle.
+function Get-FreshRoot {
+    param($Root)
+    try {
+        $handle = $Root.Current.NativeWindowHandle
+        if ($handle -ne 0) {
+            return [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$handle)
+        }
+    }
+    catch { }
+    return $Root
+}
 Set-StrictMode -Version Latest
 if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) {
     throw 'This regression test must run under Windows PowerShell 5.1.'
@@ -232,7 +247,7 @@ try {
             [Windows.Automation.AutomationElement]::NameProperty, $Name)
         $until = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
         do {
-            $found = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
+            $found = (Get-FreshRoot $window).FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
             if ($found) { return $found }
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $until)
@@ -248,7 +263,7 @@ try {
         do {
             if ($process.HasExited) { return $null }
             # A collapsed WPF card stays in the UIA tree, reported offscreen.
-            foreach ($text in $window.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)) {
+            foreach ($text in (Get-FreshRoot $window).FindAll([Windows.Automation.TreeScope]::Descendants, $condition)) {
                 # An element that is going away can report no name at all.
                 $name = $text.Current.Name
                 if ($name -and $name.Contains($Fragment) -and -not $text.Current.IsOffscreen) { return $text }

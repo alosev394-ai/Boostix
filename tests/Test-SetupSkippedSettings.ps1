@@ -9,6 +9,21 @@ param(
 # setup log.
 
 $ErrorActionPreference = 'Stop'
+
+# A window taken the moment it appears can stay empty for UI Automation:
+# WPF has not published its content yet, and the element keeps that answer.
+# Each look takes the window again from its handle.
+function Get-FreshRoot {
+    param($Root)
+    try {
+        $handle = $Root.Current.NativeWindowHandle
+        if ($handle -ne 0) {
+            return [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$handle)
+        }
+    }
+    catch { }
+    return $Root
+}
 Set-StrictMode -Version Latest
 if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) {
     throw 'This regression test must run under Windows PowerShell 5.1.'
@@ -153,7 +168,7 @@ try {
             [Windows.Automation.ControlType]::Text)
         $until = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
         do {
-            foreach ($text in $window.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)) {
+            foreach ($text in (Get-FreshRoot $window).FindAll([Windows.Automation.TreeScope]::Descendants, $condition)) {
                 if ($text.Current.Name.Contains($Fragment) -and -not $text.Current.IsOffscreen) { return $text }
             }
             Start-Sleep -Milliseconds 100
@@ -165,7 +180,7 @@ try {
     $applyButton = $null
     $until = [DateTime]::UtcNow.AddSeconds(10)
     while (-not $applyButton -and [DateTime]::UtcNow -lt $until) {
-        $applyButton = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
+        $applyButton = (Get-FreshRoot $window).FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
         if (-not $applyButton) { Start-Sleep -Milliseconds 100 }
     }
     if (-not $applyButton) {
