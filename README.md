@@ -59,7 +59,7 @@ Windows 10 окно сплошное.
 
 ## Установка
 
-Скачайте `Boostix-Setup-5.5.0.exe` со страницы релиза и сверьте SHA-256 с
+Скачайте `Boostix-Setup-5.5.1.exe` со страницы релиза и сверьте SHA-256 с
 `SHA256SUMS.txt`. Дальше Boostix обновляется сам.
 
 Файлы Boostix пока **не подписаны сертификатом Authenticode**, поэтому Windows
@@ -85,8 +85,8 @@ Visual C++ runtime для поставляемого PresentMon.
 Артефакты сборки:
 
 - `dist\Boostix.exe`;
-- `dist\Boostix-Setup-5.5.0.exe` и `dist\Boostix-Setup-Latest.exe`;
-- `dist\MajesticBoost-Setup-5.5.0.exe` — технический мост обновления старых
+- `dist\Boostix-Setup-5.5.1.exe` и `dist\Boostix-Setup-Latest.exe`;
+- `dist\MajesticBoost-Setup-5.5.1.exe` — технический мост обновления старых
   установок 1.3–1.9; установленный продукт остаётся Boostix.
 
 Сборка не готова к публикации, если любой обязательный `Test-*.ps1` пропущен или
@@ -117,6 +117,7 @@ Boost); поиск причины вылета опирается на журн�
 
 ## Документация
 
+- [Примечания к выпуску 5.5.1](release-notes-5.5.1.md)
 - [Примечания к выпуску 5.5.0](release-notes-5.5.0.md)
 - [Примечания к выпуску 5.4.1](release-notes-5.4.1.md)
 - [Примечания к выпуску 5.4.0](release-notes-5.4.0.md)

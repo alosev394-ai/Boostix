@@ -3,6 +3,15 @@
 The English interface arrived in 3.2.0. Earlier versions are described in
 [`CHANGELOG.md`](CHANGELOG.md), in Russian.
 
+## 5.5.1 — 2026-11-12
+
+### Fixes
+
+- Boostix no longer wastes processor time after an update check. The progress
+  bar kept moving behind the hidden screen: with the window open Boostix used up
+  to 40% of one core, at the clock and during games about 2.5%. Now it is about
+  0.1% with the window open. The first Windows setup screen had the same problem.
+
 ## 5.5.0 — 2026-11-08
 
 ### New

@@ -1115,6 +1115,7 @@ namespace Boostix
         private readonly FontFamily semiboldFont;
         private readonly Border card;
         private readonly Grid cardContent;
+        private TranslateTransform workingRunner;
         private readonly bool demoMode;
 
         private UpdateState state;
@@ -3646,7 +3647,7 @@ namespace Boostix
         private void BuildWorkingScreen(string title, string subtitle, string status)
         {
             ResetProgressReferences();
-            cardContent.Children.Clear();
+            ClearCard();
             cardContent.RowDefinitions.Clear();
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -3702,6 +3703,7 @@ namespace Boostix
                 progressTranslation.BeginAnimation(
                     TranslateTransform.XProperty,
                     movement);
+                workingRunner = progressTranslation;
             }
             else
             {
@@ -3717,7 +3719,7 @@ namespace Boostix
         private void BuildDownloadProgressScreen(SemanticVersion version)
         {
             ResetProgressReferences();
-            cardContent.Children.Clear();
+            ClearCard();
             cardContent.RowDefinitions.Clear();
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -3865,7 +3867,7 @@ namespace Boostix
             state = UpdateState.Required;
             Visibility = Visibility.Visible;
             ResetProgressReferences();
-            cardContent.Children.Clear();
+            ClearCard();
             cardContent.RowDefinitions.Clear();
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -3925,7 +3927,7 @@ namespace Boostix
             state = UpdateState.Retry;
             Visibility = Visibility.Visible;
             ResetProgressReferences();
-            cardContent.Children.Clear();
+            ClearCard();
             cardContent.RowDefinitions.Clear();
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -3966,7 +3968,7 @@ namespace Boostix
             state = UpdateState.Retry;
             Visibility = Visibility.Visible;
             ResetProgressReferences();
-            cardContent.Children.Clear();
+            ClearCard();
             cardContent.RowDefinitions.Clear();
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -4116,7 +4118,26 @@ namespace Boostix
             allowOwnerClose = true;
             preferredFocusButton = null;
             ResetProgressReferences();
+            StopWorkingRunner();
             Visibility = Visibility.Collapsed;
+        }
+
+        // The working screen's bar loops forever. WPF keeps ticking an
+        // animation on a cleared or collapsed element, and the whole window
+        // redraws for it: 40% of a core with the window open.
+        private void StopWorkingRunner()
+        {
+            if (workingRunner != null)
+            {
+                workingRunner.BeginAnimation(TranslateTransform.XProperty, null);
+                workingRunner = null;
+            }
+        }
+
+        private void ClearCard()
+        {
+            StopWorkingRunner();
+            cardContent.Children.Clear();
         }
 
         private void RaiseUpdateRequired(SemanticVersion currentVersion, SemanticVersion newVersion)

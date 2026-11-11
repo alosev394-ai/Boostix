@@ -67,6 +67,7 @@ namespace Boostix
         private readonly FontFamily semiboldFont;
         private readonly Border card;
         private readonly Grid cardContent;
+        private TranslateTransform workingRunner;
         private readonly string stateDirectory;
         private readonly string pendingMarkerPath;
         private readonly string completedMarkerPath;
@@ -429,7 +430,7 @@ namespace Boostix
         {
             state = FlowState.Consent;
             Visibility = Visibility.Visible;
-            cardContent.Children.Clear();
+            ClearCard();
             cardContent.RowDefinitions.Clear();
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -666,7 +667,7 @@ namespace Boostix
             bool hasNotes = notes != null && notes.Count > 0;
             state = FlowState.RebootRequired;
             Visibility = Visibility.Visible;
-            cardContent.Children.Clear();
+            ClearCard();
             cardContent.RowDefinitions.Clear();
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -775,7 +776,7 @@ namespace Boostix
         {
             state = FlowState.RecoveryRequired;
             Visibility = Visibility.Visible;
-            cardContent.Children.Clear();
+            ClearCard();
             cardContent.RowDefinitions.Clear();
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -876,7 +877,7 @@ namespace Boostix
         {
             state = FlowState.ManualRestoreConfirmation;
             Visibility = Visibility.Visible;
-            cardContent.Children.Clear();
+            ClearCard();
             cardContent.RowDefinitions.Clear();
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -1088,7 +1089,7 @@ namespace Boostix
         private void ShowWorking(string title, string description, string cancelText)
         {
             Visibility = Visibility.Visible;
-            cardContent.Children.Clear();
+            ClearCard();
             cardContent.RowDefinitions.Clear();
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -1153,6 +1154,7 @@ namespace Boostix
                 progressTranslation.BeginAnimation(
                     TranslateTransform.XProperty,
                     movement);
+                workingRunner = progressTranslation;
             }
             else
             {
@@ -1204,7 +1206,7 @@ namespace Boostix
         {
             state = FlowState.Failure;
             Visibility = Visibility.Visible;
-            cardContent.Children.Clear();
+            ClearCard();
             cardContent.RowDefinitions.Clear();
             cardContent.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             cardContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -2130,8 +2132,27 @@ namespace Boostix
         private void HideFlow()
         {
             state = FlowState.Hidden;
+            StopWorkingRunner();
             Visibility = Visibility.Collapsed;
             preferredFocusButton = null;
+        }
+
+        // The working screen's bar loops forever. WPF keeps ticking an
+        // animation on a cleared or collapsed element, and the whole window
+        // redraws for it: 40% of a core with the window open.
+        private void StopWorkingRunner()
+        {
+            if (workingRunner != null)
+            {
+                workingRunner.BeginAnimation(TranslateTransform.XProperty, null);
+                workingRunner = null;
+            }
+        }
+
+        private void ClearCard()
+        {
+            StopWorkingRunner();
+            cardContent.Children.Clear();
         }
 
         private void CloseApplication()
