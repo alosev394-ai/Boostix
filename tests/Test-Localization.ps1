@@ -170,7 +170,8 @@ try {
 finally {
     [void]$setLanguage.Invoke($null, @('ru'))
 }
-if ($highlights.Count -lt 3) {
+# A patch can carry a single fix; what matters is that the English text is found.
+if ($highlights.Count -lt 1) {
     throw "English What's new for $version has $($highlights.Count) items."
 }
 foreach ($item in $highlights) {

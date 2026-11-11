@@ -262,6 +262,21 @@ function Wait-ForWindow {
     throw 'Boostix did not expose a top-level window.'
 }
 
+# A window taken the moment it appears can stay empty for UI Automation:
+# WPF has not published its content yet, and the element keeps that answer.
+# Each look takes the window again from its handle.
+function Get-FreshRoot {
+    param($Root)
+    try {
+        $handle = $Root.Current.NativeWindowHandle
+        if ($handle -ne 0) {
+            return [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$handle)
+        }
+    }
+    catch { }
+    return $Root
+}
+
 function Find-ById {
     param(
         [Windows.Automation.AutomationElement]$Root,
@@ -275,7 +290,7 @@ function Find-ById {
         $AutomationId)
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     while ([DateTime]::UtcNow -lt $deadline) {
-        $element = $Root.FindFirst(
+        $element = (Get-FreshRoot $Root).FindFirst(
             [Windows.Automation.TreeScope]::Descendants,
             $condition)
         if ($element -and
@@ -297,7 +312,7 @@ function Assert-ElementAbsent {
     $condition = New-Object Windows.Automation.PropertyCondition(
         [Windows.Automation.AutomationElement]::AutomationIdProperty,
         $AutomationId)
-    $element = $Root.FindFirst(
+    $element = (Get-FreshRoot $Root).FindFirst(
         [Windows.Automation.TreeScope]::Descendants,
         $condition)
     if ($element -and -not $element.Current.IsOffscreen) {

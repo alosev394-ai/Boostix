@@ -130,12 +130,27 @@ Add-Type -AssemblyName UIAutomationTypes
 $markerPath = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Boostix\last-run-version.txt'
 $markerBefore = if (Test-Path -LiteralPath $markerPath) { (Get-Item -LiteralPath $markerPath).LastWriteTimeUtc } else { $null }
 
+# A window taken the moment it appears can stay empty for UI Automation:
+# WPF has not published its content yet, and the element keeps that answer.
+# Each look takes the window again from its handle.
+function Get-FreshRoot {
+    param($Root)
+    try {
+        $handle = $Root.Current.NativeWindowHandle
+        if ($handle -ne 0) {
+            return [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$handle)
+        }
+    }
+    catch { }
+    return $Root
+}
+
 function Wait-ForElement {
     param($Root, [string]$AutomationId, [int]$TimeoutSeconds = 10)
     $condition = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty, $AutomationId)
     $until = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
-        $element = $Root.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
+        $element = (Get-FreshRoot $Root).FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
         if ($element -and -not $element.Current.IsOffscreen) { return $element }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $until)
