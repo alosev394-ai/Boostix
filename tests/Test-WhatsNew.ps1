@@ -191,7 +191,7 @@ foreach ($withFlag in @($true, $false)) {
             throw "The What's new title does not name version $version."
         }
         $condition = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty, 'Boostix.WhatsNew.Item')
-        $shownItems = @($window.FindAll([Windows.Automation.TreeScope]::Descendants, $condition))
+        $shownItems = @((Get-FreshRoot $window).FindAll([Windows.Automation.TreeScope]::Descendants, $condition))
         if ($shownItems.Count -ne $shipped.Count) {
             throw "What's new shows $($shownItems.Count) items; the changelog has $($shipped.Count)."
         }

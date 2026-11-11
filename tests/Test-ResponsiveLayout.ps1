@@ -637,7 +637,7 @@ foreach ($scale in $scales) {
         $oldReportCondition = New-Object Windows.Automation.PropertyCondition(
             [Windows.Automation.AutomationElement]::AutomationIdProperty,
             'Boostix.Center.ReportBenchmark')
-        $oldReportButton = $window.FindFirst(
+        $oldReportButton = (Get-FreshRoot $window).FindFirst(
             [Windows.Automation.TreeScope]::Descendants,
             $oldReportCondition)
         if ($oldReportButton -and -not $oldReportButton.Current.IsOffscreen) {
