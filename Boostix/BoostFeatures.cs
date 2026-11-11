@@ -552,10 +552,11 @@ namespace Boostix
             IEnumerable<KeyValuePair<string, long>> processes,
             string targetName)
         {
-            return Rank(processes, targetName, BoostMemoryHog.MaximumPerSession);
+            return RankTop(processes, targetName, BoostMemoryHog.MaximumPerSession);
         }
 
-        internal static List<BoostMemoryHog> Rank(
+        // A name of its own: tests find Rank by name, and two would be ambiguous.
+        internal static List<BoostMemoryHog> RankTop(
             IEnumerable<KeyValuePair<string, long>> processes,
             string targetName,
             int maximum)

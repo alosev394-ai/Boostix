@@ -170,7 +170,7 @@ namespace Boostix
             {
                 processes = Process.GetProcesses();
                 string gameProcess = Path.GetFileNameWithoutExtension(plan.GamePath);
-                List<BoostMemoryHog> hogs = MemoryHogRanking.Rank(
+                List<BoostMemoryHog> hogs = MemoryHogRanking.RankTop(
                     processes.Select(process => new KeyValuePair<string, long>(
                         process.ProcessName,
                         process.WorkingSet64)),
